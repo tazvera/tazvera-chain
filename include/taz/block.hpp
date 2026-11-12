@@ -1,26 +1,20 @@
-#pragma once
-#include "taz/tx.hpp"
+#ifndef TAZ_BLOCK_HPP
+#define TAZ_BLOCK_HPP
+
 #include "taz/types.hpp"
-#include <vector>
+#include "taz/tx.hpp"
 
 namespace taz {
 
-struct BlockHeader {
-  uint32_t protocol_version = PROTOCOL_VERSION;
-  uint32_t chain_id = CHAIN_ID;
-  uint64_t height = 0;
-  Hash32 prev_hash{};
-  uint64_t timestamp = 0;
-  Hash32 tx_root{};
-  Hash32 state_root{};
-};
-
 struct Block {
-  BlockHeader header;
-  std::vector<Transaction> txs;
+    uint64_t height{0};
+    Hash32 prev_hash{};
+    int64_t timestamp{0};
+    std::vector<Transaction> transactions;
 
-  Hash32 block_hash() const;
-  static Hash32 merkle_tx_root(const std::vector<Transaction>& txs);
+    Hash32 hash() const;
 };
 
-}  // namespace taz
+}
+
+#endif

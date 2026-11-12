@@ -1,35 +1,24 @@
-#pragma once
-#include "taz/state.hpp"
+#ifndef TAZ_MEMPOOL_HPP
+#define TAZ_MEMPOOL_HPP
+
 #include "taz/tx.hpp"
-#include <set>
-#include <string>
+#include <deque>
 #include <vector>
 
 namespace taz {
 
-struct MempoolReject {
-  Hash32 txid{};
-  std::string reason;
-};
-
 class Mempool {
- public:
-  // Validate against current state snapshot + pool contents. Does not mutate chain state.
-  bool submit(const Transaction& tx, const State& state, uint64_t current_height,
-              std::string* err = nullptr);
+public:
+    bool add(const Transaction& tx, uint64_t current_height);
+    std::vector<Transaction> get_pending(size_t limit) const;
+    void remove_included(const std::vector<Transaction>& included_txs);
+    size_t size() const;
 
-  // Select up to max_count txs that still apply cleanly in order (simulates block building).
-  std::vector<Transaction> select(const State& state, uint64_t current_height,
-                                  size_t max_count) const;
-
-  void remove_included(const std::vector<Transaction>& txs);
-  void clear();
-  size_t size() const { return txs_.size(); }
-  const std::vector<Transaction>& txs() const { return txs_; }
-
- private:
-  std::vector<Transaction> txs_;
-  std::set<Hash32> seen_;  // txids in pool
+private:
+    std::deque<Transaction> pool_;
+    size_t max_capacity_{10000};
 };
 
-}  // namespace taz
+}
+
+#endif
