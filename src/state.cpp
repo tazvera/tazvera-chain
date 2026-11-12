@@ -52,9 +52,27 @@ ApplyResult State::apply(const Transaction& tx, uint64_t current_height) {
     return r;
   }
 
+  // --- सुरक्षा ताला 1: अमाउंट और फीस के ओवरफ्लो की जाँच ---
+  if (UINT64_MAX - tx.amount < tx.fee) {
+    r.error = "amount and fee overflow"; 
+    return r;
+  }
   Amount need = tx.amount + tx.fee;
+
   if (sender.balance < need) {
     r.error = "insufficient balance";
+    return r;
+  }
+
+  // --- सुरक्षा ताला 2: रिसीवर के बैलेंस ओवरफ्लो की जाँच ---
+  if (UINT64_MAX - accounts_[tx.to].balance < tx.amount) {
+    r.error = "receiver balance overflow"; 
+    return r;
+  }
+  
+  // --- सुरक्षा ताला 3: बर्न (Burn) टोटल ओवरफ्लो की जाँच ---
+  if (UINT64_MAX - burned_ < tx.fee) {
+    r.error = "burn total overflow"; 
     return r;
   }
 
