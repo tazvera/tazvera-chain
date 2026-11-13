@@ -1,7 +1,7 @@
 #include "taz/crypto.hpp"
 #include <openssl/evp.h>
-#include <algorithm>
 #include <openssl/rand.h>
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -11,8 +11,7 @@ using PkeyPtr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
 using MdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
 }
 Hash32 sha256(std::span<const std::uint8_t> data) {
-    Hash32 out{};
-    unsigned int length = 0;
+    Hash32 out{}; unsigned int length = 0;
     if (EVP_Digest(data.data(), data.size(), out.data(), &length, EVP_sha256(), nullptr) != 1 || length != out.size())
         throw std::runtime_error("SHA-256 failed");
     return out;
@@ -40,14 +39,12 @@ bool verify(const PubKey& public_key, std::span<const std::uint8_t> message, con
 }
 Address address_from_pubkey(const PubKey& public_key) {
     const auto digest = sha256(std::span<const std::uint8_t>(public_key));
-    Address address{};
-    std::copy_n(digest.begin(), address.size(), address.begin());
-    return address;
+    Address address{}; std::copy_n(digest.begin(), address.size(), address.begin()); return address;
 }
 std::string to_hex(std::span<const std::uint8_t> bytes) {
     static constexpr char digits[] = "0123456789abcdef";
     std::string out; out.reserve(bytes.size() * 2);
-    for (auto b : bytes) { out.push_back(digits[b >> 4]); out.push_back(digits[b & 0x0f]); }
+    for (const auto b : bytes) { out.push_back(digits[b >> 4]); out.push_back(digits[b & 0x0f]); }
     return out;
 }
 }
