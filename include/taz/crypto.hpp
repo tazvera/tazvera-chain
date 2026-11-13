@@ -1,7 +1,7 @@
 #pragma once
 #include "taz/types.hpp"
-#include <optional>
 #include <span>
+#include <string>
 
 namespace taz {
 Hash32 sha256(std::span<const std::uint8_t> data);
