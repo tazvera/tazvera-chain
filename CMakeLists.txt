@@ -1,18 +1,27 @@
-cmake_minimum_required(VERSION 3.12)
-project(tazvera_chain CXX)
+cmake_minimum_required(VERSION 3.20)
+project(tazvera_chain_repair VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-include_directories(include)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 
-file(GLOB SOURCES 
+add_library(tazcore
     src/crypto.cpp
     src/tx.cpp
     src/state.cpp
-    src/mempool.cpp
     src/block.cpp
     src/chain.cpp
-    src/main.cpp
 )
+target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
+target_compile_options(tazcore PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 
-add_executable(tazvera_node ${SOURCES})
+add_executable(taz_demo src/main.cpp)
+target_link_libraries(taz_demo PRIVATE tazcore)
+
+enable_testing()
+add_executable(taz_tests tests/test_core.cpp)
+target_link_libraries(taz_tests PRIVATE tazcore)
+add_test(NAME taz_core_tests COMMAND taz_tests)

@@ -1,20 +1,14 @@
-#ifndef TAZ_BLOCK_HPP
-#define TAZ_BLOCK_HPP
-
-#include "taz/types.hpp"
+#pragma once
 #include "taz/tx.hpp"
-
 namespace taz {
-
 struct Block {
-    uint64_t height{0};
-    Hash32 prev_hash{};
-    int64_t timestamp{0};
+    std::uint32_t protocol_version{PROTOCOL_VERSION};
+    std::string chain_id{CHAIN_ID};
+    std::uint64_t height{0};
+    Hash32 previous_hash{};
+    std::int64_t timestamp{0};
     std::vector<Transaction> transactions;
-
+    Hash32 state_root{};
     Hash32 hash() const;
 };
-
 }
-
-#endif

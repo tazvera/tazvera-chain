@@ -1,17 +1,19 @@
 #include "taz/block.hpp"
 #include "taz/crypto.hpp"
-
 namespace taz {
-
-Hash32 Block::hash() const {
-    std::vector<uint8_t> buf;
-    auto append_u64 = [&](uint64_t val) {
-        for (int i = 7; i >= 0; --i) buf.push_back(static_cast<uint8_t>((val >> (i * 8)) & 0xff));
-    };
-    append_u64(height);
-    buf.insert(buf.end(), prev_hash.begin(), prev_hash.end());
-    append_u64(timestamp);
-    return sha256(buf);
+namespace {
+void put_u32(std::vector<std::uint8_t>& out, std::uint32_t v) { for (int i=3;i>=0;--i) out.push_back(static_cast<std::uint8_t>((v>>(i*8))&0xffU)); }
+void put_u64(std::vector<std::uint8_t>& out, std::uint64_t v) { for (int i=7;i>=0;--i) out.push_back(static_cast<std::uint8_t>((v>>(i*8))&0xffU)); }
+void put_string(std::vector<std::uint8_t>& out, const std::string& s) { put_u32(out, static_cast<std::uint32_t>(s.size())); out.insert(out.end(),s.begin(),s.end()); }
 }
-
+Hash32 Block::hash() const {
+    std::vector<std::uint8_t> out;
+    constexpr std::string_view domain = "TAZVERA-BLOCK-V1";
+    out.insert(out.end(),domain.begin(),domain.end()); put_u32(out,protocol_version); put_string(out,chain_id);
+    put_u64(out,height); out.insert(out.end(),previous_hash.begin(),previous_hash.end());
+    put_u64(out,static_cast<std::uint64_t>(timestamp)); put_u64(out,transactions.size());
+    for (const auto& tx : transactions) { const auto id=tx.txid(); out.insert(out.end(),id.begin(),id.end()); }
+    out.insert(out.end(),state_root.begin(),state_root.end());
+    return sha256(out);
+}
 }
