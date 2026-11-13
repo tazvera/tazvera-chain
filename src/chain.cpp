@@ -4,7 +4,11 @@ bool Chain::init_genesis(const Address& first, Amount first_balance, const Addre
     if (!blocks_.empty() || first == second) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
     Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
-    state_=genesis_state; blocks_.push_back(genesis); return true;
+    state_=genesis_state; blocks_.push_back(genesis);
+    genesis_balances_.clear();
+    if (first_balance != 0) genesis_balances_.emplace_back(first, first_balance);
+    if (second_balance != 0) genesis_balances_.emplace_back(second, second_balance);
+    return true;
 }
 ChainResult Chain::check_timestamp(std::int64_t timestamp, std::int64_t max_timestamp) const {
     if (timestamp <= blocks_.back().timestamp) return {false,"block timestamp must be strictly greater than the previous block"};

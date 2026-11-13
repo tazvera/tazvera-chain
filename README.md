@@ -79,3 +79,13 @@ cmake --build build-san --parallel && ./build-san/taz_tests
 - Merged: the v2 core hardening above plus a GitHub Actions workflow (`.github/workflows/ci.yml`) that builds, runs the tests, and runs the tests again under ASan/UBSan.
 - **Not included:** a fixed maximum supply. A supply cap (and its unit/decimals) is a token-policy decision that has not been made yet; add it deliberately, with a genesis rule and an invariant test.
 - Empty blocks are allowed (a real chain needs them when there is nothing to include).
+
+## v4: JSON export, wallet statement, offline explorer
+
+- `taz::to_json(chain)` writes the whole chain (numbers as decimal strings, bytes as hex, correctly escaped).
+- `taz::wallet_statement(chain, address)` is computed from the blocks only and is tested to equal the real state for every address.
+- `taz_export_demo [out.json]` builds a throw-away chain with fresh random keys and writes it as JSON (keys are wiped, never saved).
+- `explorer/index.html` is a single file with no server and no network access. Open it in a browser, load a JSON file, and it re-verifies in the browser: block links, block hashes, transaction IDs, address/public-key binding, Ed25519 signatures (needs a recent browser), the rules (nonce, balance, fee, expiry) and the state root after every block. A tampered file is reported with the exact reason.
+- All file data is shown with `textContent` only (no `innerHTML`), so a hostile file cannot inject script.
+- Regenerate the page with another chain: `python3 explorer/build.py my_chain.json`.
+- Amounts are shown as integer `utzv`; decimals and total supply are still undecided policy.

@@ -1,0 +1,398 @@
+<title>Tazvera Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one narrow ledger column. Verdict first, then accounts and wallet statement, then raw blocks. */
+:root {
+  --bg: #f3f6f8; --surface: #ffffff; --ink: #0f1c26; --muted: #57697a; --line: #d5dee6;
+  --accent: #0b6b78; --accent-ink: #ffffff; --code-bg: #eaf0f4;
+  --ok: #137a4b; --ok-bg: #e1f3ea; --bad: #b3261e; --bad-bg: #fbe6e4; --warn: #8a5a00; --warn-bg: #fbf0d4;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c141a; --surface: #131f27; --ink: #e6eef3; --muted: #8ea2b1; --line: #25363f;
+    --accent: #4fc3d1; --accent-ink: #06222a; --code-bg: #0f1a21;
+    --ok: #5fd39a; --ok-bg: #12301f; --bad: #ff8a80; --bad-bg: #3a1613; --warn: #f2c35a; --warn-bg: #33270a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c141a; --surface: #131f27; --ink: #e6eef3; --muted: #8ea2b1; --line: #25363f;
+  --accent: #4fc3d1; --accent-ink: #06222a; --code-bg: #0f1a21;
+  --ok: #5fd39a; --ok-bg: #12301f; --bad: #ff8a80; --bad-bg: #3a1613; --warn: #f2c35a; --warn-bg: #33270a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-block: 20px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+h1 { font-size: 26px; letter-spacing: -0.01em; }
+h2 { font-size: 17px; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 12.5px; word-break: break-all; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button, .filebtn { font: inherit; font-weight: 500; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 14px; cursor: pointer; min-height: 40px; }
+button.primary, .filebtn { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, .filebtn:focus-within, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filebtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.filebtn { display: inline-flex; align-items: center; position: relative; }
+input[type="text"] { font: inherit; font-family: var(--font-mono); font-size: 13px; background: var(--code-bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; min-height: 40px; flex: 1 1 260px; min-width: 0; }
+.verdict { border-radius: 10px; padding: 16px; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.verdict .big { font-family: var(--font-display); font-weight: 700; font-size: 22px; }
+.verdict.ok { background: var(--ok-bg); border-color: var(--ok); } .verdict.ok .big { color: var(--ok); }
+.verdict.bad { background: var(--bad-bg); border-color: var(--bad); } .verdict.bad .big { color: var(--bad); }
+.verdict.warn { background: var(--warn-bg); border-color: var(--warn); } .verdict.warn .big { color: var(--warn); }
+.checks { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.checks li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.checks li:first-child { border-top: 0; }
+.tag { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tag.ok { color: var(--ok); } .tag.bad { color: var(--bad); } .tag.warn { color: var(--warn); }
+.fails { margin: 0; padding-left: 18px; color: var(--bad); font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.acct { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; text-align: left; width: 100%; font-weight: 400; }
+.num { font-variant-numeric: tabular-nums; font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.stat { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.stat span { display: block; font-size: 12px; color: var(--muted); }
+.stat b { font-variant-numeric: tabular-nums; word-break: break-all; }
+.entry { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.in { color: var(--ok); } .out { color: var(--bad); }
+details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--surface); min-width: 0; }
+summary { cursor: pointer; font-weight: 500; display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; }
+dl { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 12px 0 0; }
+dt { font-size: 12px; color: var(--muted); }
+dd { margin: 0; min-width: 0; }
+.note { font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { button { transition: background-color .12s; } }
+</style>
+
+<main>
+  <header class="list">
+    <h1>Tazvera Explorer</h1>
+    <p class="muted">चेन की JSON फ़ाइल खोलिए। यह पेज आपके ब्राउज़र में ही हर ब्लॉक, लेन-देन, हस्ताक्षर और state की दोबारा जाँच करता है। कुछ भी कहीं भेजा नहीं जाता।</p>
+  </header>
+
+  <section class="panel" aria-labelledby="load-h">
+    <h2 id="load-h">चेन खोलें</h2>
+    <div class="row">
+      <label class="filebtn">फ़ाइल चुनें (.json)<input type="file" id="file-input" accept=".json,application/json"></label>
+      <button type="button" id="btn-demo" class="primary">डेमो चेन खोलें</button>
+      <button type="button" id="btn-tamper">छेड़ी हुई चेन आज़माएँ</button>
+    </div>
+    <p class="note">डेमो चेन में अस्थायी कुंजियाँ हैं, जो कहीं सेव नहीं हुईं। "छेड़ी हुई" बटन डेमो में एक रकम को 1 से बढ़ा देता है ताकि आप देख सकें कि जाँच उसे कैसे पकड़ती है।</p>
+  </section>
+
+  <section id="result" hidden class="list" aria-live="polite"></section>
+
+  <section id="accounts-panel" hidden class="panel" aria-labelledby="acc-h">
+    <h2 id="acc-h">खाते</h2>
+    <div id="accounts" class="list"></div>
+  </section>
+
+  <section id="stmt-panel" hidden class="panel" aria-labelledby="stmt-h">
+    <h2 id="stmt-h">वॉलेट स्टेटमेंट</h2>
+    <form id="stmt-form" class="row">
+      <input type="text" id="stmt-input" placeholder="पता (40 अक्षर, hex)" autocomplete="off" spellcheck="false" aria-label="वॉलेट का पता">
+      <button type="submit" class="primary">दिखाएँ</button>
+    </form>
+    <div id="stmt-out" class="list"></div>
+  </section>
+
+  <section id="blocks-panel" hidden class="panel" aria-labelledby="blk-h">
+    <h2 id="blk-h">ब्लॉक</h2>
+    <div id="blocks" class="list"></div>
+    <div><button type="button" id="btn-more" hidden>और ब्लॉक दिखाएँ</button></div>
+  </section>
+
+  <p class="note">राशियाँ सबसे छोटी इकाई <b>utzv</b> में पूर्णांक के रूप में दिखाई गई हैं। दशमलव और कुल सप्लाई की नीति अभी तय नहीं है। यह एक स्थानीय प्रोटोटाइप है, असली मूल्य वाला नेटवर्क नहीं।</p>
+</main>
+
+<script type="application/json" id="demo-data">__DEMO_JSON__</script>
+<script>
+"use strict";
+const U64MAX = (1n << 64n) - 1n;
+const enc = new TextEncoder();
+const $ = (id) => document.getElementById(id);
+
+/* ---------- safe DOM helpers: data is only ever inserted with textContent ---------- */
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+const short = (h, n = 10) => (h.length > n * 2 + 1 ? h.slice(0, n) + "…" + h.slice(-6) : h);
+const fmt = (bi) => bi.toLocaleString("en-IN");
+
+/* ---------- byte helpers (must match the C++ serialisation exactly) ---------- */
+function hexToBytes(h) { const o = new Uint8Array(h.length / 2); for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16); return o; }
+function toHex(u) { let s = ""; for (const b of u) s += b.toString(16).padStart(2, "0"); return s; }
+function cat(...parts) { const n = parts.reduce((a, p) => a + p.length, 0); const o = new Uint8Array(n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; }
+function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n); return b; }
+function u64(bi) { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt.asUintN(64, bi)); return b; }
+function lp(s) { const e = enc.encode(s); return cat(u32(e.length), e); }
+async function sha(u) { return new Uint8Array(await crypto.subtle.digest("SHA-256", u)); }
+
+/* ---------- strict parsing of the export file ---------- */
+class FormatError extends Error {}
+function need(cond, msg) { if (!cond) throw new FormatError(msg); }
+const isHex = (v, n) => typeof v === "string" && v.length === n && /^[0-9a-f]+$/.test(v);
+function dec(v, what) { need(typeof v === "string" && /^[0-9]{1,20}$/.test(v), what + " सही संख्या नहीं है"); const b = BigInt(v); need(b <= U64MAX, what + " सीमा से बड़ी है"); return b; }
+function sdec(v, what) { need(typeof v === "string" && /^-?[0-9]{1,19}$/.test(v), what + " सही संख्या नहीं है"); return BigInt(v); }
+function hx(v, n, what) { need(isHex(v, n * 2), what + " सही hex नहीं है"); return v; }
+function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " सही टेक्स्ट नहीं है"); return v; }
+
+function parseChain(text) {
+  let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
+  need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
+  need(j.format === "tazvera-chain-export-v1", "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
+  need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
+  need(j.params && typeof j.params === "object", "params गलत हैं");
+  const c = {
+    chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),
+    fee: dec(j.params.fee_transfer_v1, "fee"), maxTxs: Number(dec(j.params.max_block_txs, "max_block_txs")),
+    genesis: j.genesis_balances.map((g) => { need(g && typeof g === "object", "genesis प्रविष्टि गलत है"); return { address: hx(g.address, 20, "genesis पता"), balance: dec(g.balance, "genesis राशि") }; }),
+    blocks: [],
+  };
+  for (const b of j.blocks) {
+    need(b && typeof b === "object" && Array.isArray(b.transactions) && b.transactions.length <= 100000, "ब्लॉक का ढाँचा गलत है");
+    c.blocks.push({
+      height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
+      prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
+      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); return {
+        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"),
+        from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
+        nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"), pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
+    });
+  }
+  return c;
+}
+
+/* ---------- the verification itself ---------- */
+function txSignable(t) {
+  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V1"), u32(t.version), lp(t.chainId), hexToBytes(t.from), hexToBytes(t.to),
+    u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
+}
+async function stateRoot(accounts, burned) {
+  const keys = [...accounts.keys()].sort();
+  const parts = [enc.encode("TAZVERA-STATE-V1")];
+  for (const k of keys) { const a = accounts.get(k); parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce)); }
+  parts.push(u64(burned));
+  return toHex(await sha(cat(...parts)));
+}
+let sigSupport = null;
+async function sigSupported() {
+  if (sigSupport === null) { try { await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]); sigSupport = true; } catch { sigSupport = false; } }
+  return sigSupport;
+}
+async function checkSig(t) {
+  if (!(await sigSupported())) return "unsupported";
+  try {
+    const key = await crypto.subtle.importKey("raw", hexToBytes(t.pubkey), { name: "Ed25519" }, false, ["verify"]);
+    return (await crypto.subtle.verify({ name: "Ed25519" }, key, hexToBytes(t.sig), txSignable(t))) ? "ok" : "bad";
+  } catch { return "bad"; }
+}
+
+async function verifyChain(c) {
+  const cats = {
+    link: { label: "ब्लॉकों की कड़ी (previous hash)", ok: 0, n: 0 },
+    hash: { label: "ब्लॉक hash", ok: 0, n: 0 },
+    txid: { label: "लेन-देन की ID", ok: 0, n: 0 },
+    bind: { label: "पते और public key का मेल", ok: 0, n: 0 },
+    sig: { label: "Ed25519 हस्ताक्षर", ok: 0, n: 0, unsup: 0 },
+    rules: { label: "नियम (nonce, बैलेंस, फ़ीस, expiry)", ok: 0, n: 0 },
+    root: { label: "state root (हर ब्लॉक के बाद)", ok: 0, n: 0 },
+    time: { label: "समय का क्रम", ok: 0, n: 0 },
+  };
+  const fails = [];
+  const fail = (h, msg) => { if (fails.length < 40) fails.push((h === null ? "" : "ब्लॉक #" + h + ": ") + msg); };
+  const tick = (k, good, h, msg) => { cats[k].n++; if (good) cats[k].ok++; else fail(h, msg); return good; };
+
+  const accounts = new Map(); let burned = 0n; const history = new Map(); let stateBroken = false;
+  for (const g of c.genesis) {
+    if (accounts.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
+    if (g.balance !== 0n) accounts.set(g.address, { bal: g.balance, nonce: 0n });
+  }
+  const addHist = (addr, e) => { if (!history.has(addr)) history.set(addr, []); history.get(addr).push(e); };
+
+  for (let i = 0; i < c.blocks.length; i++) {
+    const b = c.blocks[i]; const h = i;
+    tick("link", i === 0 ? /^0{64}$/.test(b.prev) : b.prev === c.blocks[i - 1].hash, h, i === 0 ? "genesis का previous hash शून्य नहीं है" : "previous hash पिछले ब्लॉक से नहीं मिलता");
+    if (b.height !== BigInt(i)) fail(h, "height क्रम में नहीं है");
+    if (b.version !== c.version || b.chainId !== c.chainId) fail(h, "ब्लॉक का version या chain ID अलग है");
+    tick("time", i === 0 ? b.ts === 0n : b.ts > c.blocks[i - 1].ts, h, "timestamp पिछले ब्लॉक से सख़्ती से बड़ा नहीं है");
+    if (b.txs.length > c.maxTxs) fail(h, "ब्लॉक में बहुत ज़्यादा लेन-देन हैं");
+
+    const txids = [];
+    for (let k = 0; k < b.txs.length; k++) {
+      const t = b.txs[k]; const where = "tx " + k;
+      const id = toHex(await sha(cat(txSignable(t), hexToBytes(t.sig))));
+      txids.push(hexToBytes(t.txid));
+      tick("txid", id === t.txid, h, where + ": txid लेन-देन की सामग्री से नहीं मिलता (डेटा बदला गया)");
+      const addr = toHex((await sha(hexToBytes(t.pubkey))).slice(0, 20));
+      tick("bind", addr === t.from, h, where + ": public key भेजने वाले के पते से नहीं मिलती");
+      const s = await checkSig(t);
+      if (s === "unsupported") cats.sig.unsup++; else tick("sig", s === "ok", h, where + ": हस्ताक्षर गलत है");
+
+      let ruleErr = null;
+      if (t.version !== c.version || t.chainId !== c.chainId) ruleErr = "version या chain ID गलत";
+      else if (t.amount === 0n) ruleErr = "रकम शून्य है";
+      else if (t.fee !== c.fee) ruleErr = "फ़ीस तय दर से अलग है";
+      else if (t.from === t.to) ruleErr = "खुद को भेजना मान्य नहीं";
+      else if (t.expiry !== 0n && b.height > t.expiry) ruleErr = "लेन-देन की अवधि समाप्त";
+      const snd = accounts.get(t.from) || { bal: 0n, nonce: 0n };
+      const rcv = accounts.get(t.to) || { bal: 0n, nonce: 0n };
+      if (!ruleErr && t.nonce !== snd.nonce) ruleErr = "nonce गलत";
+      if (!ruleErr && snd.nonce === U64MAX) ruleErr = "nonce सीमा पर है";
+      const need_ = t.amount + t.fee;
+      if (!ruleErr && need_ > U64MAX) ruleErr = "रकम और फ़ीस का जोड़ सीमा से बड़ा";
+      if (!ruleErr && snd.bal < need_) ruleErr = "बैलेंस कम है";
+      if (!ruleErr && rcv.bal + t.amount > U64MAX) ruleErr = "पाने वाले का बैलेंस सीमा पार करता";
+      if (!ruleErr && burned + t.fee > U64MAX) ruleErr = "जले हुए का कुल सीमा पार करता";
+      tick("rules", ruleErr === null, h, where + ": " + (ruleErr || ""));
+      if (ruleErr === null && !stateBroken) {
+        accounts.set(t.from, { bal: snd.bal - need_, nonce: snd.nonce + 1n });
+        const r2 = accounts.get(t.to) || { bal: 0n, nonce: 0n };
+        accounts.set(t.to, { bal: r2.bal + t.amount, nonce: r2.nonce });
+        burned += t.fee;
+        addHist(t.from, { height: b.height, dir: "out", other: t.to, amount: t.amount, fee: t.fee, txid: t.txid });
+        addHist(t.to, { height: b.height, dir: "in", other: t.from, amount: t.amount, fee: 0n, txid: t.txid });
+      } else if (ruleErr !== null) { stateBroken = true; }
+    }
+    if (!stateBroken) {
+      const calc = await stateRoot(accounts, burned);
+      tick("root", calc === b.root, h, "state root दोबारा चलाने पर नहीं मिलता");
+      if (calc !== b.root) stateBroken = true;
+    } else { cats.root.n++; if (fails.length < 40 && !fails.some((m) => m.startsWith("state की जाँच"))) fails.push("state की जाँच रोक दी गई, क्योंकि ऊपर के किसी ब्लॉक में गड़बड़ी मिली"); }
+    const calcHash = toHex(await sha(cat(enc.encode("TAZVERA-BLOCK-V1"), u32(b.version), lp(b.chainId), u64(b.height), hexToBytes(b.prev),
+      u64(b.ts), u64(BigInt(b.txs.length)), ...txids, hexToBytes(b.root))));
+    tick("hash", calcHash === b.hash, h, "ब्लॉक hash सामग्री से नहीं मिलता");
+  }
+  return { cats, fails, accounts, burned, history, stateBroken };
+}
+
+/* ---------- rendering ---------- */
+let current = null; // { chain, report }
+function renderVerdict(c, r) {
+  const box = $("result"); box.replaceChildren(); box.hidden = false;
+  const anyFail = r.fails.length > 0; const sigsSkipped = r.cats.sig.unsup > 0;
+  const v = el("div", "verdict " + (anyFail ? "bad" : sigsSkipped ? "warn" : "ok"));
+  v.append(el("div", "big", anyFail ? "चेन में गड़बड़ी मिली" : sigsSkipped ? "hash और state सही, हस्ताक्षर जाँचे नहीं गए" : "चेन सही है"));
+  v.append(el("p", "", anyFail ? "फ़ाइल में कुछ बदला गया है या वह नियमों के अनुसार नहीं है। नीचे देखिए कहाँ।" :
+    sigsSkipped ? "इस ब्राउज़र में Ed25519 की जाँच उपलब्ध नहीं है। हस्ताक्षर किसी नए ब्राउज़र में जाँचिए।" : "हर ब्लॉक, हर लेन-देन और हर हस्ताक्षर इस पेज ने खुद दोबारा जाँचा।"));
+  v.append(el("p", "muted", c.blocks.length + " ब्लॉक · " + c.blocks.reduce((a, b) => a + b.txs.length, 0) + " लेन-देन · chain ID: " + c.chainId));
+  box.append(v);
+
+  const p = el("div", "panel"); p.append(el("h2", "", "क्या-क्या जाँचा"));
+  const ul = el("ul", "checks");
+  for (const k of Object.keys(r.cats)) {
+    const x = r.cats[k]; const li = el("li"); li.append(el("span", "", x.label));
+    let txt, cls;
+    if (k === "sig" && x.unsup && !x.n) { txt = "उपलब्ध नहीं"; cls = "warn"; }
+    else { txt = x.ok + " / " + x.n; cls = x.ok === x.n ? "ok" : "bad"; }
+    li.append(el("span", "tag " + cls, txt)); ul.append(li);
+  }
+  p.append(ul);
+  if (anyFail) { p.append(el("h2", "", "गड़बड़ियाँ")); const f = el("ul", "fails"); for (const m of r.fails) f.append(el("li", "", m)); p.append(f); }
+  box.append(p);
+}
+
+function renderAccounts(c, r) {
+  $("accounts-panel").hidden = false; const box = $("accounts"); box.replaceChildren();
+  if (r.stateBroken) box.append(el("p", "note", "चेन में गड़बड़ी है, इसलिए नीचे के बैलेंस भरोसे लायक नहीं हैं।"));
+  const rows = [...r.accounts.entries()].sort((a, b) => (b[1].bal > a[1].bal ? 1 : b[1].bal < a[1].bal ? -1 : 0));
+  for (const [addr, a] of rows) {
+    const btn = el("button", "acct"); btn.type = "button";
+    btn.append(el("span", "mono", addr)); btn.append(el("span", "num", fmt(a.bal) + " utzv"));
+    btn.addEventListener("click", () => { $("stmt-input").value = addr; showStatement(addr); $("stmt-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+    box.append(btn);
+  }
+  box.append(el("p", "note", "जले हुए (burn) कुल: " + fmt(r.burned) + " utzv"));
+}
+
+function showStatement(raw) {
+  const out = $("stmt-out"); out.replaceChildren();
+  if (!current) return;
+  const addr = String(raw).trim().toLowerCase().replace(/^0x/, "");
+  if (!isHex(addr, 40)) { out.append(el("p", "fails", "पता 40 अक्षरों का hex होना चाहिए (0-9, a-f)।")); return; }
+  const r = current.report; const a = r.accounts.get(addr) || { bal: 0n, nonce: 0n }; const hist = r.history.get(addr) || [];
+  let rec = 0n, sent = 0n, fees = 0n; for (const e of hist) { if (e.dir === "in") rec += e.amount; else { sent += e.amount; fees += e.fee; } }
+  out.append(el("p", "mono", addr));
+  const st = el("div", "stats");
+  for (const [k, v] of [["बैलेंस", fmt(a.bal) + " utzv"], ["भेजे गए लेन-देन (nonce)", a.nonce.toString()], ["कुल मिला", fmt(rec)], ["कुल भेजा", fmt(sent)], ["कुल फ़ीस", fmt(fees)]]) {
+    const s = el("div", "stat"); s.append(el("span", "", k)); s.append(el("b", "", v)); st.append(s);
+  }
+  out.append(st);
+  if (!hist.length) { out.append(el("p", "muted", "इस पते का कोई लेन-देन इस चेन में नहीं मिला।")); return; }
+  for (const e of hist) {
+    const d = el("div", "entry");
+    d.append(el("span", e.dir === "in" ? "in" : "out", (e.dir === "in" ? "+" : "−") + fmt(e.amount) + " utzv · ब्लॉक #" + e.height + (e.dir === "out" ? " · फ़ीस " + fmt(e.fee) : "")));
+    d.append(el("span", "mono muted", (e.dir === "in" ? "से: " : "को: ") + e.other));
+    d.append(el("span", "mono muted", "txid: " + e.txid));
+    out.append(d);
+  }
+}
+
+let shown = 0; const PAGE = 100;
+function blockCard(b) {
+  const d = el("details"); const s = el("summary");
+  s.append(el("span", "", "ब्लॉक #" + b.height + " · " + b.txs.length + " लेन-देन")); s.append(el("span", "mono muted", short(b.hash)));
+  d.append(s);
+  const dl = el("dl");
+  const add = (k, v, mono) => { dl.append(el("dt", "", k)); dl.append(el("dd", mono ? "mono" : "", v)); };
+  add("hash", b.hash, true); add("previous hash", b.prev, true); add("state root", b.root, true);
+  add("समय", b.ts === 0n ? "genesis (0)" : new Date(Number(b.ts) * 1000).toLocaleString("hi-IN") + " (" + b.ts + ")");
+  for (const t of b.txs) {
+    add("लेन-देन " + short(t.txid, 8), "", false);
+    const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from)); dd.append(el("div", "mono", "को: " + t.to));
+    dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
+  }
+  d.append(dl); return d;
+}
+function renderBlocks(c, more) {
+  const box = $("blocks"); $("blocks-panel").hidden = false;
+  if (!more) { box.replaceChildren(); shown = 0; }
+  const order = c.blocks.slice().reverse();
+  for (const b of order.slice(shown, shown + PAGE)) box.append(blockCard(b));
+  shown = Math.min(order.length, shown + PAGE); $("btn-more").hidden = shown >= order.length;
+}
+
+async function open(text) {
+  const result = $("result"); result.hidden = false; result.replaceChildren(el("p", "muted", "जाँच चल रही है…"));
+  for (const id of ["accounts-panel", "stmt-panel", "blocks-panel"]) $(id).hidden = true;
+  current = null;
+  try {
+    if (!(window.crypto && crypto.subtle)) throw new FormatError("यह ब्राउज़र SHA-256 (crypto.subtle) नहीं देता। https या localhost पर खोलिए।");
+    const chain = parseChain(text); const report = await verifyChain(chain);
+    current = { chain, report };
+    renderVerdict(chain, report); renderAccounts(chain, report); renderBlocks(chain, false);
+    $("stmt-panel").hidden = false; $("stmt-out").replaceChildren(); $("stmt-input").value = "";
+  } catch (e) {
+    const v = el("div", "verdict bad"); v.append(el("div", "big", "फ़ाइल जाँची नहीं जा सकी"));
+    v.append(el("p", "", e instanceof FormatError ? e.message : "अनपेक्षित गलती: " + (e && e.message ? e.message : e)));
+    result.replaceChildren(v);
+  }
+}
+
+$("file-input").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  if (f.size > 20 * 1024 * 1024) { open("{"); return; }
+  open(await f.text()); ev.target.value = "";
+});
+$("btn-demo").addEventListener("click", () => open($("demo-data").textContent));
+$("btn-tamper").addEventListener("click", () => {
+  const j = JSON.parse($("demo-data").textContent);
+  const t = j.blocks[1].transactions[0]; t.amount = (BigInt(t.amount) + 1n).toString();
+  open(JSON.stringify(j));
+});
+$("stmt-form").addEventListener("submit", (ev) => { ev.preventDefault(); showStatement($("stmt-input").value); });
+$("btn-more").addEventListener("click", () => current && renderBlocks(current.chain, true));
+open($("demo-data").textContent);
+</script>
