@@ -1,38 +1,22 @@
-#ifndef TAZ_STATE_HPP
-#define TAZ_STATE_HPP
-
-#include "taz/types.hpp"
+#pragma once
 #include "taz/tx.hpp"
-#include <unordered_map>
+#include <map>
 
 namespace taz {
-
-struct Account {
-    Amount balance{0};
-    uint64_t nonce{0};
-};
-
-struct ApplyResult {
-    bool ok{false};
-    std::string error;
-    Amount burned{0};
-};
-
+struct Account { Amount balance{0}; std::uint64_t nonce{0}; };
+struct ApplyResult { bool ok{false}; std::string error; Amount burned{0}; };
 class State {
 public:
-    void set_balance(const Address& a, Amount bal);
-    Amount balance(const Address& a) const;
-    uint64_t nonce(const Address& a) const;
+    void set_balance(const Address& address, Amount amount);
+    Amount balance(const Address& address) const;
+    std::uint64_t nonce(const Address& address) const;
+    Amount burned_total() const noexcept { return burned_; }
     Amount circulating() const;
-
-    ApplyResult apply(const Transaction& tx, uint64_t current_height);
+    ApplyResult apply(const Transaction& tx, std::uint64_t current_height);
     Hash32 state_root() const;
-
 private:
-    std::unordered_map<Address, Account> accounts_;
+    // std::map gives every node the same canonical address order.
+    std::map<Address, Account> accounts_;
     Amount burned_{0};
 };
-
 }
-
-#endif

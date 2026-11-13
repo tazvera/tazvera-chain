@@ -1,29 +1,22 @@
 #include "taz/chain.hpp"
-
 namespace taz {
-
-Chain::Chain() {}
-
-bool Chain::add_block(const Block& block) {
-    if (block.height != blocks_.size()) return false;
-    if (block.height > 0) {
-        Hash32 prev = blocks_.back().hash();
-        if (block.prev_hash != prev) return false;
-    }
-    for (const auto& tx : block.transactions) {
-        ApplyResult res = state_.apply(tx, block.height);
-        if (!res.ok) return false;
-    }
-    blocks_.push_back(block);
-    return true;
+bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
+    if (!blocks_.empty() || first == second) return false;
+    State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
+    Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
+    state_=genesis_state; blocks_.push_back(genesis); return true;
 }
-
-const Block* Chain::latest_block() const {
-    if (blocks_.empty()) return nullptr;
-    return &blocks_.back();
+ChainResult Chain::append_block(const std::vector<Transaction>& transactions, std::int64_t timestamp) {
+    if (blocks_.empty()) return {false,"genesis is not initialized"};
+    if (timestamp < blocks_.back().timestamp) return {false,"block timestamp moved backwards"};
+    State candidate = state_; // transactional copy: failed block cannot partially mutate live state
+    const std::uint64_t next_height = blocks_.back().height + 1;
+    for (const auto& tx : transactions) {
+        const auto applied = candidate.apply(tx, next_height);
+        if (!applied.ok) return {false,applied.error};
+    }
+    Block block; block.height=next_height; block.previous_hash=blocks_.back().hash();
+    block.timestamp=timestamp; block.transactions=transactions; block.state_root=candidate.state_root();
+    state_=std::move(candidate); blocks_.push_back(std::move(block)); return {true,{}};
 }
-
-size_t Chain::height() const { return blocks_.size(); }
-const State& Chain::get_state() const { return state_; }
-
 }
