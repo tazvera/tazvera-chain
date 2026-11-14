@@ -76,6 +76,8 @@ dl { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 12px 0 0; }
 dt { font-size: 12px; color: var(--muted); }
 dd { margin: 0; min-width: 0; }
 .note { font-size: 13px; color: var(--muted); }
+.warnline { color: var(--warn); }
+h2 + .entry { margin-top: 0; }
 @media (prefers-reduced-motion: no-preference) { button { transition: background-color .12s; } }
 </style>
 
@@ -89,10 +91,12 @@ dd { margin: 0; min-width: 0; }
     <h2 id="load-h">चेन खोलें</h2>
     <div class="row">
       <label class="filebtn">फ़ाइल चुनें (.json)<input type="file" id="file-input" accept=".json,application/json"></label>
-      <button type="button" id="btn-demo" class="primary">डेमो चेन खोलें</button>
-      <button type="button" id="btn-tamper">छेड़ी हुई चेन आज़माएँ</button>
+      <button type="button" id="btn-demo" class="primary">डेमो चेन</button>
+      <button type="button" id="btn-safety" class="primary">सुरक्षा नियमों वाली डेमो</button>
+      <button type="button" id="btn-tamper">छेड़ी हुई चेन</button>
+      <button type="button" id="btn-tamper-safety">छेड़ी हुई (सुरक्षा वाली)</button>
     </div>
-    <p class="note">डेमो चेन में अस्थायी कुंजियाँ हैं, जो कहीं सेव नहीं हुईं। "छेड़ी हुई" बटन डेमो में एक रकम को 1 से बढ़ा देता है ताकि आप देख सकें कि जाँच उसे कैसे पकड़ती है।</p>
+    <p class="note">डेमो चेन में अस्थायी कुंजियाँ हैं, जो कहीं सेव नहीं हुईं। "सुरक्षा नियमों वाली" डेमो में रोज़ की सीमा, रुकी हुई रकम, रद्द करना और देर से ढीला करना सब दिखता है। "छेड़ी हुई" बटन एक रकम को 1 से बढ़ा देते हैं ताकि आप देख सकें कि जाँच उसे कैसे पकड़ती है।</p>
   </section>
 
   <section id="result" hidden class="list" aria-live="polite"></section>
@@ -120,7 +124,8 @@ dd { margin: 0; min-width: 0; }
   <p class="note">राशियाँ सबसे छोटी इकाई <b>utzv</b> में पूर्णांक के रूप में दिखाई गई हैं। दशमलव और कुल सप्लाई की नीति अभी तय नहीं है। यह एक स्थानीय प्रोटोटाइप है, असली मूल्य वाला नेटवर्क नहीं।</p>
 </main>
 
-<script type="application/json" id="demo-data">{"format":"tazvera-chain-export-v1","chain_id":"tazvera-local-prototype-v1","protocol_version":"1","params":{"fee_transfer_v1":"1000","max_block_txs":"10000"},"genesis_balances":[{"address":"a27e119c2cf998ab1baad95b02bbc8a91a6ed2cd","balance":"100000000"}],"blocks":[{"height":"0","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"0000000000000000000000000000000000000000000000000000000000000000","timestamp":"0","state_root":"4d54006870a21395b3515bb3c4b72c912889cb4194217f6fe1c9652d45fa99e4","hash":"8ee29576d179806725a1a48b5a29c0797f781c9604a6681d694a89ef0a58c07f","transactions":[]},{"height":"1","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"8ee29576d179806725a1a48b5a29c0797f781c9604a6681d694a89ef0a58c07f","timestamp":"1700000100","state_root":"4bca743108c341dc795106b1af7720c4836dc77d622f31271792984e80954cbf","hash":"dce9303a1a130e5634cc5b544e921f9becb178dbf3ce761ef49398337902b880","transactions":[{"txid":"9da756e9c66998e6d7634da433d18f6683bc260c9d107926e93cb366b17fc1c7","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","from":"a27e119c2cf998ab1baad95b02bbc8a91a6ed2cd","to":"d8d88c33f6be7e6698f2515d3637c27f264a25d2","amount":"5000000","fee":"1000","nonce":"0","expiry_height":"0","pubkey":"f7cf742b5d39eb4bde105a74e2d1eeed3ad3d1dd07bb30b429d92f1747c573a9","signature":"f2958c27d821cca4363d4e1685036ecaafd3c8093f81889bf62a54e290b5b53d3cfd69917ff6b80d6409802147e54e4b721ca1b33e81cd87d2172af26a489908"}]},{"height":"2","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"dce9303a1a130e5634cc5b544e921f9becb178dbf3ce761ef49398337902b880","timestamp":"1700000200","state_root":"4bca743108c341dc795106b1af7720c4836dc77d622f31271792984e80954cbf","hash":"57b9a8e0f4fa9da39fb06d2c92d782a51cf4f26733117762c87708d20d929aec","transactions":[]},{"height":"3","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"57b9a8e0f4fa9da39fb06d2c92d782a51cf4f26733117762c87708d20d929aec","timestamp":"1700000300","state_root":"0d14745cb4d9426caf9736c30783a6de4248b81751373c606e30a5e230ae7119","hash":"92085d8a76d15edd1f094c1e1fecfed95b2cd7c66c2b49eba870debd58144358","transactions":[{"txid":"9474dbd2a95cc52a0b59896121c17f87742490fd56f24df17cad5615ee665a62","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","from":"d8d88c33f6be7e6698f2515d3637c27f264a25d2","to":"a27e119c2cf998ab1baad95b02bbc8a91a6ed2cd","amount":"1200000","fee":"1000","nonce":"0","expiry_height":"0","pubkey":"18eda05ad52169e97066cc2737a71588c6afa6b0045cb1e815f2f7d68e440b7f","signature":"a4597495a0a28d0a732cb55ea84da01460e71c1488ddc928bd2175e53fdbd62bc6a14c754a13577e580a33d02a6e470db0e007f8bf5c2744545b1d6b5da10407"}]},{"height":"4","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"92085d8a76d15edd1f094c1e1fecfed95b2cd7c66c2b49eba870debd58144358","timestamp":"1700000400","state_root":"1af43fcbeb28cc3439597a5b0b1fb3622c8ad6e038207bb0b1e17d7018a050f0","hash":"25fc651e8d4d600760a72cf0a57d92c18b8469bf464f116d010de046c80464f5","transactions":[{"txid":"ff371f912d44157734e4dad4223d188471d4202d0341530ba94f65381dce7d8f","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","from":"a27e119c2cf998ab1baad95b02bbc8a91a6ed2cd","to":"d8d88c33f6be7e6698f2515d3637c27f264a25d2","amount":"250000","fee":"1000","nonce":"1","expiry_height":"0","pubkey":"f7cf742b5d39eb4bde105a74e2d1eeed3ad3d1dd07bb30b429d92f1747c573a9","signature":"60cda99fc7a1a2fce2a05e2cc11248a55467177db8e06a26755a954a898bf2f85e4a6d1cc257af055533e5879dd38cfe40a3db8a5dcf495ed6acffeeed886d05"}]}]}</script>
+<script type="application/json" id="demo-data">{"format":"tazvera-chain-export-v1","chain_id":"tazvera-local-prototype-v1","protocol_version":"1","params":{"fee_transfer_v1":"1000","max_block_txs":"10000","limit_window_blocks":"1000","max_hold_blocks":"100000","safety_delay_blocks":"500"},"genesis_balances":[{"address":"f28a84e21695b1aca257c9e97bdb1066f09272eb","balance":"100000000"}],"blocks":[{"height":"0","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"0000000000000000000000000000000000000000000000000000000000000000","timestamp":"0","state_root":"e7c44bbb6898bd1c018b8bc583e0f329df63fdb9a13df462a9e0da997e1d6623","hash":"2a25d05fe6c2dc0139f5bb04fd29c8c5455e8cf079efd61434598fb44d2436a5","transactions":[]},{"height":"1","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"2a25d05fe6c2dc0139f5bb04fd29c8c5455e8cf079efd61434598fb44d2436a5","timestamp":"1700000100","state_root":"daa8ab8bc96c03dbe46e07cfe6c1a3f687bbda218b300bc312c4744810d6a882","hash":"50bea20b91f77e2b59c21fe8b4244da905c50553ee246ad5bcf2f7e04806a86a","transactions":[{"txid":"fb4d88df4169d8cd0aaf13d21fe5484bc0ed3a66e7ad5f9d318db703f8d48986","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"f28a84e21695b1aca257c9e97bdb1066f09272eb","to":"246cdfc4f112fef2600d9e8c8afaa55e620ad4b8","amount":"5000000","fee":"1000","nonce":"0","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"94d3609cb4c21f9fe596fce269d229eb2cabb39485502b836b4d5d39da0f7c0b","signature":"a9068efdc29963db5c0cf795f5e81e5a0b023da48fee08c8c89262d0977f36478c103451db73b9fdfe071a30f65a14bdd9494fd09ea13562fbfae66e8faf2907"}]},{"height":"2","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"50bea20b91f77e2b59c21fe8b4244da905c50553ee246ad5bcf2f7e04806a86a","timestamp":"1700000200","state_root":"daa8ab8bc96c03dbe46e07cfe6c1a3f687bbda218b300bc312c4744810d6a882","hash":"3e7809b1b2b4b3715025d2e397d84fee24d3b54684f4b537d66bca7d9b91011a","transactions":[]},{"height":"3","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"3e7809b1b2b4b3715025d2e397d84fee24d3b54684f4b537d66bca7d9b91011a","timestamp":"1700000300","state_root":"c51e73148891c1dbd4233698224c53be5ac5e370bbf5f71831d5a8c4a84ed33a","hash":"c1d1fc8e11584a32b06112ffdc0cdf67f2b3794c75bb1e4a9ee635f85c57e86e","transactions":[{"txid":"e4fc382ad586720c862ea41e8c688a0dc37f53b69d1ca620cde3238e1ed3fcbb","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"246cdfc4f112fef2600d9e8c8afaa55e620ad4b8","to":"f28a84e21695b1aca257c9e97bdb1066f09272eb","amount":"1200000","fee":"1000","nonce":"0","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"a163bd6cdba40c98b637b0e795c573759ca782d13b8c90fd4abc35739d82f319","signature":"dfad40cebcb547cd7d3a1ba9c8e1d19ed2bb4a2a0e487b1ece9e832514eec961841cee9ce3de259126d61c46d535e5372c1273475568a2993463966179821c06"}]},{"height":"4","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"c1d1fc8e11584a32b06112ffdc0cdf67f2b3794c75bb1e4a9ee635f85c57e86e","timestamp":"1700000400","state_root":"6dbd405381439e215599dae41427075a7aaf74abfa1e1ec7b61cba4fed7fe127","hash":"a83d18baea538983e207c07c725ac04199340d031f8c255f40672fc47ada6260","transactions":[{"txid":"df7fc6f8bac3afbdaba55938ce007c06005fc1acf01223661a7744fdc1ada946","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"f28a84e21695b1aca257c9e97bdb1066f09272eb","to":"246cdfc4f112fef2600d9e8c8afaa55e620ad4b8","amount":"250000","fee":"1000","nonce":"1","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"94d3609cb4c21f9fe596fce269d229eb2cabb39485502b836b4d5d39da0f7c0b","signature":"a407cca3f7f1abc243a7703d1a0fdc07c7b95af05ebebcef28e6809a545f489687f4fd801335563f8876c68dcfcd729d9ff505fa2a2e062dd3663e32a8a9fa06"}]}]}</script>
+<script type="application/json" id="demo-safety">{"format":"tazvera-chain-export-v2","chain_id":"tazvera-local-prototype-v1","protocol_version":"1","params":{"fee_transfer_v1":"1000","max_block_txs":"10000","limit_window_blocks":"1000","max_hold_blocks":"100000","safety_delay_blocks":"500"},"genesis_balances":[{"address":"a8d0784925ccd68677539e547539c199b3382d19","balance":"100000000"}],"blocks":[{"height":"0","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"0000000000000000000000000000000000000000000000000000000000000000","timestamp":"0","state_root":"34108f789e6ab66ef25294eb6ea69a2cfcc34adf55fb8dcaa3a50e203107ec50","hash":"38df7f529fb0f6430bc80dce709df9068f6f67391ba7d13dc5ba1e8e81ee69f6","transactions":[]},{"height":"1","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"38df7f529fb0f6430bc80dce709df9068f6f67391ba7d13dc5ba1e8e81ee69f6","timestamp":"1700000100","state_root":"610034bf6f9c81f2919d1fcdd4f91517ed82102d0986b763ad4173537fe8c88d","hash":"1e1109233760213c8274e1d341a54421ce0f8eb1f7e6a7d7b5f5329b1245b0fd","transactions":[{"txid":"7b06b9469de8c0e86c5b74e11205616781dbb60c3a548e27222b760fd907d7b3","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"1","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"0000000000000000000000000000000000000000","amount":"0","fee":"1000","nonce":"0","expiry_height":"0","daily_limit":"20000000","hold_threshold":"3000000","hold_blocks":"5","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"95c9c40d0cf9c114eb1c83bcb8f71390d10663899213b9c03b5c111d9954973a5705568527f56cd33734be8b201eede6c9a4c94246e68d964b429215a6a2440a"}]},{"height":"2","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"1e1109233760213c8274e1d341a54421ce0f8eb1f7e6a7d7b5f5329b1245b0fd","timestamp":"1700000200","state_root":"5d6a01e7536b2ff8e00b3aec7ca2a0a9c72a86ba3aee5ef0e3bce07e0834d195","hash":"ed51aa9a55cfbdf604be23106d572736884d44185bede8b0496f86086c2a28d3","transactions":[{"txid":"19daab6af8d4361aee1aafd65a16bd555597896ef81494ba6c5db02df61654fb","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"adf6c3098fbee7c6e6f3b27c8c360799e98e590f","amount":"1000000","fee":"1000","nonce":"1","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"76444d4c16d4ddf29f2b4e0024c37c8a6f6ef8ec8b81c4526926fd6a5af255fe4aa339bf19d35763ae7ff22960f557560d84c2b85550ad3f9dadbd20521d5b01"}]},{"height":"3","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"ed51aa9a55cfbdf604be23106d572736884d44185bede8b0496f86086c2a28d3","timestamp":"1700000300","state_root":"f1e9aac4ba88078d3b426dcebbeb91af2cd014bbfc65bb375dcb505dd1a48dd7","hash":"50293a02e3b0366fd4e98bcebb0d503516d2ce8ab16a94e1fee0e815318d5395","transactions":[{"txid":"2611a5d43d7ecd0bdb6a1d5098d49cc2362511dbc10ba31e189ac70134cebea3","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"adf6c3098fbee7c6e6f3b27c8c360799e98e590f","amount":"6000000","fee":"1000","nonce":"2","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"89cf62dc46e81967b248fa86e07c59f8cfa3d4d3e5e1cfd5ec23ce5acfaa94de567ea5c8225f3fc2c2b6ae7f765a316467b249ef3cbf5affe23374f4d0e97602"}]},{"height":"4","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"50293a02e3b0366fd4e98bcebb0d503516d2ce8ab16a94e1fee0e815318d5395","timestamp":"1700000400","state_root":"758d3e3b62c777fdc31fed6a851dd53d8b43f2927544cd40b819c8b01c32cc18","hash":"b244cdccfb1b9b03eec3a0d03ceac99a28c65ca2e5d9428922b2a09499a87075","transactions":[{"txid":"26276a4980270a3ceff9e50c3c35defd954cb0b968de098af20dac01029b7faa","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"2","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"0000000000000000000000000000000000000000","amount":"0","fee":"1000","nonce":"3","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"2611a5d43d7ecd0bdb6a1d5098d49cc2362511dbc10ba31e189ac70134cebea3","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"ed0fd30513749b2c4d056310df98c9d0d1638eb5a909c9046cd655824bce3722c0c5c5ff3274f8cf21539979ffd48db016baf28f0d66c8e3c4579c2385dc3200"}]},{"height":"5","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"b244cdccfb1b9b03eec3a0d03ceac99a28c65ca2e5d9428922b2a09499a87075","timestamp":"1700000500","state_root":"d35c6396fd81d24605cae260169f897623d5b2ffb96e663b93b1440e3ba14347","hash":"1693879c16d93cf416f1bf490a1c2d0e1353e01d2fa52fff34ebd17a9013cb42","transactions":[{"txid":"f7958a6dc50c7057cb9dfab9b12774b521ebbc1e6b40101ea43b860c6ed74c3c","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"adf6c3098fbee7c6e6f3b27c8c360799e98e590f","amount":"4000000","fee":"1000","nonce":"4","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"cb9ca36005bf650b9d24222c26338ea981943c53f0b5c41bcd383333432bbe2b825ff6475d80eb1e6812c6859207105054dbfbfd43b0a017a030d51eb035160e"}]},{"height":"6","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"1693879c16d93cf416f1bf490a1c2d0e1353e01d2fa52fff34ebd17a9013cb42","timestamp":"1700000600","state_root":"d35c6396fd81d24605cae260169f897623d5b2ffb96e663b93b1440e3ba14347","hash":"bee7d710a11aa541214f298d5d67d394465d6cd5ad33d19b0da8924046cb2a67","transactions":[]},{"height":"7","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"bee7d710a11aa541214f298d5d67d394465d6cd5ad33d19b0da8924046cb2a67","timestamp":"1700000700","state_root":"d35c6396fd81d24605cae260169f897623d5b2ffb96e663b93b1440e3ba14347","hash":"f21d45211f5689f941b48931eb08850342289248454d4885e515c8f6008ff48c","transactions":[]},{"height":"8","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"f21d45211f5689f941b48931eb08850342289248454d4885e515c8f6008ff48c","timestamp":"1700000800","state_root":"d35c6396fd81d24605cae260169f897623d5b2ffb96e663b93b1440e3ba14347","hash":"f105032e08db7099afd50de774e1be7dab995ed69cebb44b84ba178380305c36","transactions":[]},{"height":"9","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"f105032e08db7099afd50de774e1be7dab995ed69cebb44b84ba178380305c36","timestamp":"1700000900","state_root":"d35c6396fd81d24605cae260169f897623d5b2ffb96e663b93b1440e3ba14347","hash":"4ebf317b6a0ac889c28839845f46023be3549153efb80632984cea9787b93f21","transactions":[]},{"height":"10","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"4ebf317b6a0ac889c28839845f46023be3549153efb80632984cea9787b93f21","timestamp":"1700001000","state_root":"9969d82dd0f885f27c47b5083847e89d960a641b1c2e1bf18908f37f251a29a8","hash":"6e6409ee1a6049683d0e73d3fa21c6a98a519a61664080968d971ee30ccd07bc","transactions":[]},{"height":"11","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"6e6409ee1a6049683d0e73d3fa21c6a98a519a61664080968d971ee30ccd07bc","timestamp":"1700001100","state_root":"a0022f336314410bd72e515fd3aacce9ab84c4210b9ffa0f1df53dc379a87c5a","hash":"308839290eb18da8f7c4ad7f92ab80856a6e203a4e8859f46051cb4609d57b45","transactions":[{"txid":"c88f9e3cd42c514873daf89d0260e8d53e398502d377e1666fde279e9446476e","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"0","from":"adf6c3098fbee7c6e6f3b27c8c360799e98e590f","to":"a8d0784925ccd68677539e547539c199b3382d19","amount":"500000","fee":"1000","nonce":"0","expiry_height":"0","daily_limit":"0","hold_threshold":"0","hold_blocks":"0","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"f93db55c9e658872e8e31c0938cf1f0da78bc4dca44deab880eadf095fb2cdc8","signature":"e48a3377c60354bf2b062c4928a38c7d71195ced27960327c7596da5b6edd5a5f49079f1181c18bac4a733999e9b3c7a5a78cc330b1a40938b574eca9197fc09"}]},{"height":"12","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","previous_hash":"308839290eb18da8f7c4ad7f92ab80856a6e203a4e8859f46051cb4609d57b45","timestamp":"1700001200","state_root":"1ac736eab572199f46c2d959e52a245db5fa00a4d742733adf031ac894855ed7","hash":"26df6dfe1b2dee98a7f7e59dbbebc515a45b5cca342a63c5bda0cc277df488eb","transactions":[{"txid":"78e55cfac83dac9adfecb4a91ba6253ed44d5f41ed2868f878d9b9e63b7f248c","protocol_version":"1","chain_id":"tazvera-local-prototype-v1","kind":"1","from":"a8d0784925ccd68677539e547539c199b3382d19","to":"0000000000000000000000000000000000000000","amount":"0","fee":"1000","nonce":"5","expiry_height":"0","daily_limit":"50000000","hold_threshold":"3000000","hold_blocks":"5","ref":"0000000000000000000000000000000000000000000000000000000000000000","pubkey":"d2d59d19c363aed206189cb57153e0b42ed30f4e67c5a027943627a5e1afeddb","signature":"e1606e5331422778c07dedb221465fcd9bdf8f5752bad22ebb80e4d62cb63ebc0762d0ed3ee49ba64401d0888e5f206dee6292f0ccdb3932bd7342ffc170b507"}]}]}</script>
 <script>
 "use strict";
 const U64MAX = (1n << 64n) - 1n;
@@ -136,11 +141,13 @@ function el(tag, cls, text) {
 }
 const short = (h, n = 10) => (h.length > n * 2 + 1 ? h.slice(0, n) + "…" + h.slice(-6) : h);
 const fmt = (bi) => bi.toLocaleString("en-IN");
+const ZERO20 = "0".repeat(40), ZERO32 = "0".repeat(64);
 
 /* ---------- byte helpers (must match the C++ serialisation exactly) ---------- */
 function hexToBytes(h) { const o = new Uint8Array(h.length / 2); for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16); return o; }
 function toHex(u) { let s = ""; for (const b of u) s += b.toString(16).padStart(2, "0"); return s; }
 function cat(...parts) { const n = parts.reduce((a, p) => a + p.length, 0); const o = new Uint8Array(n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; }
+function u8(n) { return new Uint8Array([n]); }
 function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n); return b; }
 function u64(bi) { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt.asUintN(64, bi)); return b; }
 function lp(s) { const e = enc.encode(s); return cat(u32(e.length), e); }
@@ -151,49 +158,162 @@ class FormatError extends Error {}
 function need(cond, msg) { if (!cond) throw new FormatError(msg); }
 const isHex = (v, n) => typeof v === "string" && v.length === n && /^[0-9a-f]+$/.test(v);
 function dec(v, what) { need(typeof v === "string" && /^[0-9]{1,20}$/.test(v), what + " सही संख्या नहीं है"); const b = BigInt(v); need(b <= U64MAX, what + " सीमा से बड़ी है"); return b; }
+function decOr(v, dflt, what) { return v === undefined ? dflt : dec(v, what); }
 function sdec(v, what) { need(typeof v === "string" && /^-?[0-9]{1,19}$/.test(v), what + " सही संख्या नहीं है"); return BigInt(v); }
 function hx(v, n, what) { need(isHex(v, n * 2), what + " सही hex नहीं है"); return v; }
+function hxOr(v, n, dflt, what) { return v === undefined ? dflt : hx(v, n, what); }
 function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " सही टेक्स्ट नहीं है"); return v; }
 
 function parseChain(text) {
   let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
   need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
-  need(j.format === "tazvera-chain-export-v1", "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(j.format === "tazvera-chain-export-v1" || j.format === "tazvera-chain-export-v2", "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
   need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
   need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
   need(j.params && typeof j.params === "object", "params गलत हैं");
   const c = {
-    chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),
+    format: j.format, chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),
     fee: dec(j.params.fee_transfer_v1, "fee"), maxTxs: Number(dec(j.params.max_block_txs, "max_block_txs")),
+    window: decOr(j.params.limit_window_blocks, 1000n, "limit_window_blocks"), maxHold: decOr(j.params.max_hold_blocks, 100000n, "max_hold_blocks"),
+    safetyDelay: decOr(j.params.safety_delay_blocks, 500n, "safety_delay_blocks"),
     genesis: j.genesis_balances.map((g) => { need(g && typeof g === "object", "genesis प्रविष्टि गलत है"); return { address: hx(g.address, 20, "genesis पता"), balance: dec(g.balance, "genesis राशि") }; }),
     blocks: [],
   };
+  need(c.window > 0n, "limit_window_blocks शून्य नहीं हो सकता");
   for (const b of j.blocks) {
     need(b && typeof b === "object" && Array.isArray(b.transactions) && b.transactions.length <= 100000, "ब्लॉक का ढाँचा गलत है");
     c.blocks.push({
       height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
       prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
-      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); return {
-        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"),
+      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 2n, "अज्ञात लेन-देन प्रकार"); return {
+        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
-        nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"), pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
+        nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
+        limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
+        pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
     });
   }
   return c;
 }
 
-/* ---------- the verification itself ---------- */
+/* ---------- transaction bytes ---------- */
 function txSignable(t) {
-  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V1"), u32(t.version), lp(t.chainId), hexToBytes(t.from), hexToBytes(t.to),
-    u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
+  if (t.kind === 0) // plain transfer: identical to the original v1 layout
+    return cat(enc.encode("TAZVERA-TX-SIGNATURE-V1"), u32(t.version), lp(t.chainId), hexToBytes(t.from), hexToBytes(t.to),
+      u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
+  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V2"), u32(t.version), lp(t.chainId), u8(t.kind), hexToBytes(t.from),
+    u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey),
+    t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold)) : hexToBytes(t.ref));
 }
-async function stateRoot(accounts, burned) {
-  const keys = [...accounts.keys()].sort();
-  const parts = [enc.encode("TAZVERA-STATE-V1")];
-  for (const k of keys) { const a = accounts.get(k); parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce)); }
-  parts.push(u64(burned));
+
+/* ---------- the account state machine (a mirror of the C++ State) ---------- */
+const newAcc = () => ({ bal: 0n, nonce: 0n, limit: 0n, thr: 0n, hold: 0n, widx: 0n, wspent: 0n, pend: { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n } });
+const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend } } : newAcc());
+const hasExt = (a) => a.limit !== 0n || a.thr !== 0n || a.hold !== 0n || a.wspent !== 0n || a.pend.active;
+const heldTotal = (S) => { let t = 0n; for (const h of S.held.values()) t += h.amount; return t; };
+
+function isLoosening(a, n) {
+  const oldDefault = a.limit === 0n && a.thr === 0n && a.hold === 0n;
+  if (oldDefault) return false;
+  const limitLooser = a.limit !== 0n && (n.limit === 0n || n.limit > a.limit);
+  const thrLooser = a.thr !== 0n && (n.thr === 0n || n.thr > a.thr);
+  const holdLooser = a.thr !== 0n && n.thr !== 0n && n.hold < a.hold;
+  return limitLooser || thrLooser || holdLooser;
+}
+
+function beginBlock(S, h) {
+  const events = [];
+  const due = [...S.held.entries()].filter(([, x]) => x.release <= h)
+    .sort((p, q) => (p[1].release < q[1].release ? -1 : p[1].release > q[1].release ? 1 : p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : 0));
+  for (const [id, x] of due) {
+    S.held.delete(id);
+    const rc = S.acc.get(x.to); const have = rc ? rc.bal : 0n;
+    if (x.amount > U64MAX - have) { const sd = cloneAcc(S.acc.get(x.from)); sd.bal += x.amount; S.acc.set(x.from, sd); events.push({ id, from: x.from, to: x.to, amount: x.amount, refunded: true }); }
+    else { const r = cloneAcc(rc); r.bal = have + x.amount; S.acc.set(x.to, r); events.push({ id, from: x.from, to: x.to, amount: x.amount, refunded: false }); }
+  }
+  for (const a of S.acc.values()) {
+    if (a.pend.active && a.pend.ready <= h) {
+      a.limit = a.pend.limit; a.thr = a.pend.thr; a.hold = a.pend.hold; a.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n };
+      if (a.limit === 0n) { a.widx = 0n; a.wspent = 0n; }
+    }
+  }
+  return events;
+}
+
+// Returns an error string, or {held, target} after changing S. Nothing is changed when an error is returned.
+function applyTx(S, c, t, h) {
+  if (t.version !== c.version || t.chainId !== c.chainId) return "version या chain ID गलत";
+  if (t.fee !== c.fee) return "फ़ीस तय दर से अलग है";
+  const noTo = t.to === ZERO20, noSafety = t.limit === 0n && t.thr === 0n && t.hold === 0n, noRef = t.ref === ZERO32;
+  if (t.kind === 0) {
+    if (t.amount === 0n) return "रकम शून्य है";
+    if (t.from === t.to) return "खुद को भेजना मान्य नहीं";
+    if (t.amount > U64MAX - t.fee) return "रकम और फ़ीस का जोड़ सीमा से बड़ा";
+    if (!noSafety || !noRef) return "ट्रांसफ़र में अनावश्यक फ़ील्ड भरे हैं";
+  } else if (t.kind === 1) {
+    if (t.amount !== 0n || !noTo || !noRef) return "सुरक्षा-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.thr === 0n && t.hold !== 0n) return "रोकने की सीमा शून्य है पर रुकने का समय भरा है";
+    if (t.thr !== 0n && (t.hold === 0n || t.hold > c.maxHold)) return "रुकने का समय सीमा से बाहर";
+  } else {
+    if (t.amount !== 0n || !noTo || !noSafety) return "रद्द करने में अनावश्यक फ़ील्ड भरे हैं";
+  }
+  if (t.expiry !== 0n && h > t.expiry) return "लेन-देन की अवधि समाप्त";
+  const snd = cloneAcc(S.acc.get(t.from));
+  if (t.nonce !== snd.nonce) return "nonce गलत";
+  if (snd.nonce === U64MAX) return "nonce सीमा पर है";
+  if (S.burned + t.fee > U64MAX) return "जले हुए का कुल सीमा पार करता";
+  if (snd.bal < t.fee) return "बैलेंस कम है";
+  let held = false, target = null;
+  if (t.kind === 0) {
+    const required = t.amount + t.fee;
+    if (snd.bal < required) return "बैलेंस कम है";
+    const rcv = cloneAcc(S.acc.get(t.to));
+    const window = h / c.window, limited = snd.limit !== 0n;
+    const spent = limited && snd.widx === window ? snd.wspent : 0n;
+    if (limited && (spent > snd.limit || t.amount > snd.limit - spent)) return "रोज़ की सीमा पार हो रही है";
+    held = snd.thr !== 0n && t.amount >= snd.thr;
+    if (held) { if (S.held.has(t.txid)) return "यह रुका हुआ ट्रांसफ़र पहले से है"; }
+    else if (t.amount > U64MAX - rcv.bal) return "पाने वाले का बैलेंस सीमा पार करता";
+    snd.bal -= required; snd.nonce += 1n;
+    if (limited) { snd.widx = window; snd.wspent = spent + t.amount; }
+    if (held) S.held.set(t.txid, { from: t.from, to: t.to, amount: t.amount, release: h + snd.hold });
+    else { rcv.bal += t.amount; S.acc.set(t.to, rcv); }
+  } else if (t.kind === 1) {
+    const want = { limit: t.limit, thr: t.thr, hold: t.hold };
+    snd.bal -= t.fee; snd.nonce += 1n;
+    if (isLoosening(snd, want)) snd.pend = { active: true, limit: want.limit, thr: want.thr, hold: want.hold, ready: h + c.safetyDelay };
+    else { snd.limit = want.limit; snd.thr = want.thr; snd.hold = want.hold; snd.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n }; if (want.limit === 0n) { snd.widx = 0n; snd.wspent = 0n; } }
+  } else {
+    const x = S.held.get(t.ref);
+    if (!x || x.from !== t.from) return "इस खाते का ऐसा कोई रुका हुआ ट्रांसफ़र नहीं है";
+    const after = snd.bal - t.fee;
+    if (after > U64MAX - x.amount) return "वापसी पर बैलेंस सीमा पार करता";
+    snd.bal = after + x.amount; snd.nonce += 1n; S.held.delete(t.ref); target = x;
+  }
+  S.acc.set(t.from, snd); S.burned += t.fee;
+  return { held, target };
+}
+
+async function stateRoot(S) {
+  let ext = S.held.size > 0; for (const a of S.acc.values()) if (hasExt(a)) { ext = true; break; }
+  const keys = [...S.acc.keys()].sort();
+  if (!ext) {
+    const parts = [enc.encode("TAZVERA-STATE-V1")];
+    for (const k of keys) { const a = S.acc.get(k); parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce)); }
+    parts.push(u64(S.burned));
+    return toHex(await sha(cat(...parts)));
+  }
+  const parts = [enc.encode("TAZVERA-STATE-V2"), u64(BigInt(S.acc.size))];
+  for (const k of keys) {
+    const a = S.acc.get(k);
+    parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce), u64(a.limit), u64(a.thr), u64(a.hold), u64(a.widx), u64(a.wspent),
+      u8(a.pend.active ? 1 : 0), u64(a.pend.limit), u64(a.pend.thr), u64(a.pend.hold), u64(a.pend.ready));
+  }
+  parts.push(u64(S.burned), u64(BigInt(S.held.size)));
+  for (const id of [...S.held.keys()].sort()) { const x = S.held.get(id); parts.push(hexToBytes(id), hexToBytes(x.from), hexToBytes(x.to), u64(x.amount), u64(x.release)); }
   return toHex(await sha(cat(...parts)));
 }
+
 let sigSupport = null;
 async function sigSupported() {
   if (sigSupport === null) { try { await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]); sigSupport = true; } catch { sigSupport = false; } }
@@ -207,6 +327,7 @@ async function checkSig(t) {
   } catch { return "bad"; }
 }
 
+/* ---------- the verification itself ---------- */
 async function verifyChain(c) {
   const cats = {
     link: { label: "ब्लॉकों की कड़ी (previous hash)", ok: 0, n: 0 },
@@ -214,7 +335,7 @@ async function verifyChain(c) {
     txid: { label: "लेन-देन की ID", ok: 0, n: 0 },
     bind: { label: "पते और public key का मेल", ok: 0, n: 0 },
     sig: { label: "Ed25519 हस्ताक्षर", ok: 0, n: 0, unsup: 0 },
-    rules: { label: "नियम (nonce, बैलेंस, फ़ीस, expiry)", ok: 0, n: 0 },
+    rules: { label: "नियम (nonce, बैलेंस, फ़ीस, सीमा, रुकावट)", ok: 0, n: 0 },
     root: { label: "state root (हर ब्लॉक के बाद)", ok: 0, n: 0 },
     time: { label: "समय का क्रम", ok: 0, n: 0 },
   };
@@ -222,12 +343,13 @@ async function verifyChain(c) {
   const fail = (h, msg) => { if (fails.length < 40) fails.push((h === null ? "" : "ब्लॉक #" + h + ": ") + msg); };
   const tick = (k, good, h, msg) => { cats[k].n++; if (good) cats[k].ok++; else fail(h, msg); return good; };
 
-  const accounts = new Map(); let burned = 0n; const history = new Map(); let stateBroken = false;
-  for (const g of c.genesis) {
-    if (accounts.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
-    if (g.balance !== 0n) accounts.set(g.address, { bal: g.balance, nonce: 0n });
-  }
+  const S = { acc: new Map(), held: new Map(), burned: 0n };
+  const history = new Map(); let stateBroken = false;
   const addHist = (addr, e) => { if (!history.has(addr)) history.set(addr, []); history.get(addr).push(e); };
+  for (const g of c.genesis) {
+    if (S.acc.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
+    if (g.balance !== 0n) { const a = newAcc(); a.bal = g.balance; S.acc.set(g.address, a); }
+  }
 
   for (let i = 0; i < c.blocks.length; i++) {
     const b = c.blocks[i]; const h = i;
@@ -237,6 +359,12 @@ async function verifyChain(c) {
     tick("time", i === 0 ? b.ts === 0n : b.ts > c.blocks[i - 1].ts, h, "timestamp पिछले ब्लॉक से सख़्ती से बड़ा नहीं है");
     if (b.txs.length > c.maxTxs) fail(h, "ब्लॉक में बहुत ज़्यादा लेन-देन हैं");
 
+    if (i > 0 && !stateBroken) {
+      for (const ev of beginBlock(S, b.height)) {
+        if (ev.refunded) addHist(ev.from, { height: b.height, kind: "refunded", other: ev.to, amount: ev.amount, fee: 0n, txid: ev.id });
+        else addHist(ev.to, { height: b.height, kind: "releasedIn", other: ev.from, amount: ev.amount, fee: 0n, txid: ev.id });
+      }
+    }
     const txids = [];
     for (let k = 0; k < b.txs.length; k++) {
       const t = b.txs[k]; const where = "tx " + k;
@@ -247,34 +375,18 @@ async function verifyChain(c) {
       tick("bind", addr === t.from, h, where + ": public key भेजने वाले के पते से नहीं मिलती");
       const s = await checkSig(t);
       if (s === "unsupported") cats.sig.unsup++; else tick("sig", s === "ok", h, where + ": हस्ताक्षर गलत है");
-
-      let ruleErr = null;
-      if (t.version !== c.version || t.chainId !== c.chainId) ruleErr = "version या chain ID गलत";
-      else if (t.amount === 0n) ruleErr = "रकम शून्य है";
-      else if (t.fee !== c.fee) ruleErr = "फ़ीस तय दर से अलग है";
-      else if (t.from === t.to) ruleErr = "खुद को भेजना मान्य नहीं";
-      else if (t.expiry !== 0n && b.height > t.expiry) ruleErr = "लेन-देन की अवधि समाप्त";
-      const snd = accounts.get(t.from) || { bal: 0n, nonce: 0n };
-      const rcv = accounts.get(t.to) || { bal: 0n, nonce: 0n };
-      if (!ruleErr && t.nonce !== snd.nonce) ruleErr = "nonce गलत";
-      if (!ruleErr && snd.nonce === U64MAX) ruleErr = "nonce सीमा पर है";
-      const need_ = t.amount + t.fee;
-      if (!ruleErr && need_ > U64MAX) ruleErr = "रकम और फ़ीस का जोड़ सीमा से बड़ा";
-      if (!ruleErr && snd.bal < need_) ruleErr = "बैलेंस कम है";
-      if (!ruleErr && rcv.bal + t.amount > U64MAX) ruleErr = "पाने वाले का बैलेंस सीमा पार करता";
-      if (!ruleErr && burned + t.fee > U64MAX) ruleErr = "जले हुए का कुल सीमा पार करता";
-      tick("rules", ruleErr === null, h, where + ": " + (ruleErr || ""));
-      if (ruleErr === null && !stateBroken) {
-        accounts.set(t.from, { bal: snd.bal - need_, nonce: snd.nonce + 1n });
-        const r2 = accounts.get(t.to) || { bal: 0n, nonce: 0n };
-        accounts.set(t.to, { bal: r2.bal + t.amount, nonce: r2.nonce });
-        burned += t.fee;
-        addHist(t.from, { height: b.height, dir: "out", other: t.to, amount: t.amount, fee: t.fee, txid: t.txid });
-        addHist(t.to, { height: b.height, dir: "in", other: t.from, amount: t.amount, fee: 0n, txid: t.txid });
-      } else if (ruleErr !== null) { stateBroken = true; }
+      if (stateBroken) { cats.rules.n++; continue; }
+      const r = applyTx(S, c, t, b.height);
+      tick("rules", typeof r !== "string", h, where + ": " + (typeof r === "string" ? r : ""));
+      if (typeof r === "string") { stateBroken = true; continue; }
+      if (t.kind === 0) {
+        addHist(t.from, { height: b.height, kind: r.held ? "heldOut" : "sent", other: t.to, amount: t.amount, fee: t.fee, txid: t.txid });
+        if (!r.held) addHist(t.to, { height: b.height, kind: "received", other: t.from, amount: t.amount, fee: 0n, txid: t.txid });
+      } else if (t.kind === 1) addHist(t.from, { height: b.height, kind: "safety", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid, limit: t.limit, thr: t.thr, hold: t.hold });
+      else addHist(t.from, { height: b.height, kind: "cancelled", other: r.target.to, amount: r.target.amount, fee: t.fee, txid: t.txid });
     }
     if (!stateBroken) {
-      const calc = await stateRoot(accounts, burned);
+      const calc = await stateRoot(S);
       tick("root", calc === b.root, h, "state root दोबारा चलाने पर नहीं मिलता");
       if (calc !== b.root) stateBroken = true;
     } else { cats.root.n++; if (fails.length < 40 && !fails.some((m) => m.startsWith("state की जाँच"))) fails.push("state की जाँच रोक दी गई, क्योंकि ऊपर के किसी ब्लॉक में गड़बड़ी मिली"); }
@@ -282,7 +394,7 @@ async function verifyChain(c) {
       u64(b.ts), u64(BigInt(b.txs.length)), ...txids, hexToBytes(b.root))));
     tick("hash", calcHash === b.hash, h, "ब्लॉक hash सामग्री से नहीं मिलता");
   }
-  return { cats, fails, accounts, burned, history, stateBroken };
+  return { cats, fails, S, history, stateBroken };
 }
 
 /* ---------- rendering ---------- */
@@ -311,37 +423,69 @@ function renderVerdict(c, r) {
   box.append(p);
 }
 
+function safetyText(limit, thr, hold) {
+  if (limit === 0n && thr === 0n) return "कोई सुरक्षा नियम नहीं";
+  const parts = [];
+  if (limit !== 0n) parts.push("रोज़ की सीमा " + fmt(limit));
+  if (thr !== 0n) parts.push(fmt(thr) + " या ज़्यादा की रकम " + hold + " ब्लॉक रुकती है");
+  return parts.join(" · ");
+}
+
 function renderAccounts(c, r) {
   $("accounts-panel").hidden = false; const box = $("accounts"); box.replaceChildren();
   if (r.stateBroken) box.append(el("p", "note", "चेन में गड़बड़ी है, इसलिए नीचे के बैलेंस भरोसे लायक नहीं हैं।"));
-  const rows = [...r.accounts.entries()].sort((a, b) => (b[1].bal > a[1].bal ? 1 : b[1].bal < a[1].bal ? -1 : 0));
+  const rows = [...r.S.acc.entries()].sort((a, b) => (b[1].bal > a[1].bal ? 1 : b[1].bal < a[1].bal ? -1 : 0));
   for (const [addr, a] of rows) {
     const btn = el("button", "acct"); btn.type = "button";
     btn.append(el("span", "mono", addr)); btn.append(el("span", "num", fmt(a.bal) + " utzv"));
+    if (hasExt(a)) {
+      btn.append(el("span", "note", "सुरक्षा: " + safetyText(a.limit, a.thr, a.hold)));
+      if (a.pend.active) btn.append(el("span", "note warnline", "इंतज़ार में बदलाव (ढीला करना): " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " · ब्लॉक #" + a.pend.ready + " से लागू"));
+    }
     btn.addEventListener("click", () => { $("stmt-input").value = addr; showStatement(addr); $("stmt-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
     box.append(btn);
   }
-  box.append(el("p", "note", "जले हुए (burn) कुल: " + fmt(r.burned) + " utzv"));
+  if (r.S.held.size) {
+    box.append(el("h2", "", "रुकी हुई रकम (" + fmt(heldTotal(r.S)) + " utzv)"));
+    for (const [id, x] of [...r.S.held.entries()].sort()) {
+      const d = el("div", "entry"); d.append(el("span", "num", fmt(x.amount) + " utzv · ब्लॉक #" + x.release + " पर पहुँचेगी"));
+      d.append(el("span", "mono muted", "से: " + x.from)); d.append(el("span", "mono muted", "को: " + x.to)); d.append(el("span", "mono muted", "txid: " + id)); box.append(d);
+    }
+  }
+  box.append(el("p", "note", "जले हुए (burn) कुल: " + fmt(r.S.burned) + " utzv"));
 }
 
+const KIND_TEXT = { sent: "भेजा", received: "मिला", heldOut: "भेजा (रुका हुआ)", releasedIn: "मिला (रुकावट के बाद)", cancelled: "रुका हुआ ट्रांसफ़र रद्द, पैसा लौटा", refunded: "रुका हुआ ट्रांसफ़र वापस लौटा", safety: "सुरक्षा नियम बदले" };
 function showStatement(raw) {
   const out = $("stmt-out"); out.replaceChildren();
   if (!current) return;
   const addr = String(raw).trim().toLowerCase().replace(/^0x/, "");
   if (!isHex(addr, 40)) { out.append(el("p", "fails", "पता 40 अक्षरों का hex होना चाहिए (0-9, a-f)।")); return; }
-  const r = current.report; const a = r.accounts.get(addr) || { bal: 0n, nonce: 0n }; const hist = r.history.get(addr) || [];
-  let rec = 0n, sent = 0n, fees = 0n; for (const e of hist) { if (e.dir === "in") rec += e.amount; else { sent += e.amount; fees += e.fee; } }
+  const r = current.report; const a = r.S.acc.get(addr) || newAcc(); const hist = r.history.get(addr) || [];
+  let rec = 0n, sent = 0n, fees = 0n, back = 0n, heldOut = 0n, heldIn = 0n;
+  for (const e of hist) {
+    fees += e.fee;
+    if (e.kind === "sent" || e.kind === "heldOut") sent += e.amount;
+    if (e.kind === "received" || e.kind === "releasedIn") rec += e.amount;
+    if (e.kind === "cancelled" || e.kind === "refunded") back += e.amount;
+  }
+  for (const x of r.S.held.values()) { if (x.from === addr) heldOut += x.amount; if (x.to === addr) heldIn += x.amount; }
   out.append(el("p", "mono", addr));
   const st = el("div", "stats");
-  for (const [k, v] of [["बैलेंस", fmt(a.bal) + " utzv"], ["भेजे गए लेन-देन (nonce)", a.nonce.toString()], ["कुल मिला", fmt(rec)], ["कुल भेजा", fmt(sent)], ["कुल फ़ीस", fmt(fees)]]) {
-    const s = el("div", "stat"); s.append(el("span", "", k)); s.append(el("b", "", v)); st.append(s);
-  }
+  const items = [["बैलेंस", fmt(a.bal) + " utzv"], ["भेजे गए लेन-देन (nonce)", a.nonce.toString()], ["कुल मिला", fmt(rec)], ["कुल भेजा", fmt(sent)], ["कुल फ़ीस", fmt(fees)]];
+  if (back) items.push(["रद्द/वापस हुआ", fmt(back)]);
+  if (heldOut) items.push(["रुका हुआ (भेजा)", fmt(heldOut)]);
+  if (heldIn) items.push(["रुका हुआ (आने वाला)", fmt(heldIn)]);
+  for (const [k, v] of items) { const s = el("div", "stat"); s.append(el("span", "", k)); s.append(el("b", "", v)); st.append(s); }
   out.append(st);
+  if (hasExt(a)) out.append(el("p", "note", "इस खाते की सुरक्षा: " + safetyText(a.limit, a.thr, a.hold) + (a.pend.active ? " · इंतज़ार में: " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " (ब्लॉक #" + a.pend.ready + " से)" : "")));
   if (!hist.length) { out.append(el("p", "muted", "इस पते का कोई लेन-देन इस चेन में नहीं मिला।")); return; }
   for (const e of hist) {
-    const d = el("div", "entry");
-    d.append(el("span", e.dir === "in" ? "in" : "out", (e.dir === "in" ? "+" : "−") + fmt(e.amount) + " utzv · ब्लॉक #" + e.height + (e.dir === "out" ? " · फ़ीस " + fmt(e.fee) : "")));
-    d.append(el("span", "mono muted", (e.dir === "in" ? "से: " : "को: ") + e.other));
+    const d = el("div", "entry"); const incoming = e.kind === "received" || e.kind === "releasedIn" || e.kind === "cancelled" || e.kind === "refunded";
+    const head = e.kind === "safety" ? KIND_TEXT.safety : (incoming ? "+" : "−") + fmt(e.amount) + " utzv · " + KIND_TEXT[e.kind];
+    d.append(el("span", incoming ? "in" : "out", head + " · ब्लॉक #" + e.height + (e.fee ? " · फ़ीस " + fmt(e.fee) : "")));
+    if (e.kind === "safety") d.append(el("span", "note", safetyText(e.limit, e.thr, e.hold) + (e.limit === 0n && e.thr === 0n ? "" : "")));
+    else d.append(el("span", "mono muted", (e.kind === "received" || e.kind === "releasedIn" ? "से: " : "को: ") + e.other));
     d.append(el("span", "mono muted", "txid: " + e.txid));
     out.append(d);
   }
@@ -357,9 +501,12 @@ function blockCard(b) {
   add("hash", b.hash, true); add("previous hash", b.prev, true); add("state root", b.root, true);
   add("समय", b.ts === 0n ? "genesis (0)" : new Date(Number(b.ts) * 1000).toLocaleString("hi-IN") + " (" + b.ts + ")");
   for (const t of b.txs) {
-    add("लेन-देन " + short(t.txid, 8), "", false);
-    const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from)); dd.append(el("div", "mono", "को: " + t.to));
-    dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
+    const label = t.kind === 0 ? "ट्रांसफ़र" : t.kind === 1 ? "सुरक्षा नियम" : "रुका ट्रांसफ़र रद्द";
+    add(label + " " + short(t.txid, 8), "", false);
+    const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from));
+    if (t.kind === 0) { dd.append(el("div", "mono", "को: " + t.to)); dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
+    else if (t.kind === 1) dd.append(el("div", "", safetyText(t.limit, t.thr, t.hold) + " · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
+    else { dd.append(el("div", "mono", "रद्द: " + t.ref)); dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
   }
   d.append(dl); return d;
 }
@@ -371,7 +518,7 @@ function renderBlocks(c, more) {
   shown = Math.min(order.length, shown + PAGE); $("btn-more").hidden = shown >= order.length;
 }
 
-async function open(text) {
+async function openChain(text) {
   const result = $("result"); result.hidden = false; result.replaceChildren(el("p", "muted", "जाँच चल रही है…"));
   for (const id of ["accounts-panel", "stmt-panel", "blocks-panel"]) $(id).hidden = true;
   current = null;
@@ -390,18 +537,22 @@ async function open(text) {
 
 $("file-input").addEventListener("change", async (ev) => {
   const f = ev.target.files[0]; if (!f) return;
-  if (f.size > 20 * 1024 * 1024) { open("{"); return; }
-  open(await f.text()); ev.target.value = "";
+  if (f.size > 20 * 1024 * 1024) { openChain("{"); return; }
+  openChain(await f.text()); ev.target.value = "";
 });
-$("btn-demo").addEventListener("click", () => open($("demo-data").textContent));
-$("btn-tamper").addEventListener("click", () => {
-  const j = JSON.parse($("demo-data").textContent);
-  const t = j.blocks[1].transactions[0]; t.amount = (BigInt(t.amount) + 1n).toString();
-  open(JSON.stringify(j));
-});
+$("btn-demo").addEventListener("click", () => openChain($("demo-data").textContent));
+$("btn-safety").addEventListener("click", () => openChain($("demo-safety").textContent));
+function tamper(id) {
+  const j = JSON.parse($(id).textContent);
+  const t = j.blocks.flatMap((b) => b.transactions).find((x) => x.kind === undefined || x.kind === "0");
+  t.amount = (BigInt(t.amount) + 1n).toString();
+  openChain(JSON.stringify(j));
+}
+$("btn-tamper").addEventListener("click", () => tamper("demo-data"));
+$("btn-tamper-safety").addEventListener("click", () => tamper("demo-safety"));
 $("stmt-form").addEventListener("submit", (ev) => { ev.preventDefault(); showStatement($("stmt-input").value); });
 $("btn-more").addEventListener("click", () => current && renderBlocks(current.chain, true));
-open($("demo-data").textContent);
+openChain($("demo-data").textContent);
 </script>
 
 </body>

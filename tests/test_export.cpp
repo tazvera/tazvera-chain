@@ -31,9 +31,9 @@ int main() {
     }
     const auto sa = wallet_statement(chain, a.addr);
     CHECK(sa.nonce == 3); CHECK(sa.total_fees == 3 * FEE_TRANSFER_V1); CHECK(sa.total_sent == 1000025);
-    CHECK(sa.entries.size() == 3 && !sa.entries[0].incoming && sa.entries[0].height == 1);
+    CHECK(sa.entries.size() == 3 && sa.entries[0].kind == EntryKind::Sent && sa.entries[0].height == 1);
     const auto sc = wallet_statement(chain, c.addr);
-    CHECK(sc.balance == 320 && sc.entries.size() == 2 && sc.entries[0].incoming && sc.total_fees == 0);
+    CHECK(sc.balance == 320 && sc.entries.size() == 2 && sc.entries[0].kind == EntryKind::Received && sc.total_fees == 0);
     CHECK(wallet_statement(chain, Address{9}).entries.empty());
     // supply is conserved: all balances + burned == genesis
     CHECK(chain.state().circulating() + chain.state().burned_total() == 50000000);

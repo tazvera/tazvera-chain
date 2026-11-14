@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tazvera_chain_core VERSION 0.4.0 LANGUAGES CXX)
+project(tazvera_chain_core VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,3 +33,7 @@ target_link_libraries(taz_export_demo PRIVATE tazcore)
 add_executable(taz_export_tests tests/test_export.cpp)
 target_link_libraries(taz_export_tests PRIVATE tazcore)
 add_test(NAME taz_export_tests COMMAND taz_export_tests)
+
+add_executable(taz_safety_tests tests/test_safety.cpp)
+target_link_libraries(taz_safety_tests PRIVATE tazcore)
+add_test(NAME taz_safety_tests COMMAND taz_safety_tests)

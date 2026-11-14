@@ -1,0 +1,426 @@
+"use strict";
+const U64MAX = (1n << 64n) - 1n;
+const enc = new TextEncoder();
+const $ = (id) => document.getElementById(id);
+
+/* ---------- safe DOM helpers: data is only ever inserted with textContent ---------- */
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+const short = (h, n = 10) => (h.length > n * 2 + 1 ? h.slice(0, n) + "…" + h.slice(-6) : h);
+const fmt = (bi) => bi.toLocaleString("en-IN");
+const ZERO20 = "0".repeat(40), ZERO32 = "0".repeat(64);
+
+/* ---------- byte helpers (must match the C++ serialisation exactly) ---------- */
+function hexToBytes(h) { const o = new Uint8Array(h.length / 2); for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16); return o; }
+function toHex(u) { let s = ""; for (const b of u) s += b.toString(16).padStart(2, "0"); return s; }
+function cat(...parts) { const n = parts.reduce((a, p) => a + p.length, 0); const o = new Uint8Array(n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; }
+function u8(n) { return new Uint8Array([n]); }
+function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n); return b; }
+function u64(bi) { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt.asUintN(64, bi)); return b; }
+function lp(s) { const e = enc.encode(s); return cat(u32(e.length), e); }
+async function sha(u) { return new Uint8Array(await crypto.subtle.digest("SHA-256", u)); }
+
+/* ---------- strict parsing of the export file ---------- */
+class FormatError extends Error {}
+function need(cond, msg) { if (!cond) throw new FormatError(msg); }
+const isHex = (v, n) => typeof v === "string" && v.length === n && /^[0-9a-f]+$/.test(v);
+function dec(v, what) { need(typeof v === "string" && /^[0-9]{1,20}$/.test(v), what + " सही संख्या नहीं है"); const b = BigInt(v); need(b <= U64MAX, what + " सीमा से बड़ी है"); return b; }
+function decOr(v, dflt, what) { return v === undefined ? dflt : dec(v, what); }
+function sdec(v, what) { need(typeof v === "string" && /^-?[0-9]{1,19}$/.test(v), what + " सही संख्या नहीं है"); return BigInt(v); }
+function hx(v, n, what) { need(isHex(v, n * 2), what + " सही hex नहीं है"); return v; }
+function hxOr(v, n, dflt, what) { return v === undefined ? dflt : hx(v, n, what); }
+function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " सही टेक्स्ट नहीं है"); return v; }
+
+function parseChain(text) {
+  let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
+  need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
+  need(j.format === "tazvera-chain-export-v1" || j.format === "tazvera-chain-export-v2", "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
+  need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
+  need(j.params && typeof j.params === "object", "params गलत हैं");
+  const c = {
+    format: j.format, chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),
+    fee: dec(j.params.fee_transfer_v1, "fee"), maxTxs: Number(dec(j.params.max_block_txs, "max_block_txs")),
+    window: decOr(j.params.limit_window_blocks, 1000n, "limit_window_blocks"), maxHold: decOr(j.params.max_hold_blocks, 100000n, "max_hold_blocks"),
+    safetyDelay: decOr(j.params.safety_delay_blocks, 500n, "safety_delay_blocks"),
+    genesis: j.genesis_balances.map((g) => { need(g && typeof g === "object", "genesis प्रविष्टि गलत है"); return { address: hx(g.address, 20, "genesis पता"), balance: dec(g.balance, "genesis राशि") }; }),
+    blocks: [],
+  };
+  need(c.window > 0n, "limit_window_blocks शून्य नहीं हो सकता");
+  for (const b of j.blocks) {
+    need(b && typeof b === "object" && Array.isArray(b.transactions) && b.transactions.length <= 100000, "ब्लॉक का ढाँचा गलत है");
+    c.blocks.push({
+      height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
+      prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
+      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 2n, "अज्ञात लेन-देन प्रकार"); return {
+        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
+        from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
+        nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
+        limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
+        pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
+    });
+  }
+  return c;
+}
+
+/* ---------- transaction bytes ---------- */
+function txSignable(t) {
+  if (t.kind === 0) // plain transfer: identical to the original v1 layout
+    return cat(enc.encode("TAZVERA-TX-SIGNATURE-V1"), u32(t.version), lp(t.chainId), hexToBytes(t.from), hexToBytes(t.to),
+      u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
+  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V2"), u32(t.version), lp(t.chainId), u8(t.kind), hexToBytes(t.from),
+    u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey),
+    t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold)) : hexToBytes(t.ref));
+}
+
+/* ---------- the account state machine (a mirror of the C++ State) ---------- */
+const newAcc = () => ({ bal: 0n, nonce: 0n, limit: 0n, thr: 0n, hold: 0n, widx: 0n, wspent: 0n, pend: { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n } });
+const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend } } : newAcc());
+const hasExt = (a) => a.limit !== 0n || a.thr !== 0n || a.hold !== 0n || a.wspent !== 0n || a.pend.active;
+const heldTotal = (S) => { let t = 0n; for (const h of S.held.values()) t += h.amount; return t; };
+
+function isLoosening(a, n) {
+  const oldDefault = a.limit === 0n && a.thr === 0n && a.hold === 0n;
+  if (oldDefault) return false;
+  const limitLooser = a.limit !== 0n && (n.limit === 0n || n.limit > a.limit);
+  const thrLooser = a.thr !== 0n && (n.thr === 0n || n.thr > a.thr);
+  const holdLooser = a.thr !== 0n && n.thr !== 0n && n.hold < a.hold;
+  return limitLooser || thrLooser || holdLooser;
+}
+
+function beginBlock(S, h) {
+  const events = [];
+  const due = [...S.held.entries()].filter(([, x]) => x.release <= h)
+    .sort((p, q) => (p[1].release < q[1].release ? -1 : p[1].release > q[1].release ? 1 : p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : 0));
+  for (const [id, x] of due) {
+    S.held.delete(id);
+    const rc = S.acc.get(x.to); const have = rc ? rc.bal : 0n;
+    if (x.amount > U64MAX - have) { const sd = cloneAcc(S.acc.get(x.from)); sd.bal += x.amount; S.acc.set(x.from, sd); events.push({ id, from: x.from, to: x.to, amount: x.amount, refunded: true }); }
+    else { const r = cloneAcc(rc); r.bal = have + x.amount; S.acc.set(x.to, r); events.push({ id, from: x.from, to: x.to, amount: x.amount, refunded: false }); }
+  }
+  for (const a of S.acc.values()) {
+    if (a.pend.active && a.pend.ready <= h) {
+      a.limit = a.pend.limit; a.thr = a.pend.thr; a.hold = a.pend.hold; a.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n };
+      if (a.limit === 0n) { a.widx = 0n; a.wspent = 0n; }
+    }
+  }
+  return events;
+}
+
+// Returns an error string, or {held, target} after changing S. Nothing is changed when an error is returned.
+function applyTx(S, c, t, h) {
+  if (t.version !== c.version || t.chainId !== c.chainId) return "version या chain ID गलत";
+  if (t.fee !== c.fee) return "फ़ीस तय दर से अलग है";
+  const noTo = t.to === ZERO20, noSafety = t.limit === 0n && t.thr === 0n && t.hold === 0n, noRef = t.ref === ZERO32;
+  if (t.kind === 0) {
+    if (t.amount === 0n) return "रकम शून्य है";
+    if (t.from === t.to) return "खुद को भेजना मान्य नहीं";
+    if (t.amount > U64MAX - t.fee) return "रकम और फ़ीस का जोड़ सीमा से बड़ा";
+    if (!noSafety || !noRef) return "ट्रांसफ़र में अनावश्यक फ़ील्ड भरे हैं";
+  } else if (t.kind === 1) {
+    if (t.amount !== 0n || !noTo || !noRef) return "सुरक्षा-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.thr === 0n && t.hold !== 0n) return "रोकने की सीमा शून्य है पर रुकने का समय भरा है";
+    if (t.thr !== 0n && (t.hold === 0n || t.hold > c.maxHold)) return "रुकने का समय सीमा से बाहर";
+  } else {
+    if (t.amount !== 0n || !noTo || !noSafety) return "रद्द करने में अनावश्यक फ़ील्ड भरे हैं";
+  }
+  if (t.expiry !== 0n && h > t.expiry) return "लेन-देन की अवधि समाप्त";
+  const snd = cloneAcc(S.acc.get(t.from));
+  if (t.nonce !== snd.nonce) return "nonce गलत";
+  if (snd.nonce === U64MAX) return "nonce सीमा पर है";
+  if (S.burned + t.fee > U64MAX) return "जले हुए का कुल सीमा पार करता";
+  if (snd.bal < t.fee) return "बैलेंस कम है";
+  let held = false, target = null;
+  if (t.kind === 0) {
+    const required = t.amount + t.fee;
+    if (snd.bal < required) return "बैलेंस कम है";
+    const rcv = cloneAcc(S.acc.get(t.to));
+    const window = h / c.window, limited = snd.limit !== 0n;
+    const spent = limited && snd.widx === window ? snd.wspent : 0n;
+    if (limited && (spent > snd.limit || t.amount > snd.limit - spent)) return "रोज़ की सीमा पार हो रही है";
+    held = snd.thr !== 0n && t.amount >= snd.thr;
+    if (held) { if (S.held.has(t.txid)) return "यह रुका हुआ ट्रांसफ़र पहले से है"; }
+    else if (t.amount > U64MAX - rcv.bal) return "पाने वाले का बैलेंस सीमा पार करता";
+    snd.bal -= required; snd.nonce += 1n;
+    if (limited) { snd.widx = window; snd.wspent = spent + t.amount; }
+    if (held) S.held.set(t.txid, { from: t.from, to: t.to, amount: t.amount, release: h + snd.hold });
+    else { rcv.bal += t.amount; S.acc.set(t.to, rcv); }
+  } else if (t.kind === 1) {
+    const want = { limit: t.limit, thr: t.thr, hold: t.hold };
+    snd.bal -= t.fee; snd.nonce += 1n;
+    if (isLoosening(snd, want)) snd.pend = { active: true, limit: want.limit, thr: want.thr, hold: want.hold, ready: h + c.safetyDelay };
+    else { snd.limit = want.limit; snd.thr = want.thr; snd.hold = want.hold; snd.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n }; if (want.limit === 0n) { snd.widx = 0n; snd.wspent = 0n; } }
+  } else {
+    const x = S.held.get(t.ref);
+    if (!x || x.from !== t.from) return "इस खाते का ऐसा कोई रुका हुआ ट्रांसफ़र नहीं है";
+    const after = snd.bal - t.fee;
+    if (after > U64MAX - x.amount) return "वापसी पर बैलेंस सीमा पार करता";
+    snd.bal = after + x.amount; snd.nonce += 1n; S.held.delete(t.ref); target = x;
+  }
+  S.acc.set(t.from, snd); S.burned += t.fee;
+  return { held, target };
+}
+
+async function stateRoot(S) {
+  let ext = S.held.size > 0; for (const a of S.acc.values()) if (hasExt(a)) { ext = true; break; }
+  const keys = [...S.acc.keys()].sort();
+  if (!ext) {
+    const parts = [enc.encode("TAZVERA-STATE-V1")];
+    for (const k of keys) { const a = S.acc.get(k); parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce)); }
+    parts.push(u64(S.burned));
+    return toHex(await sha(cat(...parts)));
+  }
+  const parts = [enc.encode("TAZVERA-STATE-V2"), u64(BigInt(S.acc.size))];
+  for (const k of keys) {
+    const a = S.acc.get(k);
+    parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce), u64(a.limit), u64(a.thr), u64(a.hold), u64(a.widx), u64(a.wspent),
+      u8(a.pend.active ? 1 : 0), u64(a.pend.limit), u64(a.pend.thr), u64(a.pend.hold), u64(a.pend.ready));
+  }
+  parts.push(u64(S.burned), u64(BigInt(S.held.size)));
+  for (const id of [...S.held.keys()].sort()) { const x = S.held.get(id); parts.push(hexToBytes(id), hexToBytes(x.from), hexToBytes(x.to), u64(x.amount), u64(x.release)); }
+  return toHex(await sha(cat(...parts)));
+}
+
+let sigSupport = null;
+async function sigSupported() {
+  if (sigSupport === null) { try { await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]); sigSupport = true; } catch { sigSupport = false; } }
+  return sigSupport;
+}
+async function checkSig(t) {
+  if (!(await sigSupported())) return "unsupported";
+  try {
+    const key = await crypto.subtle.importKey("raw", hexToBytes(t.pubkey), { name: "Ed25519" }, false, ["verify"]);
+    return (await crypto.subtle.verify({ name: "Ed25519" }, key, hexToBytes(t.sig), txSignable(t))) ? "ok" : "bad";
+  } catch { return "bad"; }
+}
+
+/* ---------- the verification itself ---------- */
+async function verifyChain(c) {
+  const cats = {
+    link: { label: "ब्लॉकों की कड़ी (previous hash)", ok: 0, n: 0 },
+    hash: { label: "ब्लॉक hash", ok: 0, n: 0 },
+    txid: { label: "लेन-देन की ID", ok: 0, n: 0 },
+    bind: { label: "पते और public key का मेल", ok: 0, n: 0 },
+    sig: { label: "Ed25519 हस्ताक्षर", ok: 0, n: 0, unsup: 0 },
+    rules: { label: "नियम (nonce, बैलेंस, फ़ीस, सीमा, रुकावट)", ok: 0, n: 0 },
+    root: { label: "state root (हर ब्लॉक के बाद)", ok: 0, n: 0 },
+    time: { label: "समय का क्रम", ok: 0, n: 0 },
+  };
+  const fails = [];
+  const fail = (h, msg) => { if (fails.length < 40) fails.push((h === null ? "" : "ब्लॉक #" + h + ": ") + msg); };
+  const tick = (k, good, h, msg) => { cats[k].n++; if (good) cats[k].ok++; else fail(h, msg); return good; };
+
+  const S = { acc: new Map(), held: new Map(), burned: 0n };
+  const history = new Map(); let stateBroken = false;
+  const addHist = (addr, e) => { if (!history.has(addr)) history.set(addr, []); history.get(addr).push(e); };
+  for (const g of c.genesis) {
+    if (S.acc.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
+    if (g.balance !== 0n) { const a = newAcc(); a.bal = g.balance; S.acc.set(g.address, a); }
+  }
+
+  for (let i = 0; i < c.blocks.length; i++) {
+    const b = c.blocks[i]; const h = i;
+    tick("link", i === 0 ? /^0{64}$/.test(b.prev) : b.prev === c.blocks[i - 1].hash, h, i === 0 ? "genesis का previous hash शून्य नहीं है" : "previous hash पिछले ब्लॉक से नहीं मिलता");
+    if (b.height !== BigInt(i)) fail(h, "height क्रम में नहीं है");
+    if (b.version !== c.version || b.chainId !== c.chainId) fail(h, "ब्लॉक का version या chain ID अलग है");
+    tick("time", i === 0 ? b.ts === 0n : b.ts > c.blocks[i - 1].ts, h, "timestamp पिछले ब्लॉक से सख़्ती से बड़ा नहीं है");
+    if (b.txs.length > c.maxTxs) fail(h, "ब्लॉक में बहुत ज़्यादा लेन-देन हैं");
+
+    if (i > 0 && !stateBroken) {
+      for (const ev of beginBlock(S, b.height)) {
+        if (ev.refunded) addHist(ev.from, { height: b.height, kind: "refunded", other: ev.to, amount: ev.amount, fee: 0n, txid: ev.id });
+        else addHist(ev.to, { height: b.height, kind: "releasedIn", other: ev.from, amount: ev.amount, fee: 0n, txid: ev.id });
+      }
+    }
+    const txids = [];
+    for (let k = 0; k < b.txs.length; k++) {
+      const t = b.txs[k]; const where = "tx " + k;
+      const id = toHex(await sha(cat(txSignable(t), hexToBytes(t.sig))));
+      txids.push(hexToBytes(t.txid));
+      tick("txid", id === t.txid, h, where + ": txid लेन-देन की सामग्री से नहीं मिलता (डेटा बदला गया)");
+      const addr = toHex((await sha(hexToBytes(t.pubkey))).slice(0, 20));
+      tick("bind", addr === t.from, h, where + ": public key भेजने वाले के पते से नहीं मिलती");
+      const s = await checkSig(t);
+      if (s === "unsupported") cats.sig.unsup++; else tick("sig", s === "ok", h, where + ": हस्ताक्षर गलत है");
+      if (stateBroken) { cats.rules.n++; continue; }
+      const r = applyTx(S, c, t, b.height);
+      tick("rules", typeof r !== "string", h, where + ": " + (typeof r === "string" ? r : ""));
+      if (typeof r === "string") { stateBroken = true; continue; }
+      if (t.kind === 0) {
+        addHist(t.from, { height: b.height, kind: r.held ? "heldOut" : "sent", other: t.to, amount: t.amount, fee: t.fee, txid: t.txid });
+        if (!r.held) addHist(t.to, { height: b.height, kind: "received", other: t.from, amount: t.amount, fee: 0n, txid: t.txid });
+      } else if (t.kind === 1) addHist(t.from, { height: b.height, kind: "safety", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid, limit: t.limit, thr: t.thr, hold: t.hold });
+      else addHist(t.from, { height: b.height, kind: "cancelled", other: r.target.to, amount: r.target.amount, fee: t.fee, txid: t.txid });
+    }
+    if (!stateBroken) {
+      const calc = await stateRoot(S);
+      tick("root", calc === b.root, h, "state root दोबारा चलाने पर नहीं मिलता");
+      if (calc !== b.root) stateBroken = true;
+    } else { cats.root.n++; if (fails.length < 40 && !fails.some((m) => m.startsWith("state की जाँच"))) fails.push("state की जाँच रोक दी गई, क्योंकि ऊपर के किसी ब्लॉक में गड़बड़ी मिली"); }
+    const calcHash = toHex(await sha(cat(enc.encode("TAZVERA-BLOCK-V1"), u32(b.version), lp(b.chainId), u64(b.height), hexToBytes(b.prev),
+      u64(b.ts), u64(BigInt(b.txs.length)), ...txids, hexToBytes(b.root))));
+    tick("hash", calcHash === b.hash, h, "ब्लॉक hash सामग्री से नहीं मिलता");
+  }
+  return { cats, fails, S, history, stateBroken };
+}
+
+/* ---------- rendering ---------- */
+let current = null; // { chain, report }
+function renderVerdict(c, r) {
+  const box = $("result"); box.replaceChildren(); box.hidden = false;
+  const anyFail = r.fails.length > 0; const sigsSkipped = r.cats.sig.unsup > 0;
+  const v = el("div", "verdict " + (anyFail ? "bad" : sigsSkipped ? "warn" : "ok"));
+  v.append(el("div", "big", anyFail ? "चेन में गड़बड़ी मिली" : sigsSkipped ? "hash और state सही, हस्ताक्षर जाँचे नहीं गए" : "चेन सही है"));
+  v.append(el("p", "", anyFail ? "फ़ाइल में कुछ बदला गया है या वह नियमों के अनुसार नहीं है। नीचे देखिए कहाँ।" :
+    sigsSkipped ? "इस ब्राउज़र में Ed25519 की जाँच उपलब्ध नहीं है। हस्ताक्षर किसी नए ब्राउज़र में जाँचिए।" : "हर ब्लॉक, हर लेन-देन और हर हस्ताक्षर इस पेज ने खुद दोबारा जाँचा।"));
+  v.append(el("p", "muted", c.blocks.length + " ब्लॉक · " + c.blocks.reduce((a, b) => a + b.txs.length, 0) + " लेन-देन · chain ID: " + c.chainId));
+  box.append(v);
+
+  const p = el("div", "panel"); p.append(el("h2", "", "क्या-क्या जाँचा"));
+  const ul = el("ul", "checks");
+  for (const k of Object.keys(r.cats)) {
+    const x = r.cats[k]; const li = el("li"); li.append(el("span", "", x.label));
+    let txt, cls;
+    if (k === "sig" && x.unsup && !x.n) { txt = "उपलब्ध नहीं"; cls = "warn"; }
+    else { txt = x.ok + " / " + x.n; cls = x.ok === x.n ? "ok" : "bad"; }
+    li.append(el("span", "tag " + cls, txt)); ul.append(li);
+  }
+  p.append(ul);
+  if (anyFail) { p.append(el("h2", "", "गड़बड़ियाँ")); const f = el("ul", "fails"); for (const m of r.fails) f.append(el("li", "", m)); p.append(f); }
+  box.append(p);
+}
+
+function safetyText(limit, thr, hold) {
+  if (limit === 0n && thr === 0n) return "कोई सुरक्षा नियम नहीं";
+  const parts = [];
+  if (limit !== 0n) parts.push("रोज़ की सीमा " + fmt(limit));
+  if (thr !== 0n) parts.push(fmt(thr) + " या ज़्यादा की रकम " + hold + " ब्लॉक रुकती है");
+  return parts.join(" · ");
+}
+
+function renderAccounts(c, r) {
+  $("accounts-panel").hidden = false; const box = $("accounts"); box.replaceChildren();
+  if (r.stateBroken) box.append(el("p", "note", "चेन में गड़बड़ी है, इसलिए नीचे के बैलेंस भरोसे लायक नहीं हैं।"));
+  const rows = [...r.S.acc.entries()].sort((a, b) => (b[1].bal > a[1].bal ? 1 : b[1].bal < a[1].bal ? -1 : 0));
+  for (const [addr, a] of rows) {
+    const btn = el("button", "acct"); btn.type = "button";
+    btn.append(el("span", "mono", addr)); btn.append(el("span", "num", fmt(a.bal) + " utzv"));
+    if (hasExt(a)) {
+      btn.append(el("span", "note", "सुरक्षा: " + safetyText(a.limit, a.thr, a.hold)));
+      if (a.pend.active) btn.append(el("span", "note warnline", "इंतज़ार में बदलाव (ढीला करना): " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " · ब्लॉक #" + a.pend.ready + " से लागू"));
+    }
+    btn.addEventListener("click", () => { $("stmt-input").value = addr; showStatement(addr); $("stmt-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
+    box.append(btn);
+  }
+  if (r.S.held.size) {
+    box.append(el("h2", "", "रुकी हुई रकम (" + fmt(heldTotal(r.S)) + " utzv)"));
+    for (const [id, x] of [...r.S.held.entries()].sort()) {
+      const d = el("div", "entry"); d.append(el("span", "num", fmt(x.amount) + " utzv · ब्लॉक #" + x.release + " पर पहुँचेगी"));
+      d.append(el("span", "mono muted", "से: " + x.from)); d.append(el("span", "mono muted", "को: " + x.to)); d.append(el("span", "mono muted", "txid: " + id)); box.append(d);
+    }
+  }
+  box.append(el("p", "note", "जले हुए (burn) कुल: " + fmt(r.S.burned) + " utzv"));
+}
+
+const KIND_TEXT = { sent: "भेजा", received: "मिला", heldOut: "भेजा (रुका हुआ)", releasedIn: "मिला (रुकावट के बाद)", cancelled: "रुका हुआ ट्रांसफ़र रद्द, पैसा लौटा", refunded: "रुका हुआ ट्रांसफ़र वापस लौटा", safety: "सुरक्षा नियम बदले" };
+function showStatement(raw) {
+  const out = $("stmt-out"); out.replaceChildren();
+  if (!current) return;
+  const addr = String(raw).trim().toLowerCase().replace(/^0x/, "");
+  if (!isHex(addr, 40)) { out.append(el("p", "fails", "पता 40 अक्षरों का hex होना चाहिए (0-9, a-f)।")); return; }
+  const r = current.report; const a = r.S.acc.get(addr) || newAcc(); const hist = r.history.get(addr) || [];
+  let rec = 0n, sent = 0n, fees = 0n, back = 0n, heldOut = 0n, heldIn = 0n;
+  for (const e of hist) {
+    fees += e.fee;
+    if (e.kind === "sent" || e.kind === "heldOut") sent += e.amount;
+    if (e.kind === "received" || e.kind === "releasedIn") rec += e.amount;
+    if (e.kind === "cancelled" || e.kind === "refunded") back += e.amount;
+  }
+  for (const x of r.S.held.values()) { if (x.from === addr) heldOut += x.amount; if (x.to === addr) heldIn += x.amount; }
+  out.append(el("p", "mono", addr));
+  const st = el("div", "stats");
+  const items = [["बैलेंस", fmt(a.bal) + " utzv"], ["भेजे गए लेन-देन (nonce)", a.nonce.toString()], ["कुल मिला", fmt(rec)], ["कुल भेजा", fmt(sent)], ["कुल फ़ीस", fmt(fees)]];
+  if (back) items.push(["रद्द/वापस हुआ", fmt(back)]);
+  if (heldOut) items.push(["रुका हुआ (भेजा)", fmt(heldOut)]);
+  if (heldIn) items.push(["रुका हुआ (आने वाला)", fmt(heldIn)]);
+  for (const [k, v] of items) { const s = el("div", "stat"); s.append(el("span", "", k)); s.append(el("b", "", v)); st.append(s); }
+  out.append(st);
+  if (hasExt(a)) out.append(el("p", "note", "इस खाते की सुरक्षा: " + safetyText(a.limit, a.thr, a.hold) + (a.pend.active ? " · इंतज़ार में: " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " (ब्लॉक #" + a.pend.ready + " से)" : "")));
+  if (!hist.length) { out.append(el("p", "muted", "इस पते का कोई लेन-देन इस चेन में नहीं मिला।")); return; }
+  for (const e of hist) {
+    const d = el("div", "entry"); const incoming = e.kind === "received" || e.kind === "releasedIn" || e.kind === "cancelled" || e.kind === "refunded";
+    const head = e.kind === "safety" ? KIND_TEXT.safety : (incoming ? "+" : "−") + fmt(e.amount) + " utzv · " + KIND_TEXT[e.kind];
+    d.append(el("span", incoming ? "in" : "out", head + " · ब्लॉक #" + e.height + (e.fee ? " · फ़ीस " + fmt(e.fee) : "")));
+    if (e.kind === "safety") d.append(el("span", "note", safetyText(e.limit, e.thr, e.hold) + (e.limit === 0n && e.thr === 0n ? "" : "")));
+    else d.append(el("span", "mono muted", (e.kind === "received" || e.kind === "releasedIn" ? "से: " : "को: ") + e.other));
+    d.append(el("span", "mono muted", "txid: " + e.txid));
+    out.append(d);
+  }
+}
+
+let shown = 0; const PAGE = 100;
+function blockCard(b) {
+  const d = el("details"); const s = el("summary");
+  s.append(el("span", "", "ब्लॉक #" + b.height + " · " + b.txs.length + " लेन-देन")); s.append(el("span", "mono muted", short(b.hash)));
+  d.append(s);
+  const dl = el("dl");
+  const add = (k, v, mono) => { dl.append(el("dt", "", k)); dl.append(el("dd", mono ? "mono" : "", v)); };
+  add("hash", b.hash, true); add("previous hash", b.prev, true); add("state root", b.root, true);
+  add("समय", b.ts === 0n ? "genesis (0)" : new Date(Number(b.ts) * 1000).toLocaleString("hi-IN") + " (" + b.ts + ")");
+  for (const t of b.txs) {
+    const label = t.kind === 0 ? "ट्रांसफ़र" : t.kind === 1 ? "सुरक्षा नियम" : "रुका ट्रांसफ़र रद्द";
+    add(label + " " + short(t.txid, 8), "", false);
+    const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from));
+    if (t.kind === 0) { dd.append(el("div", "mono", "को: " + t.to)); dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
+    else if (t.kind === 1) dd.append(el("div", "", safetyText(t.limit, t.thr, t.hold) + " · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
+    else { dd.append(el("div", "mono", "रद्द: " + t.ref)); dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
+  }
+  d.append(dl); return d;
+}
+function renderBlocks(c, more) {
+  const box = $("blocks"); $("blocks-panel").hidden = false;
+  if (!more) { box.replaceChildren(); shown = 0; }
+  const order = c.blocks.slice().reverse();
+  for (const b of order.slice(shown, shown + PAGE)) box.append(blockCard(b));
+  shown = Math.min(order.length, shown + PAGE); $("btn-more").hidden = shown >= order.length;
+}
+
+async function openChain(text) {
+  const result = $("result"); result.hidden = false; result.replaceChildren(el("p", "muted", "जाँच चल रही है…"));
+  for (const id of ["accounts-panel", "stmt-panel", "blocks-panel"]) $(id).hidden = true;
+  current = null;
+  try {
+    if (!(window.crypto && crypto.subtle)) throw new FormatError("यह ब्राउज़र SHA-256 (crypto.subtle) नहीं देता। https या localhost पर खोलिए।");
+    const chain = parseChain(text); const report = await verifyChain(chain);
+    current = { chain, report };
+    renderVerdict(chain, report); renderAccounts(chain, report); renderBlocks(chain, false);
+    $("stmt-panel").hidden = false; $("stmt-out").replaceChildren(); $("stmt-input").value = "";
+  } catch (e) {
+    const v = el("div", "verdict bad"); v.append(el("div", "big", "फ़ाइल जाँची नहीं जा सकी"));
+    v.append(el("p", "", e instanceof FormatError ? e.message : "अनपेक्षित गलती: " + (e && e.message ? e.message : e)));
+    result.replaceChildren(v);
+  }
+}
+
+$("file-input").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  if (f.size > 20 * 1024 * 1024) { openChain("{"); return; }
+  openChain(await f.text()); ev.target.value = "";
+});
+$("btn-demo").addEventListener("click", () => openChain($("demo-data").textContent));
+$("btn-safety").addEventListener("click", () => openChain($("demo-safety").textContent));
+function tamper(id) {
+  const j = JSON.parse($(id).textContent);
+  const t = j.blocks.flatMap((b) => b.transactions).find((x) => x.kind === undefined || x.kind === "0");
+  t.amount = (BigInt(t.amount) + 1n).toString();
+  openChain(JSON.stringify(j));
+}
+$("btn-tamper").addEventListener("click", () => tamper("demo-data"));
+$("btn-tamper-safety").addEventListener("click", () => tamper("demo-safety"));
+$("stmt-form").addEventListener("submit", (ev) => { ev.preventDefault(); showStatement($("stmt-input").value); });
+$("btn-more").addEventListener("click", () => current && renderBlocks(current.chain, true));
+openChain($("demo-data").textContent);
