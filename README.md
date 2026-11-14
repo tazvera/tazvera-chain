@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v3
+# TAZVERA Chain — Core v5
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -89,3 +89,21 @@ cmake --build build-san --parallel && ./build-san/taz_tests
 - All file data is shown with `textContent` only (no `innerHTML`), so a hostile file cannot inject script.
 - Regenerate the page with another chain: `python3 explorer/build.py my_chain.json`.
 - Amounts are shown as integer `utzv`; decimals and total supply are still undecided policy.
+
+## v5: account safety rules (opt-in, per account)
+
+Every account may switch on its own protection. Nothing changes for an account that does not.
+
+- **Daily limit** (`daily_limit`): at most this much can be sent per window of `LIMIT_WINDOW_BLOCKS` blocks. A held transfer counts when it is sent.
+- **Hold large transfers** (`hold_threshold`, `hold_blocks`): a transfer of at least the threshold does not arrive at once. The amount leaves the sender immediately and waits inside the chain; it arrives at the start of block `sent_height + hold_blocks`. Until then the sender can take it back with a `CancelHeld` transaction (this is the "scam or mistake" escape hatch).
+- **Loosening is slow, tightening is instant**: raising the limit, raising the threshold, shortening the hold or switching a rule off only takes effect after `SAFETY_DELAY_BLOCKS`. Tightening, or sending the current settings again (which also cancels a waiting loosening), is immediate. So a stolen key cannot lift the limits at once.
+- New transaction kinds: `SetSafety`, `CancelHeld` (signed under a separate domain string `TAZVERA-TX-SIGNATURE-V2`; plain transfers are byte-for-byte unchanged).
+- State root: states that use none of this keep the old v1 encoding; otherwise a fully length-prefixed `TAZVERA-STATE-V2` encoding is used.
+- Supply is conserved: `circulating + held + burned == total` is checked after every block in the tests.
+- The explorer re-runs all of these rules in the browser and was cross-checked against a 372-block random chain produced by the C++ tests.
+- Wallet statement now replays the chain and understands held / released / cancelled entries.
+- Tests: `taz_safety_tests` (shape rules, limit windows, hold and release, cancel, delayed loosening, atomic blocks, state roots, statement, and a 900-step pseudo-random run in which a second node must reach the same state root after every block). I also broke the code on purpose in four ways and confirmed the tests catch each one.
+
+**Not built yet:** guardian recovery (3-of-5 trusted people restoring an account after a lost key). Until it exists, a lost or stolen key cannot be recovered.
+
+Parameters (`LIMIT_WINDOW_BLOCKS`, `MAX_HOLD_BLOCKS`, `SAFETY_DELAY_BLOCKS`) are prototype values counted in blocks; real values depend on the block time, which is still to be chosen.

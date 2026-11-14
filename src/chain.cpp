@@ -17,6 +17,7 @@ ChainResult Chain::check_timestamp(std::int64_t timestamp, std::int64_t max_time
 }
 ChainResult Chain::execute(const std::vector<Transaction>& txs, std::uint64_t height, State& candidate) const {
     if (txs.size() > MAX_BLOCK_TXS) return {false,"too many transactions in block"};
+    candidate.begin_block(height); // release due holds and apply due safety changes before any transaction
     for (std::size_t i = 0; i < txs.size(); ++i) {
         const auto applied = candidate.apply(txs[i], height);
         if (!applied.ok) return {false,"tx " + std::to_string(i) + ": " + applied.error};
