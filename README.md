@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v5
+# TAZVERA Chain — Core v6
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -104,6 +104,33 @@ Every account may switch on its own protection. Nothing changes for an account t
 - Wallet statement now replays the chain and understands held / released / cancelled entries.
 - Tests: `taz_safety_tests` (shape rules, limit windows, hold and release, cancel, delayed loosening, atomic blocks, state roots, statement, and a 900-step pseudo-random run in which a second node must reach the same state root after every block). I also broke the code on purpose in four ways and confirmed the tests catch each one.
 
-**Not built yet:** guardian recovery (3-of-5 trusted people restoring an account after a lost key). Until it exists, a lost or stolen key cannot be recovered.
 
 Parameters (`LIMIT_WINDOW_BLOCKS`, `MAX_HOLD_BLOCKS`, `SAFETY_DELAY_BLOCKS`) are prototype values counted in blocks; real values depend on the block time, which is still to be chosen.
+
+## v6: guardian recovery ("परिवार से वापसी", opt-in, per account)
+
+If the key is lost, trusted people ("guardians") can bring the account's funds to a NEW address (a new key). Nothing changes for an account that does not use it.
+
+- `SetGuardians`: the owner names 1 to `MAX_GUARDIANS` (5) other accounts and a threshold ("2 of 3"). The list must be strictly ascending, contain no zero address and not the account itself.
+- `RecoveryVote`: a guardian (signing with his own key) votes "move account X to new address Y". Voting again replaces his vote; the same guardian never counts twice. When `threshold` guardians name the same new address, the recovery is scheduled for block `now + RECOVERY_DELAY_BLOCKS` (300).
+- `RecoveryCancel`: the account's own key can stop votes or a scheduled recovery while it waits.
+- At the scheduled block every spendable utzv moves to the new address. The old account keeps its nonce (old signatures stay useless), its guardians are removed, and the new address starts with no safety rules or guardians. Funds still being held keep their normal course (they were already on their way to someone else).
+- **Changing the guardians always waits** `SAFETY_DELAY_BLOCKS` (500) unless the account had none yet; sending the same list again cancels the change. Recovery (300) is deliberately shorter than that delay, so guardians that already agreed finish before a thief's swap of the list takes effect (tested).
+- A recovery cannot be started while one is waiting, and the guardians cannot be changed while one is waiting.
+- If the new address could not hold the funds (a state that a supply-conserving chain does not reach), nothing moves, the recovery ends and the guardians stay.
+- Transaction kinds 3, 4, 5 use the same `TAZVERA-TX-SIGNATURE-V2` domain with the kind byte; export format becomes `v3` only when they are used; state root becomes `TAZVERA-STATE-V3` only when a guardian field is non-empty (v1/v2 chains keep their old roots).
+- Tests: `taz_recovery_tests` (shape rules incl. unused-field checks, thresholds 1/2/3, vote changes, exact timing one block before and at the due block, owner cancel, delayed guardian change, thief scenario, overflow and empty-account edges, held funds, statements, state roots, and a 3500-step random run in which a follower node must match every state root; supply is checked after every block).
+
+**Honest limits (read before relying on this):**
+- Anyone who holds the account's key can cancel a recovery. A thief with the key can therefore contest guardians. Fix planned: an optional separate "veto" key kept offline (idea from the ChatGPT design review), where only that key may cancel.
+- Any `threshold` guardians together can move the funds after the delay. Choose independent people.
+- Recovery moves funds to a new address; it does not give the old address a new key (the address is derived from the public key).
+- Prototype values only; no audit; no real funds.
+
+## v6.1: local transaction pool and safe chain-file saving (from the Grok review package)
+
+- `Mempool` (`include/taz/mempool.hpp`): a local waiting room for transactions. `submit` checks a transaction against the real state PLUS everything already waiting (so nonces must follow each other, daily limits and guardian rules see pooled transactions), refuses duplicates, a full pool and too many per sender; `select` builds a block's worth in order; `prune_stale` removes entries that can no longer apply (added by me: the original kept dead entries forever); `drop_expired`, `remove_included`.
+- `save_chain_json` (`include/taz/persist.hpp`): writes the explorer JSON through a temporary file and a rename (changed by me: the original overwrote the file in place, so a crash could leave half a file).
+- Not done: loading a chain back from JSON, networking. The `json_io.hpp` header in the Grok package had no implementation, so it is left out.
+- Known cost: `submit` copies the state and replays the pool, so it is O(pool size) per call. Fine for a prototype, to be redone before any network use.
+- Tests: `taz_mempool_tests` (nonce gaps, duplicates, bad signatures, tampered amounts, expiry, capacity, per-sender limit, safety and guardian rules inside the pool, stale pruning, saving).

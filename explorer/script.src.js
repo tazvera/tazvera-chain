@@ -38,7 +38,7 @@ function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " 
 function parseChain(text) {
   let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
   need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
-  need(j.format === "tazvera-chain-export-v1" || j.format === "tazvera-chain-export-v2", "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
   need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
   need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
   need(j.params && typeof j.params === "object", "params गलत हैं");
@@ -47,6 +47,7 @@ function parseChain(text) {
     fee: dec(j.params.fee_transfer_v1, "fee"), maxTxs: Number(dec(j.params.max_block_txs, "max_block_txs")),
     window: decOr(j.params.limit_window_blocks, 1000n, "limit_window_blocks"), maxHold: decOr(j.params.max_hold_blocks, 100000n, "max_hold_blocks"),
     safetyDelay: decOr(j.params.safety_delay_blocks, 500n, "safety_delay_blocks"),
+    recoveryDelay: decOr(j.params.recovery_delay_blocks, 300n, "recovery_delay_blocks"), maxGuardians: Number(decOr(j.params.max_guardians, 5n, "max_guardians")),
     genesis: j.genesis_balances.map((g) => { need(g && typeof g === "object", "genesis प्रविष्टि गलत है"); return { address: hx(g.address, 20, "genesis पता"), balance: dec(g.balance, "genesis राशि") }; }),
     blocks: [],
   };
@@ -56,11 +57,12 @@ function parseChain(text) {
     c.blocks.push({
       height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
       prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
-      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 2n, "अज्ञात लेन-देन प्रकार"); return {
+      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 5n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
         txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
         nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
         limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
+        newOwner: hxOr(t.new_owner, 20, ZERO20, "new_owner"), gthr: decOr(t.guardian_threshold, 0n, "guardian_threshold"), guardians: (t.guardians || []).map((g) => hx(g, 20, "guardian")),
         pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
     });
   }
@@ -74,13 +76,21 @@ function txSignable(t) {
       u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
   return cat(enc.encode("TAZVERA-TX-SIGNATURE-V2"), u32(t.version), lp(t.chainId), u8(t.kind), hexToBytes(t.from),
     u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey),
-    t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold)) : hexToBytes(t.ref));
+    t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold))
+    : t.kind === 2 ? hexToBytes(t.ref)
+    : t.kind === 3 ? cat(u64(BigInt(t.guardians.length)), ...t.guardians.map(hexToBytes), u64(t.gthr))
+    : t.kind === 4 ? cat(hexToBytes(t.to), hexToBytes(t.newOwner)) : new Uint8Array(0));
 }
 
 /* ---------- the account state machine (a mirror of the C++ State) ---------- */
-const newAcc = () => ({ bal: 0n, nonce: 0n, limit: 0n, thr: 0n, hold: 0n, widx: 0n, wspent: 0n, pend: { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n } });
-const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend } } : newAcc());
-const hasExt = (a) => a.limit !== 0n || a.thr !== 0n || a.hold !== 0n || a.wspent !== 0n || a.pend.active;
+const noRec = () => ({ active: false, target: ZERO20, ready: 0n });
+const noPg = () => ({ active: false, list: [], thr: 0n, ready: 0n });
+const newAcc = () => ({ bal: 0n, nonce: 0n, limit: 0n, thr: 0n, hold: 0n, widx: 0n, wspent: 0n, pend: { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n },
+  g: { list: [], thr: 0n }, pg: noPg(), votes: new Map(), rec: noRec() });
+const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend }, g: { list: [...a.g.list], thr: a.g.thr }, pg: { ...a.pg, list: [...a.pg.list] }, votes: new Map(a.votes), rec: { ...a.rec } } : newAcc());
+const hasSafetyExt = (a) => a.limit !== 0n || a.thr !== 0n || a.hold !== 0n || a.wspent !== 0n || a.pend.active;
+const hasGuardExt = (a) => a.g.list.length > 0 || a.g.thr !== 0n || a.pg.active || a.votes.size > 0 || a.rec.active;
+const hasExt = (a) => hasSafetyExt(a);
 const heldTotal = (S) => { let t = 0n; for (const h of S.held.values()) t += h.amount; return t; };
 
 function isLoosening(a, n) {
@@ -93,7 +103,7 @@ function isLoosening(a, n) {
 }
 
 function beginBlock(S, h) {
-  const events = [];
+  const events = [], recov = [];
   const due = [...S.held.entries()].filter(([, x]) => x.release <= h)
     .sort((p, q) => (p[1].release < q[1].release ? -1 : p[1].release > q[1].release ? 1 : p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : 0));
   for (const [id, x] of due) {
@@ -107,8 +117,22 @@ function beginBlock(S, h) {
       a.limit = a.pend.limit; a.thr = a.pend.thr; a.hold = a.pend.hold; a.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n };
       if (a.limit === 0n) { a.widx = 0n; a.wspent = 0n; }
     }
+    if (a.pg.active && a.pg.ready <= h) { a.g = { list: a.pg.list, thr: a.pg.thr }; a.pg = noPg(); a.votes = new Map(); }
   }
-  return events;
+  const due2 = [...S.acc.entries()].filter(([, a]) => a.rec.active && a.rec.ready <= h).map(([k, a]) => [a.rec.ready, k])
+    .sort((p, q) => (p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : p[1] < q[1] ? -1 : p[1] > q[1] ? 1 : 0));
+  for (const [, addr] of due2) {
+    const old = S.acc.get(addr); const target = old.rec.target; const amount = old.bal;
+    const tacc = S.acc.get(target); const have = tacc ? tacc.bal : 0n;
+    const ev = { from: addr, to: target, amount, moved: false };
+    old.rec = noRec(); old.votes = new Map();
+    if (amount <= U64MAX - have) {
+      if (amount !== 0n) { old.bal = 0n; const r = cloneAcc(tacc); r.bal = have + amount; S.acc.set(target, r); }
+      old.g = { list: [], thr: 0n }; old.pg = noPg(); ev.moved = true;
+    }
+    recov.push(ev);
+  }
+  return { held: events, recov };
 }
 
 // Returns an error string, or {held, target} after changing S. Nothing is changed when an error is returned.
@@ -116,17 +140,38 @@ function applyTx(S, c, t, h) {
   if (t.version !== c.version || t.chainId !== c.chainId) return "version या chain ID गलत";
   if (t.fee !== c.fee) return "फ़ीस तय दर से अलग है";
   const noTo = t.to === ZERO20, noSafety = t.limit === 0n && t.thr === 0n && t.hold === 0n, noRef = t.ref === ZERO32;
+  const noNew = t.newOwner === ZERO20, noG = t.guardians.length === 0 && t.gthr === 0n;
   if (t.kind === 0) {
     if (t.amount === 0n) return "रकम शून्य है";
     if (t.from === t.to) return "खुद को भेजना मान्य नहीं";
     if (t.amount > U64MAX - t.fee) return "रकम और फ़ीस का जोड़ सीमा से बड़ा";
-    if (!noSafety || !noRef) return "ट्रांसफ़र में अनावश्यक फ़ील्ड भरे हैं";
+    if (!noSafety || !noRef || !noNew || !noG) return "ट्रांसफ़र में अनावश्यक फ़ील्ड भरे हैं";
   } else if (t.kind === 1) {
-    if (t.amount !== 0n || !noTo || !noRef) return "सुरक्षा-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.amount !== 0n || !noTo || !noRef || !noNew || !noG) return "सुरक्षा-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
     if (t.thr === 0n && t.hold !== 0n) return "रोकने की सीमा शून्य है पर रुकने का समय भरा है";
     if (t.thr !== 0n && (t.hold === 0n || t.hold > c.maxHold)) return "रुकने का समय सीमा से बाहर";
+  } else if (t.kind === 2) {
+    if (t.amount !== 0n || !noTo || !noSafety || !noNew || !noG) return "रद्द करने में अनावश्यक फ़ील्ड भरे हैं";
+  } else if (t.kind === 3) {
+    if (t.amount !== 0n || !noTo || !noRef || !noSafety || !noNew) return "guardian-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.guardians.length > c.maxGuardians) return "बहुत ज़्यादा guardian";
+    if (t.guardians.length === 0) { if (t.gthr !== 0n) return "guardian के बिना सीमा शून्य होनी चाहिए"; }
+    else {
+      if (t.gthr === 0n || t.gthr > BigInt(t.guardians.length)) return "सीमा 1 से guardian की गिनती के बीच होनी चाहिए";
+      for (let i = 0; i < t.guardians.length; i++) {
+        if (t.guardians[i] === ZERO20) return "guardian का पता खाली है";
+        if (t.guardians[i] === t.from) return "खाता खुद अपना guardian नहीं हो सकता";
+        if (i > 0 && !(t.guardians[i - 1] < t.guardians[i])) return "guardian क्रम में और अलग-अलग होने चाहिए";
+      }
+    }
+  } else if (t.kind === 4) {
+    if (t.amount !== 0n || !noSafety || !noRef || !noG) return "वापसी-वोट में अनावश्यक फ़ील्ड भरे हैं";
+    if (noTo) return "वोट में वापस दिलाया जाने वाला खाता लिखना ज़रूरी है";
+    if (t.to === t.from) return "खाता अपनी ही वापसी पर वोट नहीं दे सकता";
+    if (noNew) return "वोट में नया पता लिखना ज़रूरी है";
+    if (t.newOwner === t.to) return "नया पता पुराने से अलग होना चाहिए";
   } else {
-    if (t.amount !== 0n || !noTo || !noSafety) return "रद्द करने में अनावश्यक फ़ील्ड भरे हैं";
+    if (!(t.amount === 0n && noTo && noRef && noNew && noG) || !noSafety) return "वापसी-रद्द में अनावश्यक फ़ील्ड भरे हैं";
   }
   if (t.expiry !== 0n && h > t.expiry) return "लेन-देन की अवधि समाप्त";
   const snd = cloneAcc(S.acc.get(t.from));
@@ -154,31 +199,60 @@ function applyTx(S, c, t, h) {
     snd.bal -= t.fee; snd.nonce += 1n;
     if (isLoosening(snd, want)) snd.pend = { active: true, limit: want.limit, thr: want.thr, hold: want.hold, ready: h + c.safetyDelay };
     else { snd.limit = want.limit; snd.thr = want.thr; snd.hold = want.hold; snd.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n }; if (want.limit === 0n) { snd.widx = 0n; snd.wspent = 0n; } }
-  } else {
+  } else if (t.kind === 2) {
     const x = S.held.get(t.ref);
     if (!x || x.from !== t.from) return "इस खाते का ऐसा कोई रुका हुआ ट्रांसफ़र नहीं है";
     const after = snd.bal - t.fee;
     if (after > U64MAX - x.amount) return "वापसी पर बैलेंस सीमा पार करता";
     snd.bal = after + x.amount; snd.nonce += 1n; S.held.delete(t.ref); target = x;
+  } else if (t.kind === 3) {
+    if (snd.rec.active) return "पहले चल रही वापसी रद्द कीजिए";
+    snd.bal -= t.fee; snd.nonce += 1n;
+    const same = snd.g.thr === t.gthr && snd.g.list.length === t.guardians.length && snd.g.list.every((v, i) => v === t.guardians[i]);
+    if (snd.g.list.length === 0 && snd.g.thr === 0n) { snd.g = { list: [...t.guardians], thr: t.gthr }; snd.pg = noPg(); }
+    else if (same) snd.pg = noPg();
+    else snd.pg = { active: true, list: [...t.guardians], thr: t.gthr, ready: h + c.safetyDelay };
+  } else if (t.kind === 4) {
+    const pr0 = S.acc.get(t.to);
+    if (!pr0 || (pr0.g.list.length === 0 && pr0.g.thr === 0n)) return "इस खाते के कोई guardian नहीं हैं";
+    const prot = cloneAcc(pr0);
+    if (!prot.g.list.includes(t.from)) return "भेजने वाला इस खाते का guardian नहीं है";
+    if (prot.rec.active) return "वापसी पहले से इंतज़ार में है";
+    snd.bal -= t.fee; snd.nonce += 1n;
+    prot.votes.set(t.from, t.newOwner);
+    let agree = 0n; for (const v of prot.votes.values()) if (v === t.newOwner) agree += 1n;
+    if (agree >= prot.g.thr) { prot.rec = { active: true, target: t.newOwner, ready: h + c.recoveryDelay }; prot.votes = new Map(); }
+    S.acc.set(t.from, snd); S.acc.set(t.to, prot); S.burned += t.fee;
+    return { held, target };
+  } else {
+    if (!snd.rec.active && snd.votes.size === 0) return "रद्द करने के लिए कोई वापसी नहीं है";
+    snd.bal -= t.fee; snd.nonce += 1n; snd.rec = noRec(); snd.votes = new Map();
   }
   S.acc.set(t.from, snd); S.burned += t.fee;
   return { held, target };
 }
 
 async function stateRoot(S) {
-  let ext = S.held.size > 0; for (const a of S.acc.values()) if (hasExt(a)) { ext = true; break; }
+  let ext = S.held.size > 0, gext = false; for (const a of S.acc.values()) { if (hasSafetyExt(a)) ext = true; if (hasGuardExt(a)) gext = true; }
   const keys = [...S.acc.keys()].sort();
-  if (!ext) {
+  if (!ext && !gext) {
     const parts = [enc.encode("TAZVERA-STATE-V1")];
     for (const k of keys) { const a = S.acc.get(k); parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce)); }
     parts.push(u64(S.burned));
     return toHex(await sha(cat(...parts)));
   }
-  const parts = [enc.encode("TAZVERA-STATE-V2"), u64(BigInt(S.acc.size))];
+  const parts = [enc.encode(gext ? "TAZVERA-STATE-V3" : "TAZVERA-STATE-V2"), u64(BigInt(S.acc.size))];
+  const putG = (list, thr) => { parts.push(u64(BigInt(list.length))); for (const x of list) parts.push(hexToBytes(x)); parts.push(u64(thr)); };
   for (const k of keys) {
     const a = S.acc.get(k);
     parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce), u64(a.limit), u64(a.thr), u64(a.hold), u64(a.widx), u64(a.wspent),
       u8(a.pend.active ? 1 : 0), u64(a.pend.limit), u64(a.pend.thr), u64(a.pend.hold), u64(a.pend.ready));
+    if (gext) {
+      putG(a.g.list, a.g.thr); parts.push(u8(a.pg.active ? 1 : 0)); putG(a.pg.list, a.pg.thr); parts.push(u64(a.pg.ready));
+      parts.push(u64(BigInt(a.votes.size)));
+      for (const gk of [...a.votes.keys()].sort()) parts.push(hexToBytes(gk), hexToBytes(a.votes.get(gk)));
+      parts.push(u8(a.rec.active ? 1 : 0), hexToBytes(a.rec.target), u64(a.rec.ready));
+    }
   }
   parts.push(u64(S.burned), u64(BigInt(S.held.size)));
   for (const id of [...S.held.keys()].sort()) { const x = S.held.get(id); parts.push(hexToBytes(id), hexToBytes(x.from), hexToBytes(x.to), u64(x.amount), u64(x.release)); }
@@ -231,7 +305,12 @@ async function verifyChain(c) {
     if (b.txs.length > c.maxTxs) fail(h, "ब्लॉक में बहुत ज़्यादा लेन-देन हैं");
 
     if (i > 0 && !stateBroken) {
-      for (const ev of beginBlock(S, b.height)) {
+      const be = beginBlock(S, b.height);
+      for (const ev of be.recov) {
+        addHist(ev.from, { height: b.height, kind: ev.moved ? "recMoved" : "recDropped", other: ev.to, amount: ev.amount, fee: 0n, txid: ZERO32 });
+        if (ev.moved) addHist(ev.to, { height: b.height, kind: "recArrived", other: ev.from, amount: ev.amount, fee: 0n, txid: ZERO32 });
+      }
+      for (const ev of be.held) {
         if (ev.refunded) addHist(ev.from, { height: b.height, kind: "refunded", other: ev.to, amount: ev.amount, fee: 0n, txid: ev.id });
         else addHist(ev.to, { height: b.height, kind: "releasedIn", other: ev.from, amount: ev.amount, fee: 0n, txid: ev.id });
       }
@@ -254,7 +333,10 @@ async function verifyChain(c) {
         addHist(t.from, { height: b.height, kind: r.held ? "heldOut" : "sent", other: t.to, amount: t.amount, fee: t.fee, txid: t.txid });
         if (!r.held) addHist(t.to, { height: b.height, kind: "received", other: t.from, amount: t.amount, fee: 0n, txid: t.txid });
       } else if (t.kind === 1) addHist(t.from, { height: b.height, kind: "safety", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid, limit: t.limit, thr: t.thr, hold: t.hold });
-      else addHist(t.from, { height: b.height, kind: "cancelled", other: r.target.to, amount: r.target.amount, fee: t.fee, txid: t.txid });
+      else if (t.kind === 2) addHist(t.from, { height: b.height, kind: "cancelled", other: r.target.to, amount: r.target.amount, fee: t.fee, txid: t.txid });
+      else if (t.kind === 3) addHist(t.from, { height: b.height, kind: "guardians", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid, n: t.guardians.length, thr: t.gthr });
+      else if (t.kind === 4) addHist(t.from, { height: b.height, kind: "voted", other: t.to, amount: 0n, fee: t.fee, txid: t.txid, newOwner: t.newOwner });
+      else addHist(t.from, { height: b.height, kind: "recCancelled", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid });
     }
     if (!stateBroken) {
       const calc = await stateRoot(S);
@@ -309,9 +391,13 @@ function renderAccounts(c, r) {
   for (const [addr, a] of rows) {
     const btn = el("button", "acct"); btn.type = "button";
     btn.append(el("span", "mono", addr)); btn.append(el("span", "num", fmt(a.bal) + " utzv"));
-    if (hasExt(a)) {
+    if (hasSafetyExt(a)) {
       btn.append(el("span", "note", "सुरक्षा: " + safetyText(a.limit, a.thr, a.hold)));
       if (a.pend.active) btn.append(el("span", "note warnline", "इंतज़ार में बदलाव (ढीला करना): " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " · ब्लॉक #" + a.pend.ready + " से लागू"));
+    }
+    if (hasGuardExt(a)) {
+      btn.append(el("span", "note", "भरोसेमंद लोग: " + guardText(a.g)));
+      if (a.rec.active) btn.append(el("span", "note warnline", "वापसी इंतज़ार में → " + a.rec.target + " · ब्लॉक #" + a.rec.ready + " पर"));
     }
     btn.addEventListener("click", () => { $("stmt-input").value = addr; showStatement(addr); $("stmt-panel").scrollIntoView({ behavior: "smooth", block: "start" }); });
     box.append(btn);
@@ -326,19 +412,23 @@ function renderAccounts(c, r) {
   box.append(el("p", "note", "जले हुए (burn) कुल: " + fmt(r.S.burned) + " utzv"));
 }
 
-const KIND_TEXT = { sent: "भेजा", received: "मिला", heldOut: "भेजा (रुका हुआ)", releasedIn: "मिला (रुकावट के बाद)", cancelled: "रुका हुआ ट्रांसफ़र रद्द, पैसा लौटा", refunded: "रुका हुआ ट्रांसफ़र वापस लौटा", safety: "सुरक्षा नियम बदले" };
+const KIND_TEXT = { sent: "भेजा", received: "मिला", heldOut: "भेजा (रुका हुआ)", releasedIn: "मिला (रुकावट के बाद)", cancelled: "रुका हुआ ट्रांसफ़र रद्द, पैसा लौटा", refunded: "रुका हुआ ट्रांसफ़र वापस लौटा", safety: "सुरक्षा नियम बदले", guardians: "भरोसेमंद लोग (guardian) तय/बदले", voted: "किसी के खाते की वापसी पर वोट दिया", recCancelled: "वापसी रद्द की", recMoved: "वापसी: खाते की रकम नए पते पर गई", recArrived: "वापसी: पुराने खाते से रकम आई", recDropped: "वापसी हुई पर रकम नहीं हिली (नया पता रकम नहीं रख सकता)" };
+const NOAMT = new Set(["safety", "guardians", "voted", "recCancelled"]);
+function guardText(g) { return g.list.length ? g.thr + " / " + g.list.length + " भरोसेमंद लोग चाहिए" : "कोई guardian नहीं"; }
 function showStatement(raw) {
   const out = $("stmt-out"); out.replaceChildren();
   if (!current) return;
   const addr = String(raw).trim().toLowerCase().replace(/^0x/, "");
   if (!isHex(addr, 40)) { out.append(el("p", "fails", "पता 40 अक्षरों का hex होना चाहिए (0-9, a-f)।")); return; }
   const r = current.report; const a = r.S.acc.get(addr) || newAcc(); const hist = r.history.get(addr) || [];
-  let rec = 0n, sent = 0n, fees = 0n, back = 0n, heldOut = 0n, heldIn = 0n;
+  let rec = 0n, sent = 0n, fees = 0n, back = 0n, heldOut = 0n, heldIn = 0n, recIn = 0n, recOut = 0n;
   for (const e of hist) {
     fees += e.fee;
     if (e.kind === "sent" || e.kind === "heldOut") sent += e.amount;
     if (e.kind === "received" || e.kind === "releasedIn") rec += e.amount;
     if (e.kind === "cancelled" || e.kind === "refunded") back += e.amount;
+    if (e.kind === "recArrived") recIn += e.amount;
+    if (e.kind === "recMoved") recOut += e.amount;
   }
   for (const x of r.S.held.values()) { if (x.from === addr) heldOut += x.amount; if (x.to === addr) heldIn += x.amount; }
   out.append(el("p", "mono", addr));
@@ -347,17 +437,29 @@ function showStatement(raw) {
   if (back) items.push(["रद्द/वापस हुआ", fmt(back)]);
   if (heldOut) items.push(["रुका हुआ (भेजा)", fmt(heldOut)]);
   if (heldIn) items.push(["रुका हुआ (आने वाला)", fmt(heldIn)]);
+  if (recIn) items.push(["वापसी से आया", fmt(recIn)]);
+  if (recOut) items.push(["वापसी में गया", fmt(recOut)]);
   for (const [k, v] of items) { const s = el("div", "stat"); s.append(el("span", "", k)); s.append(el("b", "", v)); st.append(s); }
   out.append(st);
-  if (hasExt(a)) out.append(el("p", "note", "इस खाते की सुरक्षा: " + safetyText(a.limit, a.thr, a.hold) + (a.pend.active ? " · इंतज़ार में: " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " (ब्लॉक #" + a.pend.ready + " से)" : "")));
+  if (hasSafetyExt(a)) out.append(el("p", "note", "इस खाते की सुरक्षा: " + safetyText(a.limit, a.thr, a.hold) + (a.pend.active ? " · इंतज़ार में: " + safetyText(a.pend.limit, a.pend.thr, a.pend.hold) + " (ब्लॉक #" + a.pend.ready + " से)" : "")));
+  if (hasGuardExt(a)) {
+    let m = "इस खाते के guardian: " + guardText(a.g);
+    if (a.rec.active) m += " · वापसी इंतज़ार में: नया पता " + a.rec.target + " (ब्लॉक #" + a.rec.ready + " पर लागू)";
+    else if (a.votes.size) m += " · अब तक " + a.votes.size + " वोट";
+    if (a.pg.active) m += " · guardian बदलाव इंतज़ार में (ब्लॉक #" + a.pg.ready + " से): " + guardText(a.pg);
+    out.append(el("p", "note", m));
+  }
   if (!hist.length) { out.append(el("p", "muted", "इस पते का कोई लेन-देन इस चेन में नहीं मिला।")); return; }
   for (const e of hist) {
-    const d = el("div", "entry"); const incoming = e.kind === "received" || e.kind === "releasedIn" || e.kind === "cancelled" || e.kind === "refunded";
-    const head = e.kind === "safety" ? KIND_TEXT.safety : (incoming ? "+" : "−") + fmt(e.amount) + " utzv · " + KIND_TEXT[e.kind];
+    const d = el("div", "entry"); const incoming = e.kind === "received" || e.kind === "releasedIn" || e.kind === "cancelled" || e.kind === "refunded" || e.kind === "recArrived";
+    const head = NOAMT.has(e.kind) ? KIND_TEXT[e.kind] : (incoming ? "+" : "−") + fmt(e.amount) + " utzv · " + KIND_TEXT[e.kind];
     d.append(el("span", incoming ? "in" : "out", head + " · ब्लॉक #" + e.height + (e.fee ? " · फ़ीस " + fmt(e.fee) : "")));
-    if (e.kind === "safety") d.append(el("span", "note", safetyText(e.limit, e.thr, e.hold) + (e.limit === 0n && e.thr === 0n ? "" : "")));
-    else d.append(el("span", "mono muted", (e.kind === "received" || e.kind === "releasedIn" ? "से: " : "को: ") + e.other));
-    d.append(el("span", "mono muted", "txid: " + e.txid));
+    if (e.kind === "safety") d.append(el("span", "note", safetyText(e.limit, e.thr, e.hold)));
+    else if (e.kind === "guardians") d.append(el("span", "note", e.n ? e.thr + " / " + e.n + " भरोसेमंद लोग चाहिए" : "सभी guardian हटाने का अनुरोध"));
+    else if (e.kind === "voted") { d.append(el("span", "mono muted", "खाता: " + e.other)); d.append(el("span", "mono muted", "नया पता: " + e.newOwner)); }
+    else if (e.kind === "recCancelled") d.append(el("span", "note", "चल रही वापसी रोक दी गई"));
+    else d.append(el("span", "mono muted", (e.kind === "received" || e.kind === "releasedIn" || e.kind === "recArrived" ? "से: " : "को: ") + e.other));
+    if (e.txid !== ZERO32) d.append(el("span", "mono muted", "txid: " + e.txid));
     out.append(d);
   }
 }
@@ -372,12 +474,17 @@ function blockCard(b) {
   add("hash", b.hash, true); add("previous hash", b.prev, true); add("state root", b.root, true);
   add("समय", b.ts === 0n ? "genesis (0)" : new Date(Number(b.ts) * 1000).toLocaleString("hi-IN") + " (" + b.ts + ")");
   for (const t of b.txs) {
-    const label = t.kind === 0 ? "ट्रांसफ़र" : t.kind === 1 ? "सुरक्षा नियम" : "रुका ट्रांसफ़र रद्द";
+    const label = ["ट्रांसफ़र", "सुरक्षा नियम", "रुका ट्रांसफ़र रद्द", "guardian तय", "वापसी पर वोट", "वापसी रद्द"][t.kind];
     add(label + " " + short(t.txid, 8), "", false);
     const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from));
     if (t.kind === 0) { dd.append(el("div", "mono", "को: " + t.to)); dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
     else if (t.kind === 1) dd.append(el("div", "", safetyText(t.limit, t.thr, t.hold) + " · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
-    else { dd.append(el("div", "mono", "रद्द: " + t.ref)); dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
+    else if (t.kind === 2) { dd.append(el("div", "mono", "रद्द: " + t.ref)); dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
+    else {
+      if (t.kind === 3) dd.append(el("div", "", t.guardians.length ? t.gthr + " / " + t.guardians.length + " चाहिए: " + t.guardians.map((g) => short(g, 6)).join(", ") : "सभी guardian हटाना"));
+      if (t.kind === 4) { dd.append(el("div", "mono", "खाता: " + t.to)); dd.append(el("div", "mono", "नया पता: " + t.newOwner)); }
+      dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
+    }
   }
   d.append(dl); return d;
 }
@@ -420,6 +527,12 @@ function tamper(id) {
   openChain(JSON.stringify(j));
 }
 $("btn-tamper").addEventListener("click", () => tamper("demo-data"));
+$("btn-recovery").addEventListener("click", () => openChain($("demo-recovery").textContent));
+$("btn-tamper-recovery").addEventListener("click", () => { // flip the new address in the first recovery vote
+  const j = JSON.parse($("demo-recovery").textContent);
+  const t = j.blocks.flatMap((b) => b.transactions).find((x) => x.kind === "4"); t.new_owner = t.from;
+  openChain(JSON.stringify(j));
+});
 $("btn-tamper-safety").addEventListener("click", () => tamper("demo-safety"));
 $("stmt-form").addEventListener("submit", (ev) => { ev.preventDefault(); showStatement($("stmt-input").value); });
 $("btn-more").addEventListener("click", () => current && renderBlocks(current.chain, true));

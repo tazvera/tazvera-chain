@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 namespace taz {
 namespace {
 constexpr Amount MAX_AMOUNT = std::numeric_limits<Amount>::max();
@@ -50,8 +51,8 @@ Amount State::held_total() const {
     }
     return total;
 }
-std::vector<HeldEvent> State::begin_block(std::uint64_t height) {
-    std::vector<HeldEvent> events;
+BlockEvents State::begin_block(std::uint64_t height) {
+    BlockEvents events;
     // 1) release every hold that is due, in a fixed order: (release height, txid)
     std::vector<std::pair<std::uint64_t, Hash32>> due;
     for (const auto& [id, h] : held_) if (h.release_height <= height) due.emplace_back(h.release_height, id);
@@ -67,14 +68,38 @@ std::vector<HeldEvent> State::begin_block(std::uint64_t height) {
         } else {
             accounts_[h.to].balance = have + h.amount;
         }
-        events.push_back(ev);
+        events.held.push_back(ev);
     }
-    // 2) apply every loosening whose waiting time is over
+    // 2) apply every loosening / guardian change whose waiting time is over
     for (auto& [_, acc] : accounts_) {
         if (acc.pending.active && acc.pending.ready_height <= height) {
             acc.safety = acc.pending.config; acc.pending = PendingSafety{};
             if (acc.safety.daily_limit == 0) { acc.window_index = 0; acc.window_spent = 0; }
         }
+        if (acc.pending_guardians.active && acc.pending_guardians.ready_height <= height) {
+            acc.guardians = acc.pending_guardians.config; acc.pending_guardians = PendingGuardians{};
+            acc.votes.clear(); // votes belonged to the old list of guardians
+        }
+    }
+    // 3) carry out every agreed recovery whose waiting time is over, in a fixed order: (ready height, address)
+    std::vector<std::pair<std::uint64_t, Address>> recoveries;
+    for (const auto& [addr, acc] : accounts_) if (acc.recovery.active && acc.recovery.ready_height <= height) recoveries.emplace_back(acc.recovery.ready_height, addr);
+    std::sort(recoveries.begin(), recoveries.end());
+    for (const auto& [_, addr] : recoveries) {
+        Account& old = accounts_.at(addr);
+        const Address target = old.recovery.target;
+        const Amount amount = old.balance;
+        const auto tit = accounts_.find(target);
+        const Amount have = tit == accounts_.end() ? 0 : tit->second.balance;
+        RecoveryEvent ev{addr, target, amount, false};
+        old.recovery = PendingRecovery{}; old.votes.clear();
+        if (amount <= MAX_AMOUNT - have) {
+            if (amount != 0) { old.balance = 0; accounts_[target].balance = have + amount; }
+            old.guardians = GuardianConfig{}; old.pending_guardians = PendingGuardians{}; // the old key is retired
+            ev.moved = true;
+        }
+        if (accounts_.at(addr).is_default()) accounts_.erase(addr); // keep the stored form canonical
+        events.recoveries.push_back(ev);
     }
     return events;
 }
@@ -138,15 +163,54 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         accounts_[tx.from] = sender;
         break;
     }
+    case TxKind::SetGuardians: {
+        if (sender.recovery.active) return fail("cancel the pending recovery first");
+        const GuardianConfig wanted{tx.guardians, tx.guardian_threshold};
+        sender.balance -= tx.fee; sender.nonce += 1;
+        if (sender.guardians.is_default()) { // first-time setup is immediate
+            sender.guardians = wanted; sender.pending_guardians = PendingGuardians{};
+        } else if (wanted == sender.guardians) { // same list again: cancels a waiting change
+            sender.pending_guardians = PendingGuardians{};
+        } else { // any change of an existing list waits, so a thief cannot swap in his own helpers at once
+            sender.pending_guardians = PendingGuardians{true, wanted, height + SAFETY_DELAY_BLOCKS};
+        }
+        accounts_[tx.from] = sender;
+        break;
+    }
+    case TxKind::RecoveryVote: {
+        const auto pit = accounts_.find(tx.to);
+        if (pit == accounts_.end() || pit->second.guardians.is_default()) return fail("this account has no guardians");
+        Account prot = pit->second;
+        if (!std::binary_search(prot.guardians.list.begin(), prot.guardians.list.end(), tx.from)) return fail("sender is not a guardian of this account");
+        if (prot.recovery.active) return fail("a recovery is already waiting");
+        sender.balance -= tx.fee; sender.nonce += 1;
+        prot.votes[tx.from] = tx.new_owner;
+        std::uint64_t agree = 0;
+        for (const auto& [_, target] : prot.votes) if (target == tx.new_owner) ++agree;
+        if (agree >= prot.guardians.threshold) {
+            prot.recovery = PendingRecovery{true, tx.new_owner, height + RECOVERY_DELAY_BLOCKS};
+            prot.votes.clear();
+        }
+        accounts_[tx.from] = sender;   // sender and protected account are different (shape rule), so order is free
+        accounts_[tx.to] = prot;
+        break;
+    }
+    case TxKind::RecoveryCancel: {
+        if (!sender.recovery.active && sender.votes.empty()) return fail("no recovery to cancel");
+        sender.balance -= tx.fee; sender.nonce += 1;
+        sender.recovery = PendingRecovery{}; sender.votes.clear();
+        accounts_[tx.from] = sender;
+        break;
+    }
     }
     burned_ += tx.fee;
     result.ok = true; result.burned = tx.fee; return result;
 }
 Hash32 State::state_root() const {
-    bool extended = !held_.empty();
-    for (const auto& [_, a] : accounts_) if (a.has_extension()) { extended = true; break; }
+    bool safety_ext = !held_.empty(), guardian_ext = false;
+    for (const auto& [_, a] : accounts_) { if (a.has_safety_extension()) safety_ext = true; if (a.has_guardian_extension()) guardian_ext = true; }
     std::vector<std::uint8_t> bytes;
-    if (!extended) {
+    if (!safety_ext && !guardian_ext) {
         // Identical to the v1 encoding, so chains that only use plain transfers keep their old roots.
         constexpr std::string_view domain = "TAZVERA-STATE-V1";
         bytes.insert(bytes.end(), domain.begin(), domain.end());
@@ -157,23 +221,34 @@ Hash32 State::state_root() const {
         put_u64(bytes, burned_);
         return sha256(bytes);
     }
-    constexpr std::string_view domain = "TAZVERA-STATE-V2"; // fully length-prefixed: no two states share an encoding
+    // V2 (safety rules) is unchanged; V3 appends the guardian fields to every account. Fully length-prefixed.
+    const std::string_view domain = guardian_ext ? "TAZVERA-STATE-V3" : "TAZVERA-STATE-V2";
     bytes.insert(bytes.end(), domain.begin(), domain.end());
     put_u64(bytes, accounts_.size());
+    auto put_addr = [&bytes](const Address& a) { bytes.insert(bytes.end(), a.begin(), a.end()); };
+    auto put_guardians = [&](const GuardianConfig& g) { put_u64(bytes, g.list.size()); for (const Address& a : g.list) put_addr(a); put_u64(bytes, g.threshold); };
     for (const auto& [address, a] : accounts_) {
-        bytes.insert(bytes.end(), address.begin(), address.end());
+        put_addr(address);
         put_u64(bytes, a.balance); put_u64(bytes, a.nonce);
         put_u64(bytes, a.safety.daily_limit); put_u64(bytes, a.safety.hold_threshold); put_u64(bytes, a.safety.hold_blocks);
         put_u64(bytes, a.window_index); put_u64(bytes, a.window_spent);
         put_u8(bytes, a.pending.active ? 1 : 0);
         put_u64(bytes, a.pending.config.daily_limit); put_u64(bytes, a.pending.config.hold_threshold);
         put_u64(bytes, a.pending.config.hold_blocks); put_u64(bytes, a.pending.ready_height);
+        if (guardian_ext) {
+            put_guardians(a.guardians);
+            put_u8(bytes, a.pending_guardians.active ? 1 : 0);
+            put_guardians(a.pending_guardians.config); put_u64(bytes, a.pending_guardians.ready_height);
+            put_u64(bytes, a.votes.size());
+            for (const auto& [g, target] : a.votes) { put_addr(g); put_addr(target); }
+            put_u8(bytes, a.recovery.active ? 1 : 0); put_addr(a.recovery.target); put_u64(bytes, a.recovery.ready_height);
+        }
     }
     put_u64(bytes, burned_);
     put_u64(bytes, held_.size());
     for (const auto& [id, h] : held_) {
         bytes.insert(bytes.end(), id.begin(), id.end());
-        bytes.insert(bytes.end(), h.from.begin(), h.from.end()); bytes.insert(bytes.end(), h.to.begin(), h.to.end());
+        put_addr(h.from); put_addr(h.to);
         put_u64(bytes, h.amount); put_u64(bytes, h.release_height);
     }
     return sha256(bytes);

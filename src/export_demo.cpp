@@ -1,9 +1,12 @@
 // Builds a tiny throw-away chain with fresh random keys and writes it as JSON for the explorer.
-// Usage: taz_export_demo [output.json] [--safety]
+// Usage: taz_export_demo [output.json] [--safety | --recovery]
 //   --safety  also exercises the spending limit, a held transfer that is cancelled, a held transfer
 //             that is released, and a loosening of the rules that has to wait.
+//   --recovery  Alice names three trusted people; a first recovery attempt is cancelled by her; later she
+//             "loses" her key and two of the three bring her funds to a new key.
 #include "taz/export.hpp"
 #include "taz/crypto.hpp"
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -24,17 +27,43 @@ Transaction set_safety(const Key& k, Amount limit, Amount thr, std::uint64_t hol
 Transaction cancel(const Key& k, const Hash32& ref, std::uint64_t nonce) {
     Transaction tx; tx.kind = TxKind::CancelHeld; tx.ref = ref; tx.nonce = nonce; signit(k, tx); return tx;
 }
+Transaction set_guardians(const Key& k, std::vector<Address> list, std::uint64_t thr, std::uint64_t nonce) {
+    std::sort(list.begin(), list.end());
+    Transaction tx; tx.kind = TxKind::SetGuardians; tx.guardians = std::move(list); tx.guardian_threshold = thr; tx.nonce = nonce; signit(k, tx); return tx;
+}
+Transaction vote(const Key& g, const Address& account, const Address& new_owner, std::uint64_t nonce) {
+    Transaction tx; tx.kind = TxKind::RecoveryVote; tx.to = account; tx.new_owner = new_owner; tx.nonce = nonce; signit(g, tx); return tx;
+}
+Transaction cancel_recovery(const Key& k, std::uint64_t nonce) {
+    Transaction tx; tx.kind = TxKind::RecoveryCancel; tx.nonce = nonce; signit(k, tx); return tx;
+}
 }
 int main(int argc, char** argv) {
-    std::string path = "tazvera_demo_chain.json"; bool with_safety = false;
-    for (int i = 1; i < argc; ++i) { if (std::strcmp(argv[i], "--safety") == 0) with_safety = true; else path = argv[i]; }
-    Key alice, bob;
-    if (!new_key(alice) || !new_key(bob)) { std::cerr << "key generation failed\n"; return 1; }
+    std::string path = "tazvera_demo_chain.json"; bool with_safety = false, with_recovery = false;
+    for (int i = 1; i < argc; ++i) { if (std::strcmp(argv[i], "--safety") == 0) with_safety = true; else if (std::strcmp(argv[i], "--recovery") == 0) with_recovery = true; else path = argv[i]; }
+    Key alice, bob, charlie, dave, alice2, eve;
+    if (!new_key(alice) || !new_key(bob) || !new_key(charlie) || !new_key(dave) || !new_key(alice2) || !new_key(eve)) { std::cerr << "key generation failed\n"; return 1; }
     Chain chain;
     if (!chain.init_genesis(alice.addr, 100000000, bob.addr, 0)) return 1;
     std::int64_t ts = 1700000000; auto next = [&ts]() { return ts += 100; };
     bool ok = true;
-    if (!with_safety) {
+    if (with_recovery) {
+        // 1: Alice gives Bob, Charlie and Dave a little money so that they can pay fees.
+        ok = chain.append_block({transfer(alice, bob.addr, 2000000, 0), transfer(alice, charlie.addr, 2000000, 1), transfer(alice, dave.addr, 2000000, 2)}, next()).ok;
+        // 2: Alice names the three as guardians: any 2 of them can bring her funds to a new key.
+        ok = ok && chain.append_block({set_guardians(alice, {bob.addr, charlie.addr, dave.addr}, 2, 3)}, next()).ok;
+        // 3-4: a first attempt (for a stranger's address) gets two votes, but Alice is still here and cancels it.
+        ok = ok && chain.append_block({vote(bob, alice.addr, eve.addr, 0)}, next()).ok;
+        ok = ok && chain.append_block({vote(charlie, alice.addr, eve.addr, 0)}, next()).ok;
+        ok = ok && chain.append_block({cancel_recovery(alice, 4)}, next()).ok;
+        // 6-7: later Alice loses her key. Dave votes for her NEW key; Bob agrees.
+        ok = ok && chain.append_block({vote(dave, alice.addr, alice2.addr, 0)}, next()).ok;
+        ok = ok && chain.append_block({vote(bob, alice.addr, alice2.addr, 1)}, next()).ok;
+        // Nobody cancels, so after RECOVERY_DELAY_BLOCKS the funds move to the new key.
+        for (std::uint64_t i = 0; ok && i < RECOVERY_DELAY_BLOCKS; ++i) ok = chain.append_block({}, next()).ok;
+        // The new key works at once.
+        ok = ok && chain.append_block({transfer(alice2, bob.addr, 1500000, 0)}, next()).ok;
+    } else if (!with_safety) {
         ok = chain.append_block({transfer(alice, bob.addr, 5000000, 0)}, next()).ok
           && chain.append_block({}, next()).ok
           && chain.append_block({transfer(bob, alice.addr, 1200000, 0)}, next()).ok
@@ -56,12 +85,13 @@ int main(int argc, char** argv) {
         // A raised limit is only a request: it waits SAFETY_DELAY_BLOCKS before it counts.
         ok = ok && chain.append_block({set_safety(alice, 50000000, 3000000, 5, 5)}, next()).ok;
     }
-    secure_wipe(alice.sk); secure_wipe(bob.sk); // the demo keys are never saved
+    for (Key* k : {&alice, &bob, &charlie, &dave, &alice2, &eve}) secure_wipe(k->sk); // the demo keys are never saved
     if (!ok) { std::cerr << "demo chain failed\n"; return 1; }
     std::ofstream out(path, std::ios::binary);
     out << to_json(chain);
     if (!out) { std::cerr << "could not write " << path << "\n"; return 1; }
     std::cout << "Wrote " << path << " (" << chain.blocks().size() << " blocks)\n"
               << "Alice: " << to_hex(alice.addr) << "\nBob:   " << to_hex(bob.addr) << "\n";
+    if (with_recovery) std::cout << "Charlie: " << to_hex(charlie.addr) << "\nDave:  " << to_hex(dave.addr) << "\nAlice (new key): " << to_hex(alice2.addr) << "\n";
     return 0;
 }
