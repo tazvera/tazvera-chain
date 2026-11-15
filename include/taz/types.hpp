@@ -22,4 +22,8 @@ inline constexpr std::size_t MAX_BLOCK_TXS = 10000; // prototype DoS bound, not 
 inline constexpr std::uint64_t LIMIT_WINDOW_BLOCKS = 1000;    // length of one "day" for the spending limit
 inline constexpr std::uint64_t MAX_HOLD_BLOCKS = 100000;      // longest allowed hold on a large transfer
 inline constexpr std::uint64_t SAFETY_DELAY_BLOCKS = 500;     // delay before a loosening of the rules takes effect
+// Guardian (family) recovery. Also in blocks. Recovery is deliberately faster than a loosening of the
+// rules, because the person has already lost the key; the owner can still cancel while it waits.
+inline constexpr std::size_t MAX_GUARDIANS = 5;               // most trusted people one account may name
+inline constexpr std::uint64_t RECOVERY_DELAY_BLOCKS = 300;   // time the owner has to cancel an agreed recovery
 }

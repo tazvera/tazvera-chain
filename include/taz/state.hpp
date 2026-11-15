@@ -14,6 +14,17 @@ struct SafetyConfig {
 // A loosening of the rules (higher limit, higher threshold, shorter hold, or switching a rule off)
 // does not take effect at once: a thief with a stolen key must not be able to lift the limits instantly.
 struct PendingSafety { bool active{false}; SafetyConfig config{}; std::uint64_t ready_height{0}; };
+// The trusted people ("guardians") who may help the owner back into the account after the key is lost.
+struct GuardianConfig {
+    std::vector<Address> list{};      // strictly ascending
+    std::uint64_t threshold{0};       // how many of them must agree
+    bool is_default() const noexcept { return list.empty() && threshold == 0; }
+    friend bool operator==(const GuardianConfig&, const GuardianConfig&) = default;
+};
+// Changing the guardians is always delayed (a thief must not be able to name his own helpers at once).
+struct PendingGuardians { bool active{false}; GuardianConfig config{}; std::uint64_t ready_height{0}; };
+// An agreed recovery that is waiting out its delay; the owner may cancel until ready_height.
+struct PendingRecovery { bool active{false}; Address target{}; std::uint64_t ready_height{0}; };
 struct Account {
     Amount balance{0};
     std::uint64_t nonce{0};
@@ -21,11 +32,22 @@ struct Account {
     std::uint64_t window_index{0};    // which limit window window_spent belongs to (only meaningful while limited)
     Amount window_spent{0};
     PendingSafety pending{};
-    bool has_extension() const noexcept { return !safety.is_default() || window_spent != 0 || pending.active; }
+    GuardianConfig guardians{};
+    PendingGuardians pending_guardians{};
+    std::map<Address, Address> votes{};   // guardian -> the new address he voted for (cleared when agreed)
+    PendingRecovery recovery{};
+    bool has_safety_extension() const noexcept { return !safety.is_default() || window_spent != 0 || pending.active; }
+    bool has_guardian_extension() const noexcept {
+        return !guardians.is_default() || pending_guardians.active || !votes.empty() || recovery.active;
+    }
+    bool has_extension() const noexcept { return has_safety_extension() || has_guardian_extension(); }
     bool is_default() const noexcept { return balance == 0 && nonce == 0 && !has_extension(); }
 };
 struct HeldTransfer { Address from{}; Address to{}; Amount amount{0}; std::uint64_t release_height{0}; };
 struct HeldEvent { Hash32 txid{}; Address from{}; Address to{}; Amount amount{0}; bool refunded{false}; };
+// A recovery that came due: the whole spendable balance moved (or, if the new address could not hold it, nothing did).
+struct RecoveryEvent { Address from{}; Address to{}; Amount amount{0}; bool moved{false}; };
+struct BlockEvents { std::vector<HeldEvent> held; std::vector<RecoveryEvent> recoveries; };
 struct ApplyResult { bool ok{false}; std::string error; Amount burned{0}; bool held{false}; };
 
 class State {
@@ -42,7 +64,7 @@ public:
     Amount held_total() const;        // funds waiting inside held transfers
     const std::map<Hash32, HeldTransfer>& held() const noexcept { return held_; }
     // Must be called once at the start of every block, before its transactions.
-    std::vector<HeldEvent> begin_block(std::uint64_t height);
+    BlockEvents begin_block(std::uint64_t height);
     ApplyResult apply(const Transaction& tx, std::uint64_t current_height);
     Hash32 state_root() const;
 private:

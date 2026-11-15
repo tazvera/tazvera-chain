@@ -28,15 +28,18 @@ std::string snum(std::int64_t v) { return q(std::to_string(v)); }
 }
 
 std::string to_json(const Chain& chain) {
-    bool uses_safety = false;
-    for (const Block& b : chain.blocks()) for (const Transaction& tx : b.transactions) if (tx.kind != TxKind::Transfer) uses_safety = true;
+    int level = 1; // 1 = plain transfers only, 2 = safety rules, 3 = guardian recovery
+    for (const Block& b : chain.blocks()) for (const Transaction& tx : b.transactions) {
+        if (tx.kind >= TxKind::SetGuardians) level = 3; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
+    }
     std::string j;
-    j += std::string("{\n  \"format\": \"") + (uses_safety ? "tazvera-chain-export-v2" : "tazvera-chain-export-v1") + "\",\n";
+    j += "{\n  \"format\": \"tazvera-chain-export-v" + std::to_string(level) + "\",\n";
     j += "  \"chain_id\": " + q(CHAIN_ID) + ",\n";
     j += "  \"protocol_version\": " + num(PROTOCOL_VERSION) + ",\n";
     j += "  \"params\": {\"fee_transfer_v1\": " + num(FEE_TRANSFER_V1) + ", \"max_block_txs\": " + num(MAX_BLOCK_TXS)
        + ", \"limit_window_blocks\": " + num(LIMIT_WINDOW_BLOCKS) + ", \"max_hold_blocks\": " + num(MAX_HOLD_BLOCKS)
-       + ", \"safety_delay_blocks\": " + num(SAFETY_DELAY_BLOCKS) + "},\n";
+       + ", \"safety_delay_blocks\": " + num(SAFETY_DELAY_BLOCKS)
+       + ", \"max_guardians\": " + num(MAX_GUARDIANS) + ", \"recovery_delay_blocks\": " + num(RECOVERY_DELAY_BLOCKS) + "},\n";
     j += "  \"genesis_balances\": [";
     bool first = true;
     for (const auto& [addr, bal] : chain.genesis_balances()) {
@@ -67,6 +70,9 @@ std::string to_json(const Chain& chain) {
             j += "\"nonce\": " + num(tx.nonce) + ", \"expiry_height\": " + num(tx.expiry_height) + ", ";
             j += "\"daily_limit\": " + num(tx.daily_limit) + ", \"hold_threshold\": " + num(tx.hold_threshold) + ", ";
             j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", \"ref\": " + hex(tx.ref) + ", ";
+            j += "\"new_owner\": " + hex(tx.new_owner) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
+            for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
+            j += "], ";
             j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
         }
         j += b.transactions.empty() ? "]\n    }" : "\n      ]\n    }";
@@ -84,9 +90,14 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
     };
     for (const Block& b : chain.blocks()) {
         if (b.height == 0) continue;
-        for (const HeldEvent& ev : st.begin_block(b.height)) {
+        const BlockEvents events = st.begin_block(b.height);
+        for (const HeldEvent& ev : events.held) {
             if (ev.refunded) { if (ev.from == address) add(b.height, ev.txid, ev.to, EntryKind::Refunded, ev.amount, 0); }
             else if (ev.to == address) add(b.height, ev.txid, ev.from, EntryKind::ReleasedIn, ev.amount, 0);
+        }
+        for (const RecoveryEvent& ev : events.recoveries) {
+            if (ev.from == address) add(b.height, Hash32{}, ev.to, ev.moved ? EntryKind::RecoveryMoved : EntryKind::RecoveryDropped, ev.amount, 0);
+            if (ev.to == address && ev.moved) add(b.height, Hash32{}, ev.from, EntryKind::RecoveryArrived, ev.amount, 0);
         }
         for (const Transaction& tx : b.transactions) {
             std::optional<HeldTransfer> target;
@@ -98,6 +109,9 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
                 s.total_fees += tx.fee;
                 if (tx.kind == TxKind::Transfer) add(b.height, id, tx.to, res.held ? EntryKind::HeldOut : EntryKind::Sent, tx.amount, tx.fee);
                 else if (tx.kind == TxKind::SetSafety) add(b.height, id, Address{}, EntryKind::SafetyChanged, 0, tx.fee);
+                else if (tx.kind == TxKind::SetGuardians) add(b.height, id, Address{}, EntryKind::GuardiansChanged, 0, tx.fee);
+                else if (tx.kind == TxKind::RecoveryVote) add(b.height, id, tx.to, EntryKind::RecoveryVoted, 0, tx.fee);
+                else if (tx.kind == TxKind::RecoveryCancel) add(b.height, id, Address{}, EntryKind::RecoveryCancelled, 0, tx.fee);
                 else if (target) add(b.height, id, target->to, EntryKind::Cancelled, target->amount, tx.fee);
             }
             if (tx.kind == TxKind::Transfer && tx.to == address && !res.held) add(b.height, id, tx.from, EntryKind::Received, tx.amount, 0);
@@ -109,7 +123,10 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
             case EntryKind::Sent: case EntryKind::HeldOut: s.total_sent += e.amount; break;
             case EntryKind::Received: case EntryKind::ReleasedIn: s.total_received += e.amount; break;
             case EntryKind::Cancelled: case EntryKind::Refunded: s.total_refunded += e.amount; break;
-            case EntryKind::SafetyChanged: break;
+            case EntryKind::RecoveryArrived: s.recovered_in += e.amount; break;
+            case EntryKind::RecoveryMoved: s.recovered_out += e.amount; break;
+            case EntryKind::SafetyChanged: case EntryKind::GuardiansChanged: case EntryKind::RecoveryVoted:
+            case EntryKind::RecoveryCancelled: case EntryKind::RecoveryDropped: break;
         }
     }
     for (const auto& [_, h] : st.held()) {

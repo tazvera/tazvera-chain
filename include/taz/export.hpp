@@ -5,7 +5,8 @@ namespace taz {
 // Serialises the whole chain for the offline explorer. Every number is a decimal STRING
 // (uint64 does not fit in a JS number) and every byte array is lowercase hex.
 // A chain that only contains plain transfers is written as format "v1"; one that uses the
-// safety rules is written as "v2" (older explorers refuse v2 instead of mis-verifying it).
+// safety rules is written as "v2"; one that uses guardian recovery as "v3" (older explorers refuse
+// a newer format instead of mis-verifying it).
 std::string to_json(const Chain& chain);
 
 enum class EntryKind {
@@ -16,6 +17,12 @@ enum class EntryKind {
     Cancelled,   // the owner took back a held transfer
     Refunded,    // a hold could not be delivered and went back to the sender
     SafetyChanged,
+    GuardiansChanged,   // the owner set or changed the trusted people
+    RecoveryVoted,      // this address (as a guardian) voted to recover someone else's account
+    RecoveryCancelled,  // the owner stopped a recovery
+    RecoveryMoved,      // this account's funds were moved to a new address by an agreed recovery
+    RecoveryArrived,    // funds arrived here from a recovered account
+    RecoveryDropped,    // a recovery came due but the new address could not hold the funds; nothing moved
 };
 struct StatementEntry {
     std::uint64_t height{0};
@@ -31,6 +38,8 @@ struct WalletStatement {
     Amount total_received{0};        // Received + ReleasedIn
     Amount total_sent{0};            // Sent + HeldOut (gross)
     Amount total_refunded{0};        // Cancelled + Refunded
+    Amount recovered_in{0};          // RecoveryArrived
+    Amount recovered_out{0};         // RecoveryMoved
     Amount total_fees{0};
     Amount held_outgoing{0};         // still waiting, sent by this address
     Amount held_incoming{0};         // still waiting, on its way to this address
