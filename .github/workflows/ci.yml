@@ -1,4 +1,4 @@
-Aname: C++ Core CI
+name: C++ Core CI
 on:
   push:
   pull_request:
