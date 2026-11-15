@@ -32,6 +32,12 @@ static Transaction setg(const Key& f, std::vector<Address> list, std::uint64_t t
 static Transaction vote(const Key& g, const Address& who, const Address& new_owner, std::uint64_t n) {
     Transaction tx = base(g, n); tx.kind = TxKind::RecoveryVote; tx.to = who; tx.new_owner = new_owner; resign(tx, g); return tx;
 }
+static Transaction setg_veto(const Key& f, std::vector<Address> list, std::uint64_t thr, const Address& veto, std::uint64_t n) {
+    std::sort(list.begin(), list.end()); Transaction tx = base(f, n); tx.kind = TxKind::SetGuardians; tx.guardians = std::move(list); tx.guardian_threshold = thr; tx.veto = veto; resign(tx, f); return tx;
+}
+static Transaction vcancel(const Key& veto, const Address& account, std::uint64_t n) {
+    Transaction tx = base(veto, n); tx.kind = TxKind::RecoveryCancel; tx.to = account; resign(tx, veto); return tx;
+}
 static Transaction rcancel(const Key& f, std::uint64_t n) {
     Transaction tx = base(f, n); tx.kind = TxKind::RecoveryCancel; resign(tx, f); return tx;
 }
@@ -376,6 +382,95 @@ static void test_root_covers_recovery_data() {
       CHECK(s1.state_root() != s2.state_root()); }
 }
 
+
+// The veto key: when set, ONLY it may cancel a recovery, so a thief holding the account's everyday key cannot block the guardians.
+static void test_veto_key() {
+    World w(2, false); Chain& c = w.c; const Key &o = w.o, &g0 = w.g[0], &g1 = w.g[1];
+    Key v = new_key();
+    const std::vector<Address> three{g0.addr, g1.addr, w.g[2].addr};
+    CHECK(put(c, {transfer(o, v.addr, 1000000, nx(c, o))}));
+    auto bad = [&](Transaction tx, const Key& signer) { resign(tx, signer); return !c.append_block({tx}, g_ts++).ok; };
+    const std::uint64_t on = nx(c, o);
+    // shape rules for the veto field
+    { auto t = setg_veto(o, three, 2, o.addr, on); CHECK(bad(t, o)); }                       // veto = the account itself
+    { auto t = setg_veto(o, three, 2, g0.addr, on); CHECK(bad(t, o)); }                      // veto is also a guardian
+    { auto t = setg_veto(o, {}, 0, v.addr, on); CHECK(bad(t, o)); }                          // veto without guardians
+    { auto t = transfer(o, w.x.addr, 5, on); t.veto = v.addr; CHECK(bad(t, o)); }            // veto field inside other kinds
+    { auto t = safety(o, 0, 0, 0, on); t.veto = v.addr; CHECK(bad(t, o)); }
+    { auto t = vote(g0, o.addr, w.n.addr, nx(c, g0)); t.veto = v.addr; CHECK(bad(t, g0)); }
+    { auto t = rcancel(o, on); t.veto = v.addr; CHECK(bad(t, o)); }
+    { auto t = vcancel(v, v.addr, nx(c, v)); CHECK(bad(t, v)); }                             // naming yourself: use the empty form
+    { auto t = vcancel(v, o.addr, nx(c, v)); t.amount = 1; CHECK(bad(t, v)); }
+    CHECK(put(c, {setg_veto(o, three, 2, v.addr, on)}));                                      // control
+    CHECK(c.state().find(o.addr)->guardians.veto == v.addr);
+    // a signature covers the veto address and the account named in a veto cancel
+    { auto t = setg_veto(o, three, 2, v.addr, on + 1); t.veto = w.x.addr; CHECK(!c.append_block({t}, g_ts++).ok); }
+    CHECK(put(c, {vote(g0, o.addr, w.n.addr, nx(c, g0)), vote(g1, o.addr, w.n.addr, nx(c, g1))}));
+    const std::uint64_t ready = c.state().find(o.addr)->recovery.ready_height;
+    CHECK(c.state().find(o.addr)->recovery.active);
+    // the owner's own key (i.e. a thief) can no longer cancel; nor can a stranger or a guardian
+    CHECK(!put(c, {rcancel(o, nx(c, o))}));
+    CHECK(!put(c, {vcancel(w.x, o.addr, nx(c, w.x))}));
+    CHECK(!put(c, {vcancel(g0, o.addr, nx(c, g0))}));
+    CHECK(!put(c, {vcancel(v, w.x.addr, nx(c, v))}));                                         // veto of o has no say over x
+    { auto t = vcancel(v, o.addr, nx(c, v)); t.to = w.x.addr; CHECK(!c.append_block({t}, g_ts++).ok); } // retargeted after signing
+    // a thief tries to remove the veto: it only waits, so the guardians finish first
+    CHECK(!put(c, {setg_veto(o, three, 2, Address{}, nx(c, o))}));                            // refused while a recovery waits
+    // the legitimate owner, who still holds the offline veto key, may cancel
+    const Amount before = c.state().balance(o.addr), vb = c.state().balance(v.addr);
+    CHECK(put(c, {vcancel(v, o.addr, nx(c, v))}));
+    CHECK(!c.state().find(o.addr)->recovery.active && c.state().balance(v.addr) == vb - F && c.state().balance(o.addr) == before);
+    CHECK(!put(c, {vcancel(v, o.addr, nx(c, v))}));                                           // nothing left to cancel
+    empty_until(c, ready + 3);
+    CHECK(c.state().balance(w.n.addr) == 0 && c.state().balance(o.addr) == before);
+    conserved(c, w.total);
+    // second round: nobody cancels, the guardians win
+    CHECK(put(c, {vote(g0, o.addr, w.n.addr, nx(c, g0)), vote(g1, o.addr, w.n.addr, nx(c, g1))}));
+    empty_until(c, c.state().find(o.addr)->recovery.ready_height);
+    CHECK(c.state().balance(w.n.addr) == before && c.state().find(o.addr)->guardians.is_default()); // veto key is retired with the guardians
+    conserved(c, w.total);
+    // statements: both the veto key and the protected account show the cancel
+    const auto sv = wallet_statement(c, v.addr), so = wallet_statement(c, o.addr);
+    bool v_saw = false, o_saw = false;
+    for (const auto& e : sv.entries) if (e.kind == EntryKind::RecoveryCancelled && e.counterparty == o.addr && e.fee == F) v_saw = true;
+    for (const auto& e : so.entries) if (e.kind == EntryKind::RecoveryCancelled && e.counterparty == v.addr && e.fee == 0) o_saw = true;
+    CHECK(v_saw && o_saw);
+    for (const Address& who : {o.addr, v.addr, w.n.addr}) { const auto s = wallet_statement(c, who); CHECK(s.balance == c.state().balance(who)); CHECK(s.nonce == c.state().nonce(who)); }
+}
+
+// One veto key may guard several accounts; a cancel signed for one must not work on another (found by mutation testing).
+static void test_veto_cancel_signature_covers_account() {
+    Key o = new_key(), p = new_key(), g = new_key(), v = new_key(), n = new_key();
+    State s; for (const Key* k : {&o, &p, &g, &v}) s.set_balance(k->addr, 5000000);
+    CHECK(s.apply(setg_veto(o, {g.addr}, 1, v.addr, 0), 1).ok); CHECK(s.apply(setg_veto(p, {g.addr}, 1, v.addr, 0), 1).ok);
+    CHECK(s.apply(vote(g, o.addr, n.addr, 0), 2).ok); CHECK(s.apply(vote(g, p.addr, n.addr, 1), 2).ok);
+    CHECK(s.find(o.addr)->recovery.active && s.find(p.addr)->recovery.active);
+    auto t = vcancel(v, o.addr, 0); t.to = p.addr;                   // signed for o, aimed at p
+    State copy = s; CHECK(!copy.apply(t, 3).ok); CHECK(copy.find(p.addr)->recovery.active);
+    CHECK(s.apply(vcancel(v, o.addr, 0), 3).ok);                      // control: the honest one works
+    CHECK(!s.find(o.addr)->recovery.active && s.find(p.addr)->recovery.active);
+}
+
+static void test_veto_changes_are_delayed_and_in_root() {
+    World w(2, false); Chain& c = w.c; Key v = new_key(), v2 = new_key();
+    const std::vector<Address> two{w.g[0].addr, w.g[1].addr};
+    CHECK(put(c, {setg_veto(w.o, two, 2, v.addr, nx(c, w.o))}));                              // first time: immediate
+    CHECK(put(c, {setg_veto(w.o, two, 2, v2.addr, nx(c, w.o))}));                             // change of veto: waits
+    const Account* oa = c.state().find(w.o.addr);
+    CHECK(oa->guardians.veto == v.addr && oa->pending_guardians.active && oa->pending_guardians.config.veto == v2.addr);
+    CHECK(put(c, {setg_veto(w.o, two, 2, v.addr, nx(c, w.o))}));                              // sending the current one again cancels
+    CHECK(!c.state().find(w.o.addr)->pending_guardians.active);
+    CHECK(put(c, {setg(w.o, two, 2, nx(c, w.o))}));                                           // dropping the veto also waits (a loosening)
+    CHECK(c.state().find(w.o.addr)->guardians.veto == v.addr);
+    const std::uint64_t ready = c.state().find(w.o.addr)->pending_guardians.ready_height;
+    empty_until(c, ready - 1); CHECK(c.state().find(w.o.addr)->guardians.veto == v.addr);
+    empty_until(c, ready);     CHECK(c.state().find(w.o.addr)->guardians.veto == Address{});
+    // the veto address is part of the state root
+    State s1, s2; s1.set_balance(w.o.addr, 5000000); s2.set_balance(w.o.addr, 5000000);
+    CHECK(s1.apply(setg_veto(w.o, two, 2, v.addr, 0), 1).ok); CHECK(s2.apply(setg_veto(w.o, two, 2, v2.addr, 0), 1).ok);
+    CHECK(s1.state_root() != s2.state_root());
+}
+
 // Many blocks of random mixed transactions; every block must keep the supply exact, a follower node
 // that only receives blocks must reach the same root, and statements must match the state.
 static void test_random_run() {
@@ -384,7 +479,7 @@ static void test_random_run() {
     Chain prod, foll; const Amount total = 3 * BIG;
     for (Chain* c : {&prod, &foll}) CHECK(c->init_genesis(k[0].addr, BIG * 2, k[1].addr, BIG));
     std::uint64_t seed = 987654321; auto rnd = [&seed](std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; };
-    int blocks_ok = 0, scheduled = 0, executed = 0, cancelled = 0, swaps = 0;
+    int blocks_ok = 0, scheduled = 0, executed = 0, cancelled = 0, swaps = 0, vetos = 0;
     auto accept = [&](const std::vector<Transaction>& txs) {
         const bool had_rec = [&] { for (auto& x : k) if (auto* a = prod.state().find(x.addr)) if (a->recovery.active) return true; return false; }();
         (void)had_rec;
@@ -410,7 +505,11 @@ static void test_random_run() {
                 std::vector<Address> list; for (int q = 0; q < K; ++q) if (static_cast<std::size_t>(q) != f && rnd(3) != 0) list.push_back(k[q].addr);
                 if (list.empty()) continue;
                 if (rnd(5) == 0) txs.push_back(setg(k[f], {}, 0, local[f]++));
-                else txs.push_back(setg(k[f], list, 1 + rnd(list.size()), local[f]++));
+                else {
+                    Address veto{}; // sometimes name a separate veto key that is not in the list
+                    if (rnd(3) == 0) for (int q = 0; q < K; ++q) if (static_cast<std::size_t>(q) != f && std::find(list.begin(), list.end(), k[q].addr) == list.end()) { veto = k[q].addr; break; }
+                    txs.push_back(setg_veto(k[f], list, 1 + rnd(list.size()), veto, local[f]++));
+                }
                 ++swaps;
             } else if (roll < 90) { // a guardian votes for a protected account that has guardians (sometimes wrongly)
                 const std::size_t who = rnd(K); const Account* wa = prod.state().find(k[who].addr);
@@ -422,7 +521,15 @@ static void test_random_run() {
                 Address target = k[rnd(K)].addr; if (rnd(4) != 0) target = k[(who + 1 + (step / 700) % (K - 1)) % K].addr; // mostly agree
                 if (target == k[who].addr) continue;
                 txs.push_back(vote(k[voter], k[who].addr, target, local[voter]++));
-            } else { txs.push_back(rcancel(k[f], local[f]++)); }
+            } else {
+                const Account* fa = prod.state().find(k[f].addr);
+                if (fa && fa->guardians.veto != Address{}) txs.push_back(rcancel(k[f], local[f]++)); // wrong key on purpose: must be refused
+                else txs.push_back(rcancel(k[f], local[f]++));
+                // the veto key of some account cancels it
+                const std::size_t who = rnd(K); const Account* wa = prod.state().find(k[who].addr);
+                if (wa && wa->guardians.veto != Address{} && (wa->recovery.active || !wa->votes.empty()))
+                    for (int q = 0; q < K; ++q) if (k[q].addr == wa->guardians.veto && static_cast<std::size_t>(q) != f) { txs.push_back(vcancel(k[q], k[who].addr, local[q]++)); ++vetos; }
+            }
         }
         const Block* before_tip = &prod.blocks().back(); (void)before_tip;
         std::size_t pend_before = 0; for (auto& x : k) if (auto* a = prod.state().find(x.addr)) if (a->recovery.active) ++pend_before;
@@ -432,17 +539,17 @@ static void test_random_run() {
         if (pend_after > pend_before) scheduled += static_cast<int>(pend_after - pend_before);
         if (pend_after < pend_before) executed += static_cast<int>(pend_before - pend_after);
     }
-    CHECK(blocks_ok > 300); CHECK(scheduled > 3); CHECK(executed > 1); CHECK(swaps > 5);
+    CHECK(blocks_ok > 300); CHECK(scheduled > 3); CHECK(executed > 1); CHECK(swaps > 5); CHECK(vetos > 0);
     for (const auto& kk : k) { const auto s = wallet_statement(prod, kk.addr); CHECK(s.balance == prod.state().balance(kk.addr)); CHECK(s.nonce == prod.state().nonce(kk.addr)); }
     if (const char* path = std::getenv("TAZ_EXPORT_RANDOM")) { std::ofstream(path, std::ios::binary) << to_json(prod); }
-    std::cout << "random run: " << blocks_ok << " blocks, recoveries scheduled " << scheduled << ", ended " << executed << ", cancels " << cancelled << ", guardian settings " << swaps << "\n";
+    std::cout << "random run: " << blocks_ok << " blocks, recoveries scheduled " << scheduled << ", ended " << executed << ", cancels " << cancelled << ", guardian settings " << swaps << ", veto cancels tried " << vetos << "\n";
 }
 
 int main() {
     test_shape_rules(); test_happy_path(); test_single_guardian_and_all_guardians(); test_owner_cancel();
     test_guardian_changes_are_delayed(); test_thief_cannot_outrun_guardians(); test_overflow_and_empty_edges();
     test_held_funds_and_statements(); test_state_roots_and_export(); test_signatures_cover_fields();
-    test_same_block_order_is_fixed(); test_root_covers_recovery_data(); test_random_run();
+    test_same_block_order_is_fixed(); test_root_covers_recovery_data(); test_veto_key(); test_veto_cancel_signature_covers_account(); test_veto_changes_are_delayed_and_in_root(); test_random_run();
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Recovery tests passed. This is not a security audit.\n"; return EXIT_SUCCESS;
 }
