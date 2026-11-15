@@ -1,4 +1,4 @@
-name: C++ Core CI
+Aname: C++ Core CI
 on:
   push:
   pull_request:
@@ -26,4 +26,4 @@ jobs:
       - name: Build
         run: cmake --build build-san --parallel 2
       - name: Test
-        run: ./build-san/taz_tests && ./build-san/taz_export_tests && ./build-san/taz_safety_tests && ./build-san/taz_recovery_tests && ./build-san/taz_mempool_tests
+        run: ctest --test-dir build-san --output-on-failure
