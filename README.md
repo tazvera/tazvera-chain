@@ -145,3 +145,11 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 - The veto address is part of the signed bytes and of the state root. **This changes the `TAZVERA-STATE-V3` and kind 3/5 signature layout compared with v6**, so chain files made by v6 do not verify; acceptable because there is no mainnet and no real data.
 - Limit: whoever holds the veto key can stop every recovery, so keep it offline and separate from the everyday key; losing BOTH keys while the guardians are unavailable still loses the account.
 - Tests: shape rules, only-the-veto-may-cancel (owner key, stranger, guardian, veto of another account all refused), retargeting after signing refused, delayed change, thief scenario, statements for both accounts, state root, and the random run mixes veto settings and veto cancels (29 accepted veto cancels in the checked run).
+
+
+## Persistence (v0.8)
+
+- `save_chain_json` / `load_chain_json`: explorer JSON, atomic save, full replay on load.
+- Format: `tazvera-chain-export-v1|v2|v3` (feature level only; protocol_version must match).
+- Private keys are never stored. Tampered files must fail verification.
+- Local prototype only — not a networked consensus database.
