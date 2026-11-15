@@ -6,8 +6,9 @@ bool Chain::init_genesis(const Address& first, Amount first_balance, const Addre
     Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
     state_=genesis_state; blocks_.push_back(genesis);
     genesis_balances_.clear();
-    if (first_balance != 0) genesis_balances_.emplace_back(first, first_balance);
-    if (second_balance != 0) genesis_balances_.emplace_back(second, second_balance);
+    // v8: always record both genesis accounts (including zero) so load_chain_json can rebuild.
+    genesis_balances_.emplace_back(first, first_balance);
+    genesis_balances_.emplace_back(second, second_balance);
     return true;
 }
 ChainResult Chain::check_timestamp(std::int64_t timestamp, std::int64_t max_timestamp) const {

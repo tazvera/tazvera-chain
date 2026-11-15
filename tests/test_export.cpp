@@ -18,7 +18,7 @@ static std::size_t count(const std::string& s, const std::string& needle) {
 int main() {
     Key a = new_key(), b = new_key(), c = new_key();
     Chain chain; CHECK(chain.init_genesis(a.addr, 50000000, b.addr, 0));
-    CHECK(chain.genesis_balances().size() == 1); // zero balance is not listed
+    CHECK(chain.genesis_balances().size() == 2); // v8: both genesis accounts recorded (incl. zero)
     CHECK(chain.append_block({tx_of(a, b.addr, 1000000, 0), tx_of(a, c.addr, 20, 1)}, 1).ok);
     CHECK(chain.append_block({}, 2).ok);
     CHECK(chain.append_block({tx_of(b, c.addr, 300, 0), tx_of(a, b.addr, 5, 2)}, 3).ok);

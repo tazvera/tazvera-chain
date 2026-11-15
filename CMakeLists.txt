@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tazvera_chain_core VERSION 0.7.0 LANGUAGES CXX)
+project(tazvera_chain_core VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,3 +47,7 @@ add_test(NAME taz_recovery_tests COMMAND taz_recovery_tests)
 add_executable(taz_mempool_tests tests/test_mempool.cpp)
 target_link_libraries(taz_mempool_tests PRIVATE tazcore)
 add_test(NAME taz_mempool_tests COMMAND taz_mempool_tests)
+
+add_executable(taz_persist_tests tests/test_persist.cpp)
+target_link_libraries(taz_persist_tests PRIVATE tazcore)
+add_test(NAME taz_persist_tests COMMAND taz_persist_tests)
