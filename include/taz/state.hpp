@@ -18,7 +18,8 @@ struct PendingSafety { bool active{false}; SafetyConfig config{}; std::uint64_t 
 struct GuardianConfig {
     std::vector<Address> list{};      // strictly ascending
     std::uint64_t threshold{0};       // how many of them must agree
-    bool is_default() const noexcept { return list.empty() && threshold == 0; }
+    Address veto{};                   // optional separate key that alone may cancel a recovery (zero = the account's own key may)
+    bool is_default() const noexcept { return list.empty() && threshold == 0 && veto == Address{}; }
     friend bool operator==(const GuardianConfig&, const GuardianConfig&) = default;
 };
 // Changing the guardians is always delayed (a thief must not be able to name his own helpers at once).

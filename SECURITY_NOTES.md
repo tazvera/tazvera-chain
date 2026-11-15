@@ -13,7 +13,9 @@
 - v5: `CancelHeld` restores funds but does not give back the used part of the daily allowance (conservative; documented in the tests).
 - v5: a hold longer than a few days is deliberately impossible (`MAX_HOLD_BLOCKS`), so funds cannot be locked forever.
 - v5: held funds still belong to the sender until release; a receiver must not treat a held transfer as received.
-- v6: guardian recovery is a delayed, vote-based move of funds to a new address. While it waits, anyone with the account's key may cancel it, so a thief with the key can block the guardians; the planned fix is an optional separate offline veto key.
+- v6/v7: guardian recovery is a delayed, vote-based move of funds to a new address. Without a veto key, anyone with the account's key may cancel it, so a thief can block the guardians. With a veto key (v7), only that key may cancel.
 - v6: any `threshold` guardians acting together can take the funds after the delay; this cannot be prevented cryptographically. Do not describe it as "guardians can never steal".
 - v6: guardian changes wait SAFETY_DELAY_BLOCKS so a stolen key cannot swap in the thief's helpers at once; RECOVERY_DELAY_BLOCKS is shorter on purpose.
 - v6: votes are stored in consensus state (map guardian -> new address) and are part of the state root; the list of guardians is canonical (sorted, unique).
+- v7: the veto key can stop every recovery of its account. It is a trade-off, not a free lunch: keep it offline and separate. Its account pays the cancel fee.
+- v7: v6 chain files do not verify under v7 (signed bytes and state root changed). Prototype only.

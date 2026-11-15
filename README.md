@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v6
+# TAZVERA Chain — Core v7
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -122,7 +122,7 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 - Tests: `taz_recovery_tests` (shape rules incl. unused-field checks, thresholds 1/2/3, vote changes, exact timing one block before and at the due block, owner cancel, delayed guardian change, thief scenario, overflow and empty-account edges, held funds, statements, state roots, and a 3500-step random run in which a follower node must match every state root; supply is checked after every block).
 
 **Honest limits (read before relying on this):**
-- Anyone who holds the account's key can cancel a recovery. A thief with the key can therefore contest guardians. Fix planned: an optional separate "veto" key kept offline (idea from the ChatGPT design review), where only that key may cancel.
+- Without a veto key, anyone who holds the account's key can cancel a recovery, so a thief with the key can contest the guardians. Use the veto key below.
 - Any `threshold` guardians together can move the funds after the delay. Choose independent people.
 - Recovery moves funds to a new address; it does not give the old address a new key (the address is derived from the public key).
 - Prototype values only; no audit; no real funds.
@@ -134,3 +134,14 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 - Not done: loading a chain back from JSON, networking. The `json_io.hpp` header in the Grok package had no implementation, so it is left out.
 - Known cost: `submit` copies the state and replays the pool, so it is O(pool size) per call. Fine for a prototype, to be redone before any network use.
 - Tests: `taz_mempool_tests` (nonce gaps, duplicates, bad signatures, tampered amounts, expiry, capacity, per-sender limit, safety and guardian rules inside the pool, stale pruning, saving).
+
+## v7: veto key (optional, per account)
+
+`SetGuardians` may name one extra address, the **veto key** (not the account itself, not a guardian). Idea taken from the ChatGPT design review.
+
+- When an account has a veto key, **only the veto key can cancel a recovery**. The account's everyday key cannot, so a thief who stole it cannot block the guardians.
+- The veto key cancels with `RecoveryCancel` whose `to` is the protected account (it signs and pays the fee with its OWN account, so the veto account needs a little balance). Leave `to` empty for the account's own cancel (only allowed when no veto key is set).
+- Setting, changing or removing the veto key follows the same rules as the guardian list: first setup is immediate, any change waits `SAFETY_DELAY_BLOCKS`, resending the current setting cancels a waiting change. A change is refused while a recovery waits. The veto key is retired together with the guardians when a recovery completes.
+- The veto address is part of the signed bytes and of the state root. **This changes the `TAZVERA-STATE-V3` and kind 3/5 signature layout compared with v6**, so chain files made by v6 do not verify; acceptable because there is no mainnet and no real data.
+- Limit: whoever holds the veto key can stop every recovery, so keep it offline and separate from the everyday key; losing BOTH keys while the guardians are unavailable still loses the account.
+- Tests: shape rules, only-the-veto-may-cancel (owner key, stranger, guardian, veto of another account all refused), retargeting after signing refused, delayed change, thief scenario, statements for both accounts, state root, and the random run mixes veto settings and veto cancels (29 accepted veto cancels in the checked run).

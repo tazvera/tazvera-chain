@@ -62,7 +62,7 @@ function parseChain(text) {
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
         nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
         limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
-        newOwner: hxOr(t.new_owner, 20, ZERO20, "new_owner"), gthr: decOr(t.guardian_threshold, 0n, "guardian_threshold"), guardians: (t.guardians || []).map((g) => hx(g, 20, "guardian")),
+        newOwner: hxOr(t.new_owner, 20, ZERO20, "new_owner"), gthr: decOr(t.guardian_threshold, 0n, "guardian_threshold"), guardians: (t.guardians || []).map((g) => hx(g, 20, "guardian")), veto: hxOr(t.veto, 20, ZERO20, "veto"),
         pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
     });
   }
@@ -78,18 +78,20 @@ function txSignable(t) {
     u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey),
     t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold))
     : t.kind === 2 ? hexToBytes(t.ref)
-    : t.kind === 3 ? cat(u64(BigInt(t.guardians.length)), ...t.guardians.map(hexToBytes), u64(t.gthr))
-    : t.kind === 4 ? cat(hexToBytes(t.to), hexToBytes(t.newOwner)) : new Uint8Array(0));
+    : t.kind === 3 ? cat(u64(BigInt(t.guardians.length)), ...t.guardians.map(hexToBytes), u64(t.gthr), hexToBytes(t.veto))
+    : t.kind === 4 ? cat(hexToBytes(t.to), hexToBytes(t.newOwner)) : t.kind === 5 ? hexToBytes(t.to) : new Uint8Array(0));
 }
 
 /* ---------- the account state machine (a mirror of the C++ State) ---------- */
 const noRec = () => ({ active: false, target: ZERO20, ready: 0n });
-const noPg = () => ({ active: false, list: [], thr: 0n, ready: 0n });
+const noPg = () => ({ active: false, list: [], thr: 0n, veto: ZERO20, ready: 0n });
+const noG0 = () => ({ list: [], thr: 0n, veto: ZERO20 });
+const gDefault = (g) => g.list.length === 0 && g.thr === 0n && g.veto === ZERO20;
 const newAcc = () => ({ bal: 0n, nonce: 0n, limit: 0n, thr: 0n, hold: 0n, widx: 0n, wspent: 0n, pend: { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n },
-  g: { list: [], thr: 0n }, pg: noPg(), votes: new Map(), rec: noRec() });
-const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend }, g: { list: [...a.g.list], thr: a.g.thr }, pg: { ...a.pg, list: [...a.pg.list] }, votes: new Map(a.votes), rec: { ...a.rec } } : newAcc());
+  g: { list: [], thr: 0n, veto: ZERO20 }, pg: noPg(), votes: new Map(), rec: noRec() });
+const cloneAcc = (a) => (a ? { ...a, pend: { ...a.pend }, g: { list: [...a.g.list], thr: a.g.thr, veto: a.g.veto }, pg: { ...a.pg, list: [...a.pg.list] }, votes: new Map(a.votes), rec: { ...a.rec } } : newAcc());
 const hasSafetyExt = (a) => a.limit !== 0n || a.thr !== 0n || a.hold !== 0n || a.wspent !== 0n || a.pend.active;
-const hasGuardExt = (a) => a.g.list.length > 0 || a.g.thr !== 0n || a.pg.active || a.votes.size > 0 || a.rec.active;
+const hasGuardExt = (a) => !gDefault(a.g) || a.pg.active || a.votes.size > 0 || a.rec.active;
 const hasExt = (a) => hasSafetyExt(a);
 const heldTotal = (S) => { let t = 0n; for (const h of S.held.values()) t += h.amount; return t; };
 
@@ -117,7 +119,7 @@ function beginBlock(S, h) {
       a.limit = a.pend.limit; a.thr = a.pend.thr; a.hold = a.pend.hold; a.pend = { active: false, limit: 0n, thr: 0n, hold: 0n, ready: 0n };
       if (a.limit === 0n) { a.widx = 0n; a.wspent = 0n; }
     }
-    if (a.pg.active && a.pg.ready <= h) { a.g = { list: a.pg.list, thr: a.pg.thr }; a.pg = noPg(); a.votes = new Map(); }
+    if (a.pg.active && a.pg.ready <= h) { a.g = { list: a.pg.list, thr: a.pg.thr, veto: a.pg.veto }; a.pg = noPg(); a.votes = new Map(); }
   }
   const due2 = [...S.acc.entries()].filter(([, a]) => a.rec.active && a.rec.ready <= h).map(([k, a]) => [a.rec.ready, k])
     .sort((p, q) => (p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : p[1] < q[1] ? -1 : p[1] > q[1] ? 1 : 0));
@@ -128,7 +130,7 @@ function beginBlock(S, h) {
     old.rec = noRec(); old.votes = new Map();
     if (amount <= U64MAX - have) {
       if (amount !== 0n) { old.bal = 0n; const r = cloneAcc(tacc); r.bal = have + amount; S.acc.set(target, r); }
-      old.g = { list: [], thr: 0n }; old.pg = noPg(); ev.moved = true;
+      old.g = noG0(); old.pg = noPg(); ev.moved = true;
     }
     recov.push(ev);
   }
@@ -140,7 +142,7 @@ function applyTx(S, c, t, h) {
   if (t.version !== c.version || t.chainId !== c.chainId) return "version या chain ID गलत";
   if (t.fee !== c.fee) return "फ़ीस तय दर से अलग है";
   const noTo = t.to === ZERO20, noSafety = t.limit === 0n && t.thr === 0n && t.hold === 0n, noRef = t.ref === ZERO32;
-  const noNew = t.newOwner === ZERO20, noG = t.guardians.length === 0 && t.gthr === 0n;
+  const noNew = t.newOwner === ZERO20, noG = t.guardians.length === 0 && t.gthr === 0n && t.veto === ZERO20;
   if (t.kind === 0) {
     if (t.amount === 0n) return "रकम शून्य है";
     if (t.from === t.to) return "खुद को भेजना मान्य नहीं";
@@ -155,7 +157,7 @@ function applyTx(S, c, t, h) {
   } else if (t.kind === 3) {
     if (t.amount !== 0n || !noTo || !noRef || !noSafety || !noNew) return "guardian-सेटिंग में अनावश्यक फ़ील्ड भरे हैं";
     if (t.guardians.length > c.maxGuardians) return "बहुत ज़्यादा guardian";
-    if (t.guardians.length === 0) { if (t.gthr !== 0n) return "guardian के बिना सीमा शून्य होनी चाहिए"; }
+    if (t.guardians.length === 0) { if (t.gthr !== 0n) return "guardian के बिना सीमा शून्य होनी चाहिए"; if (t.veto !== ZERO20) return "veto चाबी के लिए guardian ज़रूरी हैं"; }
     else {
       if (t.gthr === 0n || t.gthr > BigInt(t.guardians.length)) return "सीमा 1 से guardian की गिनती के बीच होनी चाहिए";
       for (let i = 0; i < t.guardians.length; i++) {
@@ -163,6 +165,8 @@ function applyTx(S, c, t, h) {
         if (t.guardians[i] === t.from) return "खाता खुद अपना guardian नहीं हो सकता";
         if (i > 0 && !(t.guardians[i - 1] < t.guardians[i])) return "guardian क्रम में और अलग-अलग होने चाहिए";
       }
+      if (t.veto === t.from) return "veto चाबी खाता खुद नहीं हो सकता";
+      if (t.guardians.includes(t.veto)) return "veto चाबी guardian भी नहीं हो सकती";
     }
   } else if (t.kind === 4) {
     if (t.amount !== 0n || !noSafety || !noRef || !noG) return "वापसी-वोट में अनावश्यक फ़ील्ड भरे हैं";
@@ -171,7 +175,8 @@ function applyTx(S, c, t, h) {
     if (noNew) return "वोट में नया पता लिखना ज़रूरी है";
     if (t.newOwner === t.to) return "नया पता पुराने से अलग होना चाहिए";
   } else {
-    if (!(t.amount === 0n && noTo && noRef && noNew && noG) || !noSafety) return "वापसी-रद्द में अनावश्यक फ़ील्ड भरे हैं";
+    if (!(t.amount === 0n && noRef && noNew && noG) || !noSafety) return "वापसी-रद्द में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.to === t.from) return "अपनी वापसी रद्द करने के लिए खाता खाली छोड़िए";
   }
   if (t.expiry !== 0n && h > t.expiry) return "लेन-देन की अवधि समाप्त";
   const snd = cloneAcc(S.acc.get(t.from));
@@ -208,13 +213,13 @@ function applyTx(S, c, t, h) {
   } else if (t.kind === 3) {
     if (snd.rec.active) return "पहले चल रही वापसी रद्द कीजिए";
     snd.bal -= t.fee; snd.nonce += 1n;
-    const same = snd.g.thr === t.gthr && snd.g.list.length === t.guardians.length && snd.g.list.every((v, i) => v === t.guardians[i]);
-    if (snd.g.list.length === 0 && snd.g.thr === 0n) { snd.g = { list: [...t.guardians], thr: t.gthr }; snd.pg = noPg(); }
+    const same = snd.g.thr === t.gthr && snd.g.veto === t.veto && snd.g.list.length === t.guardians.length && snd.g.list.every((v, i) => v === t.guardians[i]);
+    if (gDefault(snd.g)) { snd.g = { list: [...t.guardians], thr: t.gthr, veto: t.veto }; snd.pg = noPg(); }
     else if (same) snd.pg = noPg();
-    else snd.pg = { active: true, list: [...t.guardians], thr: t.gthr, ready: h + c.safetyDelay };
+    else snd.pg = { active: true, list: [...t.guardians], thr: t.gthr, veto: t.veto, ready: h + c.safetyDelay };
   } else if (t.kind === 4) {
     const pr0 = S.acc.get(t.to);
-    if (!pr0 || (pr0.g.list.length === 0 && pr0.g.thr === 0n)) return "इस खाते के कोई guardian नहीं हैं";
+    if (!pr0 || gDefault(pr0.g)) return "इस खाते के कोई guardian नहीं हैं";
     const prot = cloneAcc(pr0);
     if (!prot.g.list.includes(t.from)) return "भेजने वाला इस खाते का guardian नहीं है";
     if (prot.rec.active) return "वापसी पहले से इंतज़ार में है";
@@ -224,9 +229,19 @@ function applyTx(S, c, t, h) {
     if (agree >= prot.g.thr) { prot.rec = { active: true, target: t.newOwner, ready: h + c.recoveryDelay }; prot.votes = new Map(); }
     S.acc.set(t.from, snd); S.acc.set(t.to, prot); S.burned += t.fee;
     return { held, target };
-  } else {
+  } else if (t.to === ZERO20) {
+    if (snd.g.veto !== ZERO20) return "इस खाते की veto चाबी है: सिर्फ़ वही रद्द कर सकती है";
     if (!snd.rec.active && snd.votes.size === 0) return "रद्द करने के लिए कोई वापसी नहीं है";
     snd.bal -= t.fee; snd.nonce += 1n; snd.rec = noRec(); snd.votes = new Map();
+  } else {
+    const pr1 = S.acc.get(t.to);
+    if (!pr1) return "ऐसा कोई खाता नहीं है";
+    const prot = cloneAcc(pr1);
+    if (prot.g.veto !== t.from) return "भेजने वाला इस खाते की veto चाबी नहीं है";
+    if (!prot.rec.active && prot.votes.size === 0) return "रद्द करने के लिए कोई वापसी नहीं है";
+    snd.bal -= t.fee; snd.nonce += 1n; prot.rec = noRec(); prot.votes = new Map();
+    S.acc.set(t.from, snd); S.acc.set(t.to, prot); S.burned += t.fee;
+    return { held, target };
   }
   S.acc.set(t.from, snd); S.burned += t.fee;
   return { held, target };
@@ -242,13 +257,13 @@ async function stateRoot(S) {
     return toHex(await sha(cat(...parts)));
   }
   const parts = [enc.encode(gext ? "TAZVERA-STATE-V3" : "TAZVERA-STATE-V2"), u64(BigInt(S.acc.size))];
-  const putG = (list, thr) => { parts.push(u64(BigInt(list.length))); for (const x of list) parts.push(hexToBytes(x)); parts.push(u64(thr)); };
+  const putG = (list, thr, veto) => { parts.push(u64(BigInt(list.length))); for (const x of list) parts.push(hexToBytes(x)); parts.push(u64(thr), hexToBytes(veto)); };
   for (const k of keys) {
     const a = S.acc.get(k);
     parts.push(hexToBytes(k), u64(a.bal), u64(a.nonce), u64(a.limit), u64(a.thr), u64(a.hold), u64(a.widx), u64(a.wspent),
       u8(a.pend.active ? 1 : 0), u64(a.pend.limit), u64(a.pend.thr), u64(a.pend.hold), u64(a.pend.ready));
     if (gext) {
-      putG(a.g.list, a.g.thr); parts.push(u8(a.pg.active ? 1 : 0)); putG(a.pg.list, a.pg.thr); parts.push(u64(a.pg.ready));
+      putG(a.g.list, a.g.thr, a.g.veto); parts.push(u8(a.pg.active ? 1 : 0)); putG(a.pg.list, a.pg.thr, a.pg.veto); parts.push(u64(a.pg.ready));
       parts.push(u64(BigInt(a.votes.size)));
       for (const gk of [...a.votes.keys()].sort()) parts.push(hexToBytes(gk), hexToBytes(a.votes.get(gk)));
       parts.push(u8(a.rec.active ? 1 : 0), hexToBytes(a.rec.target), u64(a.rec.ready));
@@ -336,7 +351,8 @@ async function verifyChain(c) {
       else if (t.kind === 2) addHist(t.from, { height: b.height, kind: "cancelled", other: r.target.to, amount: r.target.amount, fee: t.fee, txid: t.txid });
       else if (t.kind === 3) addHist(t.from, { height: b.height, kind: "guardians", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid, n: t.guardians.length, thr: t.gthr });
       else if (t.kind === 4) addHist(t.from, { height: b.height, kind: "voted", other: t.to, amount: 0n, fee: t.fee, txid: t.txid, newOwner: t.newOwner });
-      else addHist(t.from, { height: b.height, kind: "recCancelled", other: ZERO20, amount: 0n, fee: t.fee, txid: t.txid });
+      else { addHist(t.from, { height: b.height, kind: "recCancelled", other: t.to, amount: 0n, fee: t.fee, txid: t.txid });
+        if (t.to !== ZERO20) addHist(t.to, { height: b.height, kind: "recCancelled", other: t.from, amount: 0n, fee: 0n, txid: t.txid }); }
     }
     if (!stateBroken) {
       const calc = await stateRoot(S);
@@ -414,7 +430,7 @@ function renderAccounts(c, r) {
 
 const KIND_TEXT = { sent: "भेजा", received: "मिला", heldOut: "भेजा (रुका हुआ)", releasedIn: "मिला (रुकावट के बाद)", cancelled: "रुका हुआ ट्रांसफ़र रद्द, पैसा लौटा", refunded: "रुका हुआ ट्रांसफ़र वापस लौटा", safety: "सुरक्षा नियम बदले", guardians: "भरोसेमंद लोग (guardian) तय/बदले", voted: "किसी के खाते की वापसी पर वोट दिया", recCancelled: "वापसी रद्द की", recMoved: "वापसी: खाते की रकम नए पते पर गई", recArrived: "वापसी: पुराने खाते से रकम आई", recDropped: "वापसी हुई पर रकम नहीं हिली (नया पता रकम नहीं रख सकता)" };
 const NOAMT = new Set(["safety", "guardians", "voted", "recCancelled"]);
-function guardText(g) { return g.list.length ? g.thr + " / " + g.list.length + " भरोसेमंद लोग चाहिए" : "कोई guardian नहीं"; }
+function guardText(g) { return (g.list.length ? g.thr + " / " + g.list.length + " भरोसेमंद लोग चाहिए" : "कोई guardian नहीं") + (g.veto !== ZERO20 ? " · veto चाबी: " + g.veto : ""); }
 function showStatement(raw) {
   const out = $("stmt-out"); out.replaceChildren();
   if (!current) return;
@@ -457,7 +473,7 @@ function showStatement(raw) {
     if (e.kind === "safety") d.append(el("span", "note", safetyText(e.limit, e.thr, e.hold)));
     else if (e.kind === "guardians") d.append(el("span", "note", e.n ? e.thr + " / " + e.n + " भरोसेमंद लोग चाहिए" : "सभी guardian हटाने का अनुरोध"));
     else if (e.kind === "voted") { d.append(el("span", "mono muted", "खाता: " + e.other)); d.append(el("span", "mono muted", "नया पता: " + e.newOwner)); }
-    else if (e.kind === "recCancelled") d.append(el("span", "note", "चल रही वापसी रोक दी गई"));
+    else if (e.kind === "recCancelled") d.append(el("span", "note", e.other === ZERO20 ? "चल रही वापसी रोक दी गई" : "वापसी veto चाबी से रोकी गई · veto/खाता: " + e.other));
     else d.append(el("span", "mono muted", (e.kind === "received" || e.kind === "releasedIn" || e.kind === "recArrived" ? "से: " : "को: ") + e.other));
     if (e.txid !== ZERO32) d.append(el("span", "mono muted", "txid: " + e.txid));
     out.append(d);

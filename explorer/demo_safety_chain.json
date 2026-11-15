@@ -4,7 +4,7 @@
   "protocol_version": "1",
   "params": {"fee_transfer_v1": "1000", "max_block_txs": "10000", "limit_window_blocks": "1000", "max_hold_blocks": "100000", "safety_delay_blocks": "500", "max_guardians": "5", "recovery_delay_blocks": "300"},
   "genesis_balances": [
-    {"address": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "balance": "100000000"}
+    {"address": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "balance": "100000000"}
   ],
   "blocks": [
     {
@@ -13,142 +13,142 @@
       "chain_id": "tazvera-local-prototype-v1",
       "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
       "timestamp": "0",
-      "state_root": "e3b080776f305d014b8b907f50aac1d92ee1d8b047402452548d1367871c2132",
-      "hash": "68555a0da3951c9e2cc22e98759bfc809a019a247f3451f7452983267c036cee",
+      "state_root": "d4186840018b494ce0890bb4fc821901308f832c284b59b6f65466fc1785276d",
+      "hash": "3736d27de7edb3e418d61ce80d9f5a99e336e0e2ac12a4c20ff3eb2de7ab4775",
       "transactions": []
     },
     {
       "height": "1",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "68555a0da3951c9e2cc22e98759bfc809a019a247f3451f7452983267c036cee",
+      "previous_hash": "3736d27de7edb3e418d61ce80d9f5a99e336e0e2ac12a4c20ff3eb2de7ab4775",
       "timestamp": "1700000100",
-      "state_root": "6b91467e7110d0752bbbcd561cf937640b1f3a60ce31705cdb47d95536bd4056",
-      "hash": "42cf6b241f7d5e47967c1945e776d9942c77cdecbaf9de7c390704aa68d245aa",
+      "state_root": "1e4872f73f24d03aecc414f2cc99b7993c544265a8d65321c7c9ec04b5a6e374",
+      "hash": "b772711277bcc765c65db8416206f04333d236237563d108a5ac4378115dbcd2",
       "transactions": [
-        {"txid": "75400e31716f02813e676dc264e4f5b4f4e441ef3bc65d31baf1d97e4f5af707", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "1", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "0", "expiry_height": "0", "daily_limit": "20000000", "hold_threshold": "3000000", "hold_blocks": "5", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "3c0437c151a631c54ebc274125f435695accc5e673ba061bf44c913fd305606baa9a590474664e38011ea26ed69bb4d27c7c0bf51f3f257671f8ad58235b7b06"}
+        {"txid": "0ef159f10cbcfd315b7a0e7b7117d9738bc6c18055cc812198cac1cf0d8d4166", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "1", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "0", "expiry_height": "0", "daily_limit": "20000000", "hold_threshold": "3000000", "hold_blocks": "5", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "3cea852df7769ed311100b4c18a55091cb1236fba5955cef1933630a16718441a0f1d530be3628030c36fd4df36349f8d6d911e25d834cf82bb26c0a7e8e2001"}
       ]
     },
     {
       "height": "2",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "42cf6b241f7d5e47967c1945e776d9942c77cdecbaf9de7c390704aa68d245aa",
+      "previous_hash": "b772711277bcc765c65db8416206f04333d236237563d108a5ac4378115dbcd2",
       "timestamp": "1700000200",
-      "state_root": "ba35e228cdf3b97981e060114935f3a04e83f32731ebefb96a5e29226997da2d",
-      "hash": "6b5fef9d8722583c5762c1ae64145dea7b9368538efb012433437907291b16bb",
+      "state_root": "789a3a347440788b8f23ae2ecc1b60a7b7b21ccb206286b795d3fd51e0cf269b",
+      "hash": "024203c2bcd8ab1975975c4e44c62cd8a0de7674db5ff8ed791766da2deb3fd0",
       "transactions": [
-        {"txid": "4d5616dfdc62673d236f80ada43d93d5cda4ba8ac492e631312470cd05bb5e33", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "fd270d453ad9f604d0eab303b39b0375156317a2", "amount": "1000000", "fee": "1000", "nonce": "1", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "e54c3cb448cc38cc4bc6c78126b1463383c499f4a25b75e7caba969f05ac32ffc1f0b96dba51c88c330ed7bc170a67d2d2e046fc319b6f67a9cc6e68939c820f"}
+        {"txid": "aa29faa65850da52b801cfc6e0c5e8f1c7380998a06cbe4254ed9243b5d8ba57", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "f694e4d70c4f9474892d166e28af5f171e9a9473", "amount": "1000000", "fee": "1000", "nonce": "1", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "a3c786b0231f60140e631be2786895b3efeca30d6dd56874a34c4b46fdf7dd9f46251c4300ab94288b7d6e51063bf60ad801f90a0d4eaf723239b22a76775f01"}
       ]
     },
     {
       "height": "3",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "6b5fef9d8722583c5762c1ae64145dea7b9368538efb012433437907291b16bb",
+      "previous_hash": "024203c2bcd8ab1975975c4e44c62cd8a0de7674db5ff8ed791766da2deb3fd0",
       "timestamp": "1700000300",
-      "state_root": "d580a9727ba300de95d838bdcd774e8fac9a95f03b3215981e58387519f6858b",
-      "hash": "1747de08617c3a1f30b9b7f2efecf0cfbf8c846ab412fb48b56bcaf622609997",
+      "state_root": "b3193b6514413ef04b6a3a341157e7a59de76541f631d1e103dfd124c5f1bf35",
+      "hash": "e1f926ca7eed89190ce0a758011aa18cf82610141cd4dd739530a08063353fda",
       "transactions": [
-        {"txid": "2474593f325ba9535bfe0c84c5278d67130747a1fd9a0a84e6a1e7993d579bb1", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "fd270d453ad9f604d0eab303b39b0375156317a2", "amount": "6000000", "fee": "1000", "nonce": "2", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "88c0665bc93ae35f0df3e3ade60efd640c5a42d2c9a7ce6fe0f2bb20e47dbdaca6550102df1f33aedc8a3e152c228c8ff179e1d068bfd6561bcdb5e316946802"}
+        {"txid": "715b23ed33dbfb3eb72fd114c8c127aa0cb4d4cc7222604482057c923dab5f47", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "f694e4d70c4f9474892d166e28af5f171e9a9473", "amount": "6000000", "fee": "1000", "nonce": "2", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "b866f982b8ffe98fdf342e8c257f0e332bdb5428e325a67211df441b7ed33721710a82471719152fd81f4f05146044cab4a814e75ab4d36e2811aec0c631540b"}
       ]
     },
     {
       "height": "4",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "1747de08617c3a1f30b9b7f2efecf0cfbf8c846ab412fb48b56bcaf622609997",
+      "previous_hash": "e1f926ca7eed89190ce0a758011aa18cf82610141cd4dd739530a08063353fda",
       "timestamp": "1700000400",
-      "state_root": "4efddc99c4ef1e11626e6baf154cce31273f135287a8c836f71e7e67b8796eec",
-      "hash": "8e88050f0980bb84c6e0ce57b87de605d968bca0a13311513e0aca863c94ea54",
+      "state_root": "7e1b8c3cd774dbfd092eacf49f453e3e1e394cf13803b397a46ddd3b9f1267ba",
+      "hash": "9230bc4eadab700b58e460680d490b9d3e20511dc6cd756860a4e6b5aa13ff7f",
       "transactions": [
-        {"txid": "0b91e65ff74c6287196c396a80a6f1138c9db5716948f00fbb86ca7cced8e943", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "2", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "3", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "2474593f325ba9535bfe0c84c5278d67130747a1fd9a0a84e6a1e7993d579bb1", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "aea27c79eff52db981be89a38f5aa7e6e36f426da66e688cf8b9e719bf96eb1239cb54c091d6f1691e5d85e71e9e55225ef6a1030d08494c0e5b27efa7591105"}
+        {"txid": "a3ddaa539b818d3f1f52ec4fb8c9e2e186b148881f70cfc9e9b3db0e2811acff", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "2", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "3", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "715b23ed33dbfb3eb72fd114c8c127aa0cb4d4cc7222604482057c923dab5f47", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "c952ff1d74980f7dc1743e8949f2a688ad7aa78a47858f61b6ec20498174829d467bec0abf6d02cdcd262a8e9b817346597f5b28abe2ee7ba99a41168996770d"}
       ]
     },
     {
       "height": "5",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "8e88050f0980bb84c6e0ce57b87de605d968bca0a13311513e0aca863c94ea54",
+      "previous_hash": "9230bc4eadab700b58e460680d490b9d3e20511dc6cd756860a4e6b5aa13ff7f",
       "timestamp": "1700000500",
-      "state_root": "ef1878ef4d9af1affa3d286f4768115d6da1a7a80f949e1449851bcbaf482eee",
-      "hash": "0b2f11f337ef9a75a18fefb25d2abcb908bf960d9a257f6701e3d23ba7a1b3cc",
+      "state_root": "97f8c3f3f16521cd03e1e027d183988049cfacf3fc38ce5067250499257b56d6",
+      "hash": "cd1bcda5d2d997047dd2d28f3245608f9c3e759be253ff6e7ed6a1eedcdb8b36",
       "transactions": [
-        {"txid": "d2052fa8427894b565b5642d978aee2e82f4f514046a74097c74cc8cbd3a0637", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "fd270d453ad9f604d0eab303b39b0375156317a2", "amount": "4000000", "fee": "1000", "nonce": "4", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "bfe8b9815745cadca35b8dc07830007f2ebea81d061ec9fd50bde439ac41bdeb58261cae8f1f38533fd6eeff6beeb76ce26c9d154ab371b722988bd84ff69c0b"}
+        {"txid": "4a6a8997947b6bf3740cf3fab2b1f05a2c99ae4b72959e9983d89c9982af2568", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "f694e4d70c4f9474892d166e28af5f171e9a9473", "amount": "4000000", "fee": "1000", "nonce": "4", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "75ec5423c9a0d6bade03e1dafda0d40e7fd1d57ba99bce7a2969004ef93f58d3525edc5af6177890ee686b460320bd1c4d3a4f6e777e456f17ef356f11a01e02"}
       ]
     },
     {
       "height": "6",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "0b2f11f337ef9a75a18fefb25d2abcb908bf960d9a257f6701e3d23ba7a1b3cc",
+      "previous_hash": "cd1bcda5d2d997047dd2d28f3245608f9c3e759be253ff6e7ed6a1eedcdb8b36",
       "timestamp": "1700000600",
-      "state_root": "ef1878ef4d9af1affa3d286f4768115d6da1a7a80f949e1449851bcbaf482eee",
-      "hash": "135ba541e617be0cf9f4531b4e0fd5f4849b95b5338e87dc60307ee1b2c675b8",
+      "state_root": "97f8c3f3f16521cd03e1e027d183988049cfacf3fc38ce5067250499257b56d6",
+      "hash": "1433bb8e3210d36936ab4ba2902cb52e3764cb843c100cab007d241d4bfa41f5",
       "transactions": []
     },
     {
       "height": "7",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "135ba541e617be0cf9f4531b4e0fd5f4849b95b5338e87dc60307ee1b2c675b8",
+      "previous_hash": "1433bb8e3210d36936ab4ba2902cb52e3764cb843c100cab007d241d4bfa41f5",
       "timestamp": "1700000700",
-      "state_root": "ef1878ef4d9af1affa3d286f4768115d6da1a7a80f949e1449851bcbaf482eee",
-      "hash": "b452733146c7a18702b8cc51c70e84265088c203df57cb0853a5c1b2e7fdbbce",
+      "state_root": "97f8c3f3f16521cd03e1e027d183988049cfacf3fc38ce5067250499257b56d6",
+      "hash": "42dee66a2fe3b5bd9ea1556ee4c0546bbddf5c38289dd2f11c2dd08c984ffc65",
       "transactions": []
     },
     {
       "height": "8",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "b452733146c7a18702b8cc51c70e84265088c203df57cb0853a5c1b2e7fdbbce",
+      "previous_hash": "42dee66a2fe3b5bd9ea1556ee4c0546bbddf5c38289dd2f11c2dd08c984ffc65",
       "timestamp": "1700000800",
-      "state_root": "ef1878ef4d9af1affa3d286f4768115d6da1a7a80f949e1449851bcbaf482eee",
-      "hash": "a8fb12d2f6170d9f0ce5ebe5df956e56f10db7d187187013e0bb25eeae3d9376",
+      "state_root": "97f8c3f3f16521cd03e1e027d183988049cfacf3fc38ce5067250499257b56d6",
+      "hash": "cd88091522f051c8941d4bdbb81bf2eab00bc98b00c9b0e803931c59c8f96d5d",
       "transactions": []
     },
     {
       "height": "9",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "a8fb12d2f6170d9f0ce5ebe5df956e56f10db7d187187013e0bb25eeae3d9376",
+      "previous_hash": "cd88091522f051c8941d4bdbb81bf2eab00bc98b00c9b0e803931c59c8f96d5d",
       "timestamp": "1700000900",
-      "state_root": "ef1878ef4d9af1affa3d286f4768115d6da1a7a80f949e1449851bcbaf482eee",
-      "hash": "701859e88d5a7080f906ae74eaee6a5b42d4a129ed3cd22b2f292f70fe521bf7",
+      "state_root": "97f8c3f3f16521cd03e1e027d183988049cfacf3fc38ce5067250499257b56d6",
+      "hash": "1fc0826d6b1bcc96fee07b6d8fcba641a2bc1f295e9d53120c04282c67faaf46",
       "transactions": []
     },
     {
       "height": "10",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "701859e88d5a7080f906ae74eaee6a5b42d4a129ed3cd22b2f292f70fe521bf7",
+      "previous_hash": "1fc0826d6b1bcc96fee07b6d8fcba641a2bc1f295e9d53120c04282c67faaf46",
       "timestamp": "1700001000",
-      "state_root": "e93422ae52c8a223645b0d3bea8eb0610d204ef41577ef446efabbf1cef3dd0a",
-      "hash": "5d780b61b4b8106f0d7dda647b47f8ef4216ff0329bbc88a700501b2c834c8e9",
+      "state_root": "d5616a83be5e41042fd1266313f7addab4fd61b1d678566bc221a97a66468eeb",
+      "hash": "e7d92c74f19749e2aa0dd6a697d25365a202f5ee48461dc2c00363ed958092de",
       "transactions": []
     },
     {
       "height": "11",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "5d780b61b4b8106f0d7dda647b47f8ef4216ff0329bbc88a700501b2c834c8e9",
+      "previous_hash": "e7d92c74f19749e2aa0dd6a697d25365a202f5ee48461dc2c00363ed958092de",
       "timestamp": "1700001100",
-      "state_root": "bcc2ac7c4a4e06891739476832140394c8a0a1011b4bed28ae43f49055531ca2",
-      "hash": "fefa7c4d283e1a2e42aaad984bb2c868a372ce16d31b18863ffaba03d328bc84",
+      "state_root": "7e0fcf5ad3ede51874ce46e0eebdecd142489756c9682a4e75eb76164c71bf30",
+      "hash": "2f4c8b123f5948d067e6596f729cca9fd71101b2f299cbb96af1b510dc07df2a",
       "transactions": [
-        {"txid": "89e9ff7bdd41c36f2c11b86e788193a412cec824b143766ee1c0f6ba09b17bee", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "fd270d453ad9f604d0eab303b39b0375156317a2", "to": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "amount": "500000", "fee": "1000", "nonce": "0", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "d935ce3529ff0e5b7e59918935bf764d42dfef75643206ddf3cedf806a5ac0c9", "signature": "1aa8a4b66dd573bbadb9621ff37973de87f91c873c1101f63d8c99565e413db03f8594dc213a2a3e640902f580e61a55a5640b9a3fa01a2b5bc7c597abb2bd0d"}
+        {"txid": "9c30c92ed68ac1cb8a79e7461a6268505f690ea80c98eef7c1c4c2db81459be8", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "0", "from": "f694e4d70c4f9474892d166e28af5f171e9a9473", "to": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "amount": "500000", "fee": "1000", "nonce": "0", "expiry_height": "0", "daily_limit": "0", "hold_threshold": "0", "hold_blocks": "0", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "18fe3cc5c7d7bfaf3232f090ba5d49db42b477f07e90d4dccff6582eb9b42abb", "signature": "f552617806ba97b415f0a23cde35b02d8f2a09f105521ee9ea1cd957c3046baa350e12ca3de38c36e601894c51587e38b319c4af8446191b749fd7396a214d0d"}
       ]
     },
     {
       "height": "12",
       "protocol_version": "1",
       "chain_id": "tazvera-local-prototype-v1",
-      "previous_hash": "fefa7c4d283e1a2e42aaad984bb2c868a372ce16d31b18863ffaba03d328bc84",
+      "previous_hash": "2f4c8b123f5948d067e6596f729cca9fd71101b2f299cbb96af1b510dc07df2a",
       "timestamp": "1700001200",
-      "state_root": "65bf5f3dac84713c01e51681cbb1e457a2e80443b1c84d1acfa815f22a19e1f6",
-      "hash": "fcc4a313a45b41f4e83a2a252b768e6af6f2fb08bf0d30156f7624b3ce26ce3f",
+      "state_root": "6afc18ff1b70164a158f916cbfa8d89f229a45d6b9487a443de0be1837a7f5f3",
+      "hash": "27f83706688bb0726b96862aadf418cc5ccf2559babe7cdd48218d10cfb0247d",
       "transactions": [
-        {"txid": "034dcb0900b1610e333beadaea42efcedd8c52f50c71c4ce94da304ffd8d70b7", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "1", "from": "82d4962beb49713c0e715841fa8a7166cceb3d2a", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "5", "expiry_height": "0", "daily_limit": "50000000", "hold_threshold": "3000000", "hold_blocks": "5", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "dcf3e291fa91ac449a5bb737387ccdfa770a83842af4838a991703e82900f95f", "signature": "c8d47b3703ef2f51a8772fc38b4df5b4d7ad7cae9f7c0d4addc0dae7054af37eff121688b7c953062b8e9e6af7963ef101386d2e1c07f750ab1780cd0c0f7d01"}
+        {"txid": "781339cbc745ee0e77865a96e51a876392184846784450da8b736de31c27afa0", "protocol_version": "1", "chain_id": "tazvera-local-prototype-v1", "kind": "1", "from": "f691f226e6cc1e56a973357ffb1f0a2f2aceb9fd", "to": "0000000000000000000000000000000000000000", "amount": "0", "fee": "1000", "nonce": "5", "expiry_height": "0", "daily_limit": "50000000", "hold_threshold": "3000000", "hold_blocks": "5", "ref": "0000000000000000000000000000000000000000000000000000000000000000", "new_owner": "0000000000000000000000000000000000000000", "veto": "0000000000000000000000000000000000000000", "guardian_threshold": "0", "guardians": [], "pubkey": "bb01054f5b585560673f8bae5ff854da44c6fbf28359f2907a9f008ac9569daa", "signature": "c1b1c85d523bff745fc3b8b5bc96b1581ac729d21d0773397557533432c13b295a9ea5930f6536e2334a6c97b04e28ebe360c1477b7bdc24d092ccaf5bd1a20c"}
       ]
     }
   ]

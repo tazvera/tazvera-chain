@@ -70,7 +70,7 @@ std::string to_json(const Chain& chain) {
             j += "\"nonce\": " + num(tx.nonce) + ", \"expiry_height\": " + num(tx.expiry_height) + ", ";
             j += "\"daily_limit\": " + num(tx.daily_limit) + ", \"hold_threshold\": " + num(tx.hold_threshold) + ", ";
             j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", \"ref\": " + hex(tx.ref) + ", ";
-            j += "\"new_owner\": " + hex(tx.new_owner) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
+            j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
             for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
             j += "], ";
             j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
@@ -111,9 +111,10 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
                 else if (tx.kind == TxKind::SetSafety) add(b.height, id, Address{}, EntryKind::SafetyChanged, 0, tx.fee);
                 else if (tx.kind == TxKind::SetGuardians) add(b.height, id, Address{}, EntryKind::GuardiansChanged, 0, tx.fee);
                 else if (tx.kind == TxKind::RecoveryVote) add(b.height, id, tx.to, EntryKind::RecoveryVoted, 0, tx.fee);
-                else if (tx.kind == TxKind::RecoveryCancel) add(b.height, id, Address{}, EntryKind::RecoveryCancelled, 0, tx.fee);
+                else if (tx.kind == TxKind::RecoveryCancel) add(b.height, id, tx.to, EntryKind::RecoveryCancelled, 0, tx.fee);
                 else if (target) add(b.height, id, target->to, EntryKind::Cancelled, target->amount, tx.fee);
             }
+            if (tx.kind == TxKind::RecoveryCancel && tx.to == address && tx.from != address) add(b.height, id, tx.from, EntryKind::RecoveryCancelled, 0, 0); // stopped by the veto key
             if (tx.kind == TxKind::Transfer && tx.to == address && !res.held) add(b.height, id, tx.from, EntryKind::Received, tx.amount, 0);
         }
     }

@@ -9,13 +9,13 @@ enum class TxKind : std::uint8_t {
     CancelHeld = 2,      // take back a transfer that is still being held
     SetGuardians = 3,    // name the trusted people who may help recover this account
     RecoveryVote = 4,    // a guardian votes to move someone's account to a new address
-    RecoveryCancel = 5,  // the owner stops a recovery that is voting or waiting
+    RecoveryCancel = 5,  // stop a recovery: the owner (to = zero) or, if one is set, the account's veto key (to = the account)
 };
 struct Transaction {
     std::uint32_t protocol_version{PROTOCOL_VERSION};
     std::string chain_id{CHAIN_ID};
     Address from{};
-    Address to{};            // Transfer: receiver. RecoveryVote: the account that is to be recovered
+    Address to{};            // Transfer: receiver. RecoveryVote: the account to recover. RecoveryCancel: zero (own account) or the account the veto key protects
     Amount amount{0};        // Transfer only
     Amount fee{FEE_TRANSFER_V1};
     std::uint64_t nonce{0};
@@ -30,6 +30,7 @@ struct Transaction {
     Address new_owner{};            // RecoveryVote: the address the funds should move to
     std::vector<Address> guardians; // SetGuardians: strictly ascending, at most MAX_GUARDIANS
     std::uint64_t guardian_threshold{0}; // SetGuardians: how many of them must agree
+    Address veto{};                 // SetGuardians: optional separate (offline) key that alone may cancel a recovery; zero = none
     std::vector<std::uint8_t> signable_bytes() const;
     Hash32 txid() const;
 };

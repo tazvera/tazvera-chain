@@ -165,7 +165,7 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
     }
     case TxKind::SetGuardians: {
         if (sender.recovery.active) return fail("cancel the pending recovery first");
-        const GuardianConfig wanted{tx.guardians, tx.guardian_threshold};
+        const GuardianConfig wanted{tx.guardians, tx.guardian_threshold, tx.veto};
         sender.balance -= tx.fee; sender.nonce += 1;
         if (sender.guardians.is_default()) { // first-time setup is immediate
             sender.guardians = wanted; sender.pending_guardians = PendingGuardians{};
@@ -196,10 +196,22 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         break;
     }
     case TxKind::RecoveryCancel: {
-        if (!sender.recovery.active && sender.votes.empty()) return fail("no recovery to cancel");
-        sender.balance -= tx.fee; sender.nonce += 1;
-        sender.recovery = PendingRecovery{}; sender.votes.clear();
-        accounts_[tx.from] = sender;
+        if (tx.to == Address{}) { // the account cancels its own recovery ...
+            if (sender.guardians.veto != Address{}) return fail("this account has a veto key: only the veto key may cancel");
+            if (!sender.recovery.active && sender.votes.empty()) return fail("no recovery to cancel");
+            sender.balance -= tx.fee; sender.nonce += 1;
+            sender.recovery = PendingRecovery{}; sender.votes.clear();
+            accounts_[tx.from] = sender;
+        } else { // ... or the veto key of another account does it (the veto key pays the fee from its own account)
+            const auto pit = accounts_.find(tx.to);
+            if (pit == accounts_.end()) return fail("no such account");
+            Account prot = pit->second;
+            if (prot.guardians.veto != tx.from) return fail("sender is not the veto key of this account");
+            if (!prot.recovery.active && prot.votes.empty()) return fail("no recovery to cancel");
+            sender.balance -= tx.fee; sender.nonce += 1;
+            prot.recovery = PendingRecovery{}; prot.votes.clear();
+            accounts_[tx.from] = sender; accounts_[tx.to] = prot;
+        }
         break;
     }
     }
@@ -226,7 +238,7 @@ Hash32 State::state_root() const {
     bytes.insert(bytes.end(), domain.begin(), domain.end());
     put_u64(bytes, accounts_.size());
     auto put_addr = [&bytes](const Address& a) { bytes.insert(bytes.end(), a.begin(), a.end()); };
-    auto put_guardians = [&](const GuardianConfig& g) { put_u64(bytes, g.list.size()); for (const Address& a : g.list) put_addr(a); put_u64(bytes, g.threshold); };
+    auto put_guardians = [&](const GuardianConfig& g) { put_u64(bytes, g.list.size()); for (const Address& a : g.list) put_addr(a); put_u64(bytes, g.threshold); put_addr(g.veto); };
     for (const auto& [address, a] : accounts_) {
         put_addr(address);
         put_u64(bytes, a.balance); put_u64(bytes, a.nonce);
