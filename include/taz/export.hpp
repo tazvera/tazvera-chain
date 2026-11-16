@@ -5,7 +5,7 @@ namespace taz {
 // Serialises the whole chain for the offline explorer. Every number is a decimal STRING
 // (uint64 does not fit in a JS number) and every byte array is lowercase hex.
 // A chain that only contains plain transfers is written as format "v1"; one that uses the
-// safety rules is written as "v2"; one that uses guardian recovery as "v3" (older explorers refuse
+// safety rules is written as "v2"; one that uses guardian recovery as "v4" (older explorers refuse
 // a newer format instead of mis-verifying it).
 std::string to_json(const Chain& chain);
 

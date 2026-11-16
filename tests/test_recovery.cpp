@@ -314,7 +314,7 @@ static void test_held_funds_and_statements() {
 
 static void test_state_roots_and_export() {
     World a(2), b(2);
-    CHECK(to_json(a.c).find("tazvera-chain-export-v3") != std::string::npos);
+    CHECK(to_json(a.c).find("tazvera-chain-export-v4") != std::string::npos);
     World p(2, false); CHECK(to_json(p.c).find("tazvera-chain-export-v1") != std::string::npos); // no guardians used => still v1
     CHECK(put(p.c, {safety(p.o, 0, 0, 0, nx(p.c, p.o))})); CHECK(to_json(p.c).find("tazvera-chain-export-v2") != std::string::npos);
     // different guardian data => different roots
@@ -473,6 +473,40 @@ static void test_veto_changes_are_delayed_and_in_root() {
 
 // Many blocks of random mixed transactions; every block must keep the supply exact, a follower node
 // that only receives blocks must reach the same root, and statements must match the state.
+// A thief who ALREADY holds the account key can add his own veto key to an account that has guardians but no veto.
+// This pins what really happens (it is a known limit of delayed list changes, see README "Known limits"):
+//  (a) guardians who vote within SAFETY_DELAY_BLOCKS - RECOVERY_DELAY_BLOCKS still win;
+//  (b) guardians who are too late lose every later recovery, and the owner cannot remove the thief's veto.
+static void test_thief_adds_veto_late() {
+    { // (a) guardians react at once: the recovery completes before the thief's veto takes effect
+        World w(2); Chain& c = w.c; const Key& thief_veto = w.x;
+        CHECK(put(c, {setg_veto(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, thief_veto.addr, nx(c, w.o))}));
+        CHECK(c.state().find(w.o.addr)->pending_guardians.active);
+        CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
+        empty_until(c, c.state().find(w.o.addr)->recovery.ready_height);
+        CHECK(c.state().balance(w.n.addr) > 0);                                      // the guardians won
+        CHECK(c.state().find(w.o.addr)->guardians.is_default());
+        conserved(c, w.total);
+    }
+    { // (b) guardians sleep for 500 blocks
+        World w(2); Chain& c = w.c; const Key& thief_veto = w.x;
+        CHECK(put(c, {setg_veto(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, thief_veto.addr, nx(c, w.o))}));
+        empty_until(c, c.height() + SAFETY_DELAY_BLOCKS);
+        CHECK(c.state().find(w.o.addr)->guardians.veto == thief_veto.addr);          // the thief's veto is now in force
+        CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
+        CHECK(c.state().find(w.o.addr)->recovery.active);
+        CHECK(put(c, {vcancel(thief_veto, w.o.addr, nx(c, thief_veto))}));            // the thief cancels the recovery
+        CHECK(!c.state().find(w.o.addr)->recovery.active);
+        // the owner asks to remove the veto, the thief (same key) resends the current setting and cancels that change
+        CHECK(put(c, {setg(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, nx(c, w.o))}));
+        CHECK(c.state().find(w.o.addr)->pending_guardians.active);
+        CHECK(put(c, {setg_veto(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, thief_veto.addr, nx(c, w.o))}));
+        CHECK(!c.state().find(w.o.addr)->pending_guardians.active);
+        CHECK(c.state().find(w.o.addr)->guardians.veto == thief_veto.addr);
+        conserved(c, w.total);
+    }
+}
+
 static void test_random_run() {
     constexpr int K = 5;
     Key k[K]; for (auto& x : k) x = new_key();
@@ -549,7 +583,7 @@ int main() {
     test_shape_rules(); test_happy_path(); test_single_guardian_and_all_guardians(); test_owner_cancel();
     test_guardian_changes_are_delayed(); test_thief_cannot_outrun_guardians(); test_overflow_and_empty_edges();
     test_held_funds_and_statements(); test_state_roots_and_export(); test_signatures_cover_fields();
-    test_same_block_order_is_fixed(); test_root_covers_recovery_data(); test_veto_key(); test_veto_cancel_signature_covers_account(); test_veto_changes_are_delayed_and_in_root(); test_random_run();
+    test_same_block_order_is_fixed(); test_root_covers_recovery_data(); test_veto_key(); test_veto_cancel_signature_covers_account(); test_veto_changes_are_delayed_and_in_root(); test_thief_adds_veto_late(); test_random_run();
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Recovery tests passed. This is not a security audit.\n"; return EXIT_SUCCESS;
 }

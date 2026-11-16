@@ -1,8 +1,8 @@
-# TAZVERA Chain — Core v7
+# TAZVERA Chain — Core v8.1
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
-This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. It deliberately does **not** implement networking, validators, consensus, staking, smart contracts, a wallet, explorer, or persistence.
+This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. It deliberately does **not** implement networking, validators, consensus, staking, smart contracts or a wallet. It does include a local transaction pool, an offline JSON explorer and local chain-file persistence (see the sections below).
 
 ## What this package includes
 
@@ -46,7 +46,7 @@ The test suite checks valid signatures, modified-signature rejection, wrong-chai
 ## Important limitations and next work
 
 1. This is a repaired local core only. A successful local build is not proof of blockchain security.
-2. No P2P networking, consensus, validator registration, staking, slashing, persistence, RPC, JSON protocol, wallet, or smart contracts are included.
+2. No P2P networking, consensus, validator registration, staking, slashing, RPC, network protocol, wallet, or smart contracts are included. Local file persistence exists (v8 / v8.1 below), but it is not a database and not a network.
 3. The prototype uses one fixed transfer fee. Congestion policy, fee governance, validator economics, and the long-term sustainability of a finite staking reserve still need formal design.
 4. The 100% fee-burn choice means transaction fees do not pay validators. Resolve validator rewards before public testnet/mainnet.
 5. The address derivation here is a prototype convention, not a finalized public address standard.
@@ -131,7 +131,7 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 
 - `Mempool` (`include/taz/mempool.hpp`): a local waiting room for transactions. `submit` checks a transaction against the real state PLUS everything already waiting (so nonces must follow each other, daily limits and guardian rules see pooled transactions), refuses duplicates, a full pool and too many per sender; `select` builds a block's worth in order; `prune_stale` removes entries that can no longer apply (added by me: the original kept dead entries forever); `drop_expired`, `remove_included`.
 - `save_chain_json` (`include/taz/persist.hpp`): writes the explorer JSON through a temporary file and a rename (changed by me: the original overwrote the file in place, so a crash could leave half a file).
-- Not done: loading a chain back from JSON, networking. The `json_io.hpp` header in the Grok package had no implementation, so it is left out.
+- Loading a chain back from JSON was added in v8 / v8.1 (below). The `json_io.hpp` header from the Grok package had no implementation; since v8.1 it contains only a comment.
 - Known cost: `submit` copies the state and replays the pool, so it is O(pool size) per call. Fine for a prototype, to be redone before any network use.
 - Tests: `taz_mempool_tests` (nonce gaps, duplicates, bad signatures, tampered amounts, expiry, capacity, per-sender limit, safety and guardian rules inside the pool, stale pruning, saving).
 
@@ -147,9 +147,23 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 - Tests: shape rules, only-the-veto-may-cancel (owner key, stranger, guardian, veto of another account all refused), retargeting after signing refused, delayed change, thief scenario, statements for both accounts, state root, and the random run mixes veto settings and veto cancels (29 accepted veto cancels in the checked run).
 
 
-## Persistence (v0.8)
+## v8 / v8.1: saving and loading a chain (persistence)
 
-- `save_chain_json` / `load_chain_json`: explorer JSON, atomic save, full replay on load.
-- Format: `tazvera-chain-export-v1|v2|v3` (feature level only; protocol_version must match).
-- Private keys are never stored. Tampered files must fail verification.
-- Local prototype only — not a networked consensus database.
+**Files:** `include/taz/persist.hpp`, `src/persist.cpp`, `tests/test_persist.cpp`. Version 0.8.1.
+
+- `save_chain_json(chain, path, &error)` writes the same JSON the explorer reads. Private keys are never written (the chain holds none; a test searches the file for every key used).
+- `load_chain_json(path, chain, &error)` and `load_chain_json_text(text, chain, &error)` rebuild the chain **from genesis**: the genesis block is rebuilt from `genesis_balances`, and every later block goes through the same `Chain::accept_block` as a live block. So block hash, every signature, nonce, balance and safety/guardian/veto rule, chain ID, protocol version, previous-hash link and the state root after each block are all checked again. Declared `txid` and `hash` must equal the recomputed values.
+- The parser is strict: only objects, arrays and strings; no escapes, comments, numbers, `true`/`null`, duplicate or unknown keys, byte-order mark or trailing data; hex must be lowercase and of exact length; numbers must be canonical decimal strings (no `+`, no leading zero, no overflow); depth, string length, member count, node count and file size are limited (`LoadOptions`, default 64 MiB). On **any** failure the target chain is left untouched and `error` says why.
+- **Atomic save (POSIX):** the body is written to a unique temporary file (`path.tmp.<pid>.<n>`, created with `O_EXCL`), flushed with `fsync`, read back and compared, renamed over the target, and the directory is flushed. A crash before the rename leaves the old file intact; a stale temporary file is harmless. Several writers at once never mix their data. **Windows:** a plain write plus `rename`, no `fsync`. It is untested and the guarantee is weaker; do not rely on it.
+- **Formats and the v6/v7 difference.** `v1` = plain transfers, `v2` = safety rules, `v4` = guardian recovery with the veto key (what v8 writes). The label must match what the chain really contains, so history cannot be passed off as simpler. Core v7 wrote guardian chains as `v3`; those carry the veto field and load as `v4`. Core v6 also wrote `v3`, **without** the veto field, with different signature bytes and state roots: such a file is refused with a clear message ("Core v6 file"). Plain and safety files from v6 (no veto field) still load, because their rules did not change. Files written by Core v7 or older list **one** genesis account; v8 requires both, so they must be re-exported.
+- Restart: save, load, save again gives a byte-identical file, and the loaded chain accepts the same next block as the original (tested at many points, including a held transfer, a recovery waiting and a completed recovery).
+- The repository's own `explorer/*.json` demo files are loaded and re-exported byte for byte by a test (the v8 demo files did not load, and are regenerated).
+- **Known limits.** (1) The address of a genesis account with a **zero** balance is not covered by any hash or by the state root, so changing it is not detected; the ledger (every hash, root and balance) stays identical. A test pins this. (2) It is local file persistence: no network, no database, no concurrent-process locking across machines. (3) The file must come from a build with the same protocol constants. (4) Not a security audit.
+- Tests: `taz_persist_tests`, 11 sections: save, load, strict JSON, replay, integrity, incomplete files (cut at every possible length), atomic save and crash simulation, restart, versions, random damage (about 7,000 damaged files; any that load must have an identical ledger), repository demo files.
+- Also restored in v8.1: the height-overflow guards of Core v6.2 (`chain.cpp`, `mempool.cpp`) that the v7 upload had dropped, and `.gitattributes`.
+
+## Known limits of guardians and the veto key (checked by tests)
+
+- A thief who already holds the account key can add **his own** veto key to an account that has guardians but no veto key. The change waits `SAFETY_DELAY_BLOCKS` (500). Guardians who vote within about 200 blocks still win (recovery needs 300). Guardians who are too late lose every later recovery, and the owner cannot remove the thief's veto, because the thief (same key) resends the current setting and cancels the owner's change. Pinned by `test_thief_adds_veto_late`.
+- So "a thief cannot stop the guardians" holds only when the veto key was set **before** the key was stolen. Set it at the same time as the guardians.
+- This is a property of delayed list changes controlled by one key, not special to the veto key (without a veto, a thief could likewise install his own guardians after 500 blocks). Whether to change the rule is an open design decision.

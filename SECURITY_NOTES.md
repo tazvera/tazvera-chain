@@ -19,3 +19,6 @@
 - v6: votes are stored in consensus state (map guardian -> new address) and are part of the state root; the list of guardians is canonical (sorted, unique).
 - v7: the veto key can stop every recovery of its account. It is a trade-off, not a free lunch: keep it offline and separate. Its account pays the cancel fee.
 - v7: v6 chain files do not verify under v7 (signed bytes and state root changed). Prototype only.
+- v8.1: persistence loads by full replay (every block through `accept_block`) with a strict parser and size limits; the address of a zero-balance genesis account is not authenticated (see README). Windows saving has no `fsync` and is untested.
+- v8.1: a thief holding the key can add his own veto key to an account that has guardians but no veto, and guardians that are more than about 200 blocks late then lose permanently (test `test_thief_adds_veto_late`). Set the veto key together with the guardians.
+- v8.1: `max_timestamp` still defaults to "no limit" in `Chain`; the caller must supply a clock-drift bound. Blocks carry no producer signature (known, consensus work is not started).
