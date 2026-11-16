@@ -28,9 +28,12 @@ std::string snum(std::int64_t v) { return q(std::to_string(v)); }
 }
 
 std::string to_json(const Chain& chain) {
-    int level = 1; // 1 = plain transfers only, 2 = safety rules, 3 = guardian recovery
+    // Format label: v1 = plain transfers only, v2 = safety rules, v4 = guardian recovery with the veto key (Core v7 rules).
+    // "v3" is deliberately never written: Core v6 used it for guardian chains WITHOUT the veto key, whose signatures
+    // and state roots differ from today's rules, so the two layouts must not share a label.
+    int level = 1;
     for (const Block& b : chain.blocks()) for (const Transaction& tx : b.transactions) {
-        if (tx.kind >= TxKind::SetGuardians) level = 3; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
+        if (tx.kind >= TxKind::SetGuardians) level = 4; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
     }
     std::string j;
     j += "{\n  \"format\": \"tazvera-chain-export-v" + std::to_string(level) + "\",\n";

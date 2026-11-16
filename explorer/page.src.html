@@ -163,7 +163,7 @@ function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " 
 function parseChain(text) {
   let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
   need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
-  need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3", "tazvera-chain-export-v4"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
   need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
   need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
   need(j.params && typeof j.params === "object", "params गलत हैं");

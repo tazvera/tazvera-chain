@@ -1,403 +1,419 @@
 #include "taz/persist.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
-#include <cctype>
+#include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
-#include <sstream>
+#include <map>
+#include <cerrno>
+#include <cstring>
+#include <stdexcept>
+#include <tuple>
+#include <utility>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace taz {
 namespace {
 
-struct Cursor {
-    const std::string& s;
-    std::size_t i{0};
-    std::string err;
-    bool fail(const char* m) { err = m; return false; }
-    void skip() {
-        while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+struct LoadError : std::runtime_error { using std::runtime_error::runtime_error; };
+[[noreturn]] void fail(const std::string& msg) { throw LoadError(msg); }
+
+// ----------------------------------------------------------------------------------------------
+// A deliberately small and strict JSON reader. The chain file only ever contains objects, arrays and
+// strings (every number is a decimal string), so nothing else is accepted: no numbers, true, false, null,
+// comments, trailing commas, duplicate keys, escape sequences, control characters or non-ASCII bytes.
+// ----------------------------------------------------------------------------------------------
+struct JVal {
+    enum class Type { Obj, Arr, Str } type{Type::Str};
+    std::string str;
+    std::vector<JVal> arr;
+    std::vector<std::pair<std::string, JVal>> obj;
+};
+
+class Parser {
+public:
+    Parser(std::string_view text, std::uint64_t max_nodes) : t_(text), max_nodes_(max_nodes) {}
+    JVal parse_document() {
+        if (t_.size() >= 3 && static_cast<unsigned char>(t_[0]) == 0xEF && static_cast<unsigned char>(t_[1]) == 0xBB && static_cast<unsigned char>(t_[2]) == 0xBF)
+            fail("the file starts with a byte-order mark; it must be plain ASCII JSON");
+        ws();
+        JVal v = value(0);
+        ws();
+        if (pos_ != t_.size()) err("unexpected data after the end of the JSON document");
+        return v;
     }
-    bool eof() { skip(); return i >= s.size(); }
-    bool take(char c) {
-        skip();
-        if (i >= s.size() || s[i] != c) return false;
-        ++i;
-        return true;
+private:
+    static constexpr int MAX_DEPTH = 12;
+    static constexpr std::size_t MAX_STRING = 4096, MAX_MEMBERS = 64;
+    std::string_view t_; std::size_t pos_{0}; std::uint64_t nodes_{0}, max_nodes_;
+    [[noreturn]] void err(const std::string& m) const { fail(m + " (at byte " + std::to_string(pos_) + ")"); }
+    void ws() { while (pos_ < t_.size() && (t_[pos_] == ' ' || t_[pos_] == '\n' || t_[pos_] == '\r' || t_[pos_] == '\t')) ++pos_; }
+    char peek() const { if (pos_ >= t_.size()) fail("the file ends too early (cut short?)"); return t_[pos_]; }
+    void count_node() { if (++nodes_ > max_nodes_) fail("the file holds too many JSON values"); }
+    JVal value(int depth) {
+        if (depth > MAX_DEPTH) err("JSON is nested too deeply");
+        count_node();
+        const char c = peek();
+        if (c == '{') return object(depth);
+        if (c == '[') return array(depth);
+        if (c == '"') { JVal v; v.type = JVal::Type::Str; v.str = string(); return v; }
+        err("only objects, arrays and strings are allowed in a chain file");
     }
-    bool expect(char c) {
-        if (!take(c)) return fail(c == '{' ? "expected {" : "expected delimiter");
-        return true;
+    std::string string() {
+        ++pos_; // opening quote
+        std::string s;
+        for (;;) {
+            const char c = peek(); ++pos_;
+            if (c == '"') return s;
+            const auto u = static_cast<unsigned char>(c);
+            if (c == '\\') err("escape sequences are not allowed in a chain file");
+            if (u < 0x20 || u > 0x7e) err("only printable ASCII is allowed inside strings");
+            if (s.size() >= MAX_STRING) err("string is too long");
+            s.push_back(c);
+        }
+    }
+    JVal array(int depth) {
+        JVal v; v.type = JVal::Type::Arr; ++pos_; ws();
+        if (peek() == ']') { ++pos_; return v; }
+        for (;;) {
+            ws(); v.arr.push_back(value(depth + 1)); ws();
+            const char c = peek(); ++pos_;
+            if (c == ']') return v;
+            if (c != ',') { --pos_; err("expected ',' or ']'"); }
+        }
+    }
+    JVal object(int depth) {
+        JVal v; v.type = JVal::Type::Obj; ++pos_; ws();
+        if (peek() == '}') { ++pos_; return v; }
+        for (;;) {
+            ws();
+            if (peek() != '"') err("expected a quoted key");
+            count_node();
+            std::string key = string();
+            for (const auto& kv : v.obj) if (kv.first == key) err("duplicate key \"" + key + "\"");
+            if (v.obj.size() >= MAX_MEMBERS) err("object has too many members");
+            ws();
+            if (peek() != ':') err("expected ':'");
+            ++pos_; ws();
+            v.obj.emplace_back(std::move(key), value(depth + 1)); ws();
+            const char c = peek(); ++pos_;
+            if (c == '}') return v;
+            if (c != ',') { --pos_; err("expected ',' or '}'"); }
+        }
     }
 };
 
-bool parse_string(Cursor& c, std::string& out) {
-    c.skip();
-    if (c.i >= c.s.size() || c.s[c.i] != '"') return c.fail("expected string");
-    ++c.i;
-    out.clear();
-    while (c.i < c.s.size()) {
-        char ch = c.s[c.i++];
-        if (ch == '"') return true;
-        if (ch == '\\') {
-            if (c.i >= c.s.size()) return c.fail("bad escape");
-            char e = c.s[c.i++];
-            if (e == '"' || e == '\\' || e == '/') out.push_back(e);
-            else if (e == 'n') out.push_back('\n');
-            else if (e == 'r') out.push_back('\r');
-            else if (e == 't') out.push_back('\t');
-            else if (e == 'u') {
-                if (c.i + 4 > c.s.size()) return c.fail("bad unicode escape");
-                unsigned v = 0;
-                for (int k = 0; k < 4; ++k) {
-                    char h = c.s[c.i++];
-                    v <<= 4;
-                    if (h >= '0' && h <= '9') v |= static_cast<unsigned>(h - '0');
-                    else if (h >= 'a' && h <= 'f') v |= static_cast<unsigned>(h - 'a' + 10);
-                    else if (h >= 'A' && h <= 'F') v |= static_cast<unsigned>(h - 'A' + 10);
-                    else return c.fail("bad unicode escape");
-                }
-                if (v > 0x7f) return c.fail("only ASCII unicode escapes supported");
-                out.push_back(static_cast<char>(v));
-            } else return c.fail("bad escape");
-        } else if (static_cast<unsigned char>(ch) < 0x20) return c.fail("raw control in string");
-        else out.push_back(ch);
-    }
-    return c.fail("unterminated string");
+// ----------------------------------------------------------------------------------------------
+// Strict, typed access. Every key set must match exactly; every number must be canonical.
+// ----------------------------------------------------------------------------------------------
+const JVal* find(const JVal& o, std::string_view key) {
+    for (const auto& kv : o.obj) if (kv.first == key) return &kv.second;
+    return nullptr;
 }
-
-bool parse_u64_string(Cursor& c, std::uint64_t& out) {
-    std::string str;
-    if (!parse_string(c, str)) return false;
-    if (str.empty() || str.size() > 20) return c.fail("invalid u64 string");
-    std::uint64_t v = 0;
-    for (char ch : str) {
-        if (ch < '0' || ch > '9') return c.fail("invalid u64 digits");
-        std::uint64_t d = static_cast<std::uint64_t>(ch - '0');
-        if (v > (UINT64_MAX - d) / 10) return c.fail("u64 overflow");
-        v = v * 10 + d;
+const JVal& obj_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Obj) fail(std::string(what) + " must be an object"); return v; }
+const JVal& arr_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Arr) fail(std::string(what) + " must be an array"); return v; }
+const std::string& str_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Str) fail(std::string(what) + " must be a string"); return v.str; }
+// The object must have exactly these keys (no more, no fewer).
+void exact_keys(const JVal& o, std::initializer_list<std::string_view> keys, const std::string& what) {
+    for (std::string_view k : keys) if (!find(o, k)) fail(what + " is missing the field \"" + std::string(k) + "\"");
+    if (o.obj.size() != keys.size()) {
+        for (const auto& kv : o.obj) if (std::find(keys.begin(), keys.end(), kv.first) == keys.end()) fail(what + " has an unknown field \"" + kv.first + "\"");
     }
-    out = v;
-    return true;
 }
+const JVal& field(const JVal& o, std::string_view key) { return *find(o, key); }
 
-bool parse_i64_string(Cursor& c, std::int64_t& out) {
-    std::string str;
-    if (!parse_string(c, str)) return false;
-    if (str.empty() || str == "-" || str.size() > 21) return c.fail("invalid i64 string");
-    std::size_t p = 0;
-    bool neg = false;
-    if (str[0] == '-') { neg = true; p = 1; }
-    std::uint64_t v = 0;
-    for (; p < str.size(); ++p) {
-        char ch = str[p];
-        if (ch < '0' || ch > '9') return c.fail("invalid i64 digits");
-        std::uint64_t d = static_cast<std::uint64_t>(ch - '0');
-        if (v > (static_cast<std::uint64_t>(INT64_MAX) - d) / 10) return c.fail("i64 overflow");
-        v = v * 10 + d;
+std::uint64_t dec_u64(const JVal& v, const std::string& what) {
+    const std::string& s = str_of(v, what);
+    if (s.empty() || s.size() > 20) fail(what + " is not a valid decimal number");
+    if (s.size() > 1 && s[0] == '0') fail(what + " has a leading zero");
+    std::uint64_t r = 0;
+    for (char c : s) {
+        if (c < '0' || c > '9') fail(what + " is not a valid decimal number");
+        const auto d = static_cast<std::uint64_t>(c - '0');
+        if (r > (UINT64_MAX - d) / 10) fail(what + " does not fit in 64 bits");
+        r = r * 10 + d;
     }
-    if (neg) {
-        if (v > static_cast<std::uint64_t>(INT64_MAX) + 1) return c.fail("i64 overflow");
-        out = v == static_cast<std::uint64_t>(INT64_MAX) + 1 ? INT64_MIN : -static_cast<std::int64_t>(v);
-    } else out = static_cast<std::int64_t>(v);
-    return true;
+    return r;
 }
-
-int hex_val(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    return -1;
+std::int64_t dec_i64(const JVal& v, const std::string& what) {
+    const std::string& s = str_of(v, what);
+    const bool neg = !s.empty() && s[0] == '-';
+    JVal digits; digits.type = JVal::Type::Str; digits.str = neg ? s.substr(1) : s;
+    const std::uint64_t mag = dec_u64(digits, what);
+    if (neg) { if (mag == 0 || mag > (1ull << 63)) fail(what + " is out of range"); return mag == (1ull << 63) ? INT64_MIN : -static_cast<std::int64_t>(mag); }
+    if (mag > static_cast<std::uint64_t>(INT64_MAX)) fail(what + " is out of range");
+    return static_cast<std::int64_t>(mag);
 }
-
-bool parse_hex_into(Cursor& c, std::uint8_t* dest, std::size_t n) {
-    std::string str;
-    if (!parse_string(c, str)) return false;
-    if (str.size() != n * 2) return c.fail("hex length mismatch");
-    for (std::size_t i = 0; i < n; ++i) {
-        int hi = hex_val(str[i * 2]), lo = hex_val(str[i * 2 + 1]);
-        if (hi < 0 || lo < 0) return c.fail("invalid hex");
-        dest[i] = static_cast<std::uint8_t>((hi << 4) | lo);
-    }
-    return true;
-}
-
-template <std::size_t N>
-bool parse_hex_arr(Cursor& c, std::array<std::uint8_t, N>& a) {
-    return parse_hex_into(c, a.data(), N);
-}
-
-bool key(Cursor& c, const char* name) {
-    std::string k;
-    if (!parse_string(c, k)) return false;
-    if (k != name) return c.fail("unexpected key");
-    if (!c.take(':')) return c.fail("expected :");
-    return true;
-}
-
-bool parse_tx(Cursor& c, Transaction& tx) {
-    if (!c.expect('{')) return false;
-    Hash32 declared_txid{};
-    if (!key(c, "txid") || !parse_hex_arr(c, declared_txid)) return false;
-    if (!c.take(',')) return c.fail("tx comma");
-    std::uint64_t u = 0;
-    if (!key(c, "protocol_version") || !parse_u64_string(c, u) || u > UINT32_MAX) return false;
-    tx.protocol_version = static_cast<std::uint32_t>(u);
-    if (!c.take(',')) return false;
-    if (!key(c, "chain_id") || !parse_string(c, tx.chain_id)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "kind") || !parse_u64_string(c, u) || u > 5) return c.fail("bad kind");
-    tx.kind = static_cast<TxKind>(u);
-    if (!c.take(',')) return false;
-    if (!key(c, "from") || !parse_hex_arr(c, tx.from)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "to") || !parse_hex_arr(c, tx.to)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "amount") || !parse_u64_string(c, tx.amount)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "fee") || !parse_u64_string(c, tx.fee)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "nonce") || !parse_u64_string(c, tx.nonce)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "expiry_height") || !parse_u64_string(c, tx.expiry_height)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "daily_limit") || !parse_u64_string(c, tx.daily_limit)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "hold_threshold") || !parse_u64_string(c, tx.hold_threshold)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "hold_blocks") || !parse_u64_string(c, tx.hold_blocks)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "ref") || !parse_hex_arr(c, tx.ref)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "new_owner") || !parse_hex_arr(c, tx.new_owner)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "veto") || !parse_hex_arr(c, tx.veto)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "guardian_threshold") || !parse_u64_string(c, tx.guardian_threshold)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "guardians")) return false;
-    if (!c.expect('[')) return false;
-    tx.guardians.clear();
-    c.skip();
-    if (!c.take(']')) {
-        for (;;) {
-            Address g{};
-            if (!parse_hex_arr(c, g)) return false;
-            tx.guardians.push_back(g);
-            c.skip();
-            if (c.take(']')) break;
-            if (!c.take(',')) return c.fail("guardians comma");
-        }
-    }
-    if (!c.take(',')) return false;
-    if (!key(c, "pubkey") || !parse_hex_arr(c, tx.pubkey)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "signature") || !parse_hex_arr(c, tx.signature)) return false;
-    if (!c.expect('}')) return false;
-    if (tx.txid() != declared_txid) return c.fail("txid mismatch");
-    return true;
-}
-
-bool parse_block(Cursor& c, Block& b, Hash32& declared_hash) {
-    if (!c.expect('{')) return false;
-    std::uint64_t u = 0;
-    if (!key(c, "height") || !parse_u64_string(c, b.height)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "protocol_version") || !parse_u64_string(c, u) || u > UINT32_MAX) return false;
-    b.protocol_version = static_cast<std::uint32_t>(u);
-    if (!c.take(',')) return false;
-    if (!key(c, "chain_id") || !parse_string(c, b.chain_id)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "previous_hash") || !parse_hex_arr(c, b.previous_hash)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "timestamp") || !parse_i64_string(c, b.timestamp)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "state_root") || !parse_hex_arr(c, b.state_root)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "hash") || !parse_hex_arr(c, declared_hash)) return false;
-    if (!c.take(',')) return false;
-    if (!key(c, "transactions")) return false;
-    if (!c.expect('[')) return false;
-    b.transactions.clear();
-    c.skip();
-    if (!c.take(']')) {
-        for (;;) {
-            Transaction tx;
-            if (!parse_tx(c, tx)) return false;
-            b.transactions.push_back(std::move(tx));
-            c.skip();
-            if (c.take(']')) break;
-            if (!c.take(',')) return c.fail("tx list comma");
-        }
-    }
-    if (!c.expect('}')) return false;
-    return true;
-}
-
-bool rebuild_chain(const std::vector<std::pair<Address, Amount>>& genesis,
-                   const std::vector<std::pair<Block, Hash32>>& blocks,
-                   Chain& out, std::string& err) {
-    if (genesis.size() != 2) { err = "genesis_balances must list exactly 2 accounts"; return false; }
-    if (blocks.empty()) { err = "missing genesis block"; return false; }
-    Chain chain;
-    if (!chain.init_genesis(genesis[0].first, genesis[0].second, genesis[1].first, genesis[1].second)) {
-        err = "init_genesis failed";
-        return false;
-    }
-    const Block& gfile = blocks[0].first;
-    const Hash32& ghash = blocks[0].second;
-    if (gfile.height != 0) { err = "first block must be height 0"; return false; }
-    if (gfile.protocol_version != PROTOCOL_VERSION) { err = "unsupported protocol version"; return false; }
-    if (gfile.chain_id != CHAIN_ID) { err = "wrong chain_id"; return false; }
-    if (!gfile.transactions.empty()) { err = "genesis block must have no transactions"; return false; }
-    if (gfile.timestamp != 0) { err = "genesis timestamp must be 0"; return false; }
-    if (chain.blocks().front().state_root != gfile.state_root) { err = "genesis state_root mismatch"; return false; }
-    if (chain.blocks().front().hash() != ghash) { err = "genesis hash mismatch"; return false; }
-    if (chain.blocks().front().hash() != gfile.previous_hash && gfile.previous_hash != Hash32{}) {
-        // genesis previous_hash is zero in normal export
-    }
-    if (gfile.previous_hash != Hash32{}) { err = "genesis previous_hash must be zero"; return false; }
-
-    for (std::size_t i = 1; i < blocks.size(); ++i) {
-        Block b = blocks[i].first;
-        const Hash32& declared = blocks[i].second;
-        if (b.hash() != declared) { err = "block hash mismatch at height " + std::to_string(b.height); return false; }
-        auto r = chain.accept_block(b, NO_TIMESTAMP_LIMIT);
-        if (!r.ok) { err = "accept_block failed at height " + std::to_string(b.height) + ": " + r.error; return false; }
-        if (chain.blocks().back().hash() != declared) {
-            err = "committed block hash mismatch";
-            return false;
-        }
-    }
-    out = std::move(chain);
-    return true;
-}
-
-bool parse_document(const std::string& json, Chain& out, std::string& err) {
-    Cursor c{json};
-    if (!c.expect('{')) { err = c.err.empty() ? "expected object" : c.err; return false; }
-
-    std::string format;
-    if (!key(c, "format") || !parse_string(c, format)) { err = c.err; return false; }
-    // v1 = transfers only, v2 = safety, v3 = guardians — same protocol_version, different feature use.
-    if (format != "tazvera-chain-export-v1" && format != "tazvera-chain-export-v2" &&
-        format != "tazvera-chain-export-v3") {
-        err = "unsupported export format (need tazvera-chain-export-v1/v2/v3)";
-        return false;
-    }
-    if (!c.take(',')) { err = "comma after format"; return false; }
-
-    std::string chain_id;
-    if (!key(c, "chain_id") || !parse_string(c, chain_id)) { err = c.err; return false; }
-    if (chain_id != CHAIN_ID) { err = "chain_id mismatch"; return false; }
-    if (!c.take(',')) { err = "comma"; return false; }
-
-    std::uint64_t proto = 0;
-    if (!key(c, "protocol_version") || !parse_u64_string(c, proto)) { err = c.err; return false; }
-    if (proto != PROTOCOL_VERSION) { err = "protocol_version mismatch"; return false; }
-    if (!c.take(',')) { err = "comma"; return false; }
-
-    // params object — required keys checked lightly; values must match compiled constants
-    if (!key(c, "params")) { err = c.err; return false; }
-    if (!c.expect('{')) { err = c.err; return false; }
-    auto need_u64 = [&](const char* name, std::uint64_t expected) -> bool {
-        std::uint64_t v = 0;
-        if (!key(c, name) || !parse_u64_string(c, v)) return false;
-        if (v != expected) return c.fail("params constant mismatch");
-        return true;
+template <class T> T hex_of(const JVal& v, const std::string& what) {
+    constexpr std::size_t N = std::tuple_size<T>::value;
+    const std::string& s = str_of(v, what);
+    if (s.size() != 2 * N) fail(what + " must be exactly " + std::to_string(2 * N) + " hex characters");
+    T out{};
+    auto nib = [&](char c) -> unsigned {
+        if (c >= '0' && c <= '9') return static_cast<unsigned>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<unsigned>(c - 'a' + 10);
+        fail(what + " must be lowercase hex");
     };
-    if (!need_u64("fee_transfer_v1", FEE_TRANSFER_V1) || !c.take(',')) { err = c.err.empty() ? "params" : c.err; return false; }
-    if (!need_u64("max_block_txs", MAX_BLOCK_TXS) || !c.take(',')) { err = c.err.empty() ? "params" : c.err; return false; }
-    if (!need_u64("limit_window_blocks", LIMIT_WINDOW_BLOCKS) || !c.take(',')) { err = c.err; return false; }
-    if (!need_u64("max_hold_blocks", MAX_HOLD_BLOCKS) || !c.take(',')) { err = c.err; return false; }
-    if (!need_u64("safety_delay_blocks", SAFETY_DELAY_BLOCKS) || !c.take(',')) { err = c.err; return false; }
-    if (!need_u64("max_guardians", MAX_GUARDIANS) || !c.take(',')) { err = c.err; return false; }
-    if (!need_u64("recovery_delay_blocks", RECOVERY_DELAY_BLOCKS)) { err = c.err; return false; }
-    if (!c.expect('}')) { err = c.err; return false; }
-    if (!c.take(',')) { err = "comma after params"; return false; }
-
-    if (!key(c, "genesis_balances")) { err = c.err; return false; }
-    if (!c.expect('[')) { err = c.err; return false; }
-    std::vector<std::pair<Address, Amount>> genesis;
-    c.skip();
-    if (!c.take(']')) {
-        for (;;) {
-            if (!c.expect('{')) { err = c.err; return false; }
-            Address a{}; Amount bal = 0;
-            if (!key(c, "address") || !parse_hex_arr(c, a)) { err = c.err; return false; }
-            if (!c.take(',')) { err = "comma"; return false; }
-            if (!key(c, "balance") || !parse_u64_string(c, bal)) { err = c.err; return false; }
-            if (!c.expect('}')) { err = c.err; return false; }
-            genesis.emplace_back(a, bal);
-            c.skip();
-            if (c.take(']')) break;
-            if (!c.take(',')) { err = "genesis comma"; return false; }
-        }
-    }
-    if (!c.take(',')) { err = "comma after genesis"; return false; }
-
-    if (!key(c, "blocks")) { err = c.err; return false; }
-    if (!c.expect('[')) { err = c.err; return false; }
-    std::vector<std::pair<Block, Hash32>> blocks;
-    c.skip();
-    if (!c.take(']')) {
-        for (;;) {
-            Block b; Hash32 h{};
-            if (!parse_block(c, b, h)) { err = c.err; return false; }
-            blocks.emplace_back(std::move(b), h);
-            c.skip();
-            if (c.take(']')) break;
-            if (!c.take(',')) { err = "blocks comma"; return false; }
-        }
-    }
-    if (!c.expect('}')) { err = c.err.empty() ? "expected end of object" : c.err; return false; }
-    if (!c.eof()) { err = "trailing garbage after JSON"; return false; }
-
-    return rebuild_chain(genesis, blocks, out, err);
+    for (std::size_t i = 0; i < N; ++i) out[i] = static_cast<std::uint8_t>((nib(s[2 * i]) << 4) | nib(s[2 * i + 1]));
+    return out;
 }
+template <class T> bool is_zero(const T& a) { return std::all_of(a.begin(), a.end(), [](std::uint8_t b) { return b == 0; }); }
+
+constexpr std::string_view FORMAT_PREFIX = "tazvera-chain-export-";
+
+Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
+    const JVal& o = obj_of(jv, where);
+    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+                                  "hold_threshold", "hold_blocks", "ref", "new_owner", "veto", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
+    else exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+                        "hold_threshold", "hold_blocks", "ref", "new_owner", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
+    Transaction tx;
+    const std::uint64_t pv = dec_u64(field(o, "protocol_version"), where + ".protocol_version");
+    if (pv != PROTOCOL_VERSION) fail(where + " has an unsupported protocol version");
+    tx.protocol_version = static_cast<std::uint32_t>(pv);
+    tx.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
+    const std::uint64_t kind = dec_u64(field(o, "kind"), where + ".kind");
+    if (kind > static_cast<std::uint64_t>(TxKind::RecoveryCancel)) fail(where + " has an unknown transaction kind");
+    tx.kind = static_cast<TxKind>(kind);
+    tx.from = hex_of<Address>(field(o, "from"), where + ".from");
+    tx.to = hex_of<Address>(field(o, "to"), where + ".to");
+    tx.amount = dec_u64(field(o, "amount"), where + ".amount");
+    tx.fee = dec_u64(field(o, "fee"), where + ".fee");
+    tx.nonce = dec_u64(field(o, "nonce"), where + ".nonce");
+    tx.expiry_height = dec_u64(field(o, "expiry_height"), where + ".expiry_height");
+    tx.daily_limit = dec_u64(field(o, "daily_limit"), where + ".daily_limit");
+    tx.hold_threshold = dec_u64(field(o, "hold_threshold"), where + ".hold_threshold");
+    tx.hold_blocks = dec_u64(field(o, "hold_blocks"), where + ".hold_blocks");
+    tx.ref = hex_of<Hash32>(field(o, "ref"), where + ".ref");
+    tx.new_owner = hex_of<Address>(field(o, "new_owner"), where + ".new_owner");
+    if (with_veto) tx.veto = hex_of<Address>(field(o, "veto"), where + ".veto");
+    tx.guardian_threshold = dec_u64(field(o, "guardian_threshold"), where + ".guardian_threshold");
+    const JVal& g = arr_of(field(o, "guardians"), where + ".guardians");
+    if (g.arr.size() > 64) fail(where + " lists too many guardians");
+    for (std::size_t i = 0; i < g.arr.size(); ++i) tx.guardians.push_back(hex_of<Address>(g.arr[i], where + ".guardians[" + std::to_string(i) + "]"));
+    tx.pubkey = hex_of<PubKey>(field(o, "pubkey"), where + ".pubkey");
+    tx.signature = hex_of<Signature>(field(o, "signature"), where + ".signature");
+    if (hex_of<Hash32>(field(o, "txid"), where + ".txid") != tx.txid()) fail(where + ": txid does not match the transaction contents (data was changed)");
+    return tx;
+}
+
+Block parse_block(const JVal& jv, bool with_veto, const std::string& where) {
+    const JVal& o = obj_of(jv, where);
+    exact_keys(o, {"height", "protocol_version", "chain_id", "previous_hash", "timestamp", "state_root", "hash", "transactions"}, where);
+    Block b;
+    b.height = dec_u64(field(o, "height"), where + ".height");
+    const std::uint64_t pv = dec_u64(field(o, "protocol_version"), where + ".protocol_version");
+    if (pv != PROTOCOL_VERSION) fail(where + " has an unsupported protocol version");
+    b.protocol_version = static_cast<std::uint32_t>(pv);
+    b.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
+    b.previous_hash = hex_of<Hash32>(field(o, "previous_hash"), where + ".previous_hash");
+    b.timestamp = dec_i64(field(o, "timestamp"), where + ".timestamp");
+    b.state_root = hex_of<Hash32>(field(o, "state_root"), where + ".state_root");
+    const JVal& txs = arr_of(field(o, "transactions"), where + ".transactions");
+    if (txs.arr.size() > MAX_BLOCK_TXS) fail(where + " has too many transactions");
+    for (std::size_t i = 0; i < txs.arr.size(); ++i) b.transactions.push_back(parse_tx(txs.arr[i], with_veto, where + " tx " + std::to_string(i)));
+    if (hex_of<Hash32>(field(o, "hash"), where + ".hash") != b.hash()) fail(where + ": block hash does not match the block contents (data was changed)");
+    return b;
+}
+
+int level_of(const Chain& c) {
+    int level = 1;
+    for (const Block& b : c.blocks()) for (const Transaction& tx : b.transactions) {
+        if (tx.kind >= TxKind::SetGuardians) level = 4; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
+    }
+    return level;
+}
+
+void load_document(std::string_view text, Chain& result, const LoadOptions& opt) {
+    Parser parser(text, opt.max_nodes);
+    const JVal root = parser.parse_document();
+    const JVal& r = obj_of(root, "the file");
+    exact_keys(r, {"format", "chain_id", "protocol_version", "params", "genesis_balances", "blocks"}, "the file");
+
+    // ---- version / format ----
+    const std::string& format = str_of(field(r, "format"), "format");
+    if (format.rfind(FORMAT_PREFIX, 0) != 0) fail("this is not a TAZVERA chain file (unknown \"format\")");
+    const std::string tag = format.substr(FORMAT_PREFIX.size());
+    int declared_level = 0; bool expects_veto = true;
+    if (tag == "v1") { declared_level = 1; expects_veto = false; }          // plain transfers; Core v6 files omit the veto key
+    else if (tag == "v2") { declared_level = 2; expects_veto = false; }     // safety rules; same
+    else if (tag == "v4") declared_level = 4;
+    else if (tag == "v3") declared_level = 4;                               // v7 label before "-v4" existed; checked below
+    else fail("unsupported chain file format \"" + format + "\" (this build reads v1, v2 and v4)");
+
+    if (str_of(field(r, "chain_id"), "chain_id") != CHAIN_ID) fail("the file belongs to a different chain (chain ID differs)");
+    if (dec_u64(field(r, "protocol_version"), "protocol_version") != PROTOCOL_VERSION) fail("unsupported protocol version");
+
+    const JVal& p = obj_of(field(r, "params"), "params");
+    exact_keys(p, {"fee_transfer_v1", "max_block_txs", "limit_window_blocks", "max_hold_blocks", "safety_delay_blocks", "max_guardians", "recovery_delay_blocks"}, "params");
+    const std::pair<const char*, std::uint64_t> expected[] = {
+        {"fee_transfer_v1", FEE_TRANSFER_V1}, {"max_block_txs", MAX_BLOCK_TXS}, {"limit_window_blocks", LIMIT_WINDOW_BLOCKS},
+        {"max_hold_blocks", MAX_HOLD_BLOCKS}, {"safety_delay_blocks", SAFETY_DELAY_BLOCKS}, {"max_guardians", MAX_GUARDIANS},
+        {"recovery_delay_blocks", RECOVERY_DELAY_BLOCKS}};
+    for (const auto& [name, value] : expected)
+        if (dec_u64(field(p, name), std::string("params.") + name) != value) fail(std::string("parameter ") + name + " differs from this build, so the chain cannot be verified here");
+
+    // ---- which transaction layout does this file use? (veto key present or not) ----
+    const JVal& blocks = arr_of(field(r, "blocks"), "blocks");
+    bool saw_tx = false, any_with_veto = false, any_without_veto = false;
+    for (const JVal& b : blocks.arr) {
+        if (b.type != JVal::Type::Obj) continue;
+        const JVal* txs = find(b, "transactions");
+        if (!txs || txs->type != JVal::Type::Arr) continue;
+        for (const JVal& t : txs->arr) {
+            if (t.type != JVal::Type::Obj) continue;
+            saw_tx = true;
+            (find(t, "veto") ? any_with_veto : any_without_veto) = true;
+        }
+    }
+    (void)saw_tx;
+    if (any_with_veto && any_without_veto) fail("transactions in this file use two different layouts");
+    if (tag == "v3" && any_without_veto)
+        fail("this is a Core v6 file (format v3): guardian recovery WITHOUT a veto key. Its signatures and state roots follow older rules, "
+             "so Core v7 and later cannot verify it. Chains written before the veto key existed cannot be loaded.");
+    // v1/v2 files may or may not carry the veto field: Core v6 omitted it, Core v7 and later always write it (value zero when unused).
+    if (expects_veto && any_without_veto) fail("format " + tag + " requires the veto field in every transaction (this looks like an older layout)");
+    const bool with_veto = any_with_veto;
+
+    // ---- genesis ----
+    const JVal& gb = arr_of(field(r, "genesis_balances"), "genesis_balances");
+    if (gb.arr.size() == 1) fail("genesis_balances lists one account: a file written by Core v7 or older; Core v8 files list both genesis accounts, please re-export it");
+    if (gb.arr.size() != 2) fail("genesis_balances must list exactly 2 accounts");
+    std::vector<std::pair<Address, Amount>> genesis;
+    for (std::size_t i = 0; i < gb.arr.size(); ++i) {
+        const std::string w = "genesis_balances[" + std::to_string(i) + "]";
+        const JVal& e = obj_of(gb.arr[i], w);
+        exact_keys(e, {"address", "balance"}, w);
+        const Amount bal = dec_u64(field(e, "balance"), w + ".balance");
+        genesis.emplace_back(hex_of<Address>(field(e, "address"), w + ".address"), bal);
+    }
+    if (genesis[0].first == genesis[1].first) fail("genesis_balances lists the same address twice");
+    Chain chain;
+    if (!chain.init_genesis(genesis[0].first, genesis[0].second, genesis[1].first, genesis[1].second)) fail("genesis could not be created");
+    if (chain.genesis_balances() != genesis) fail("genesis balances do not match");
+
+    // ---- blocks: block 0 must equal the genesis we just rebuilt; every other block is replayed ----
+    if (blocks.arr.empty()) fail("blocks is empty (the genesis block is missing)");
+    const Block g = parse_block(blocks.arr[0], with_veto, "block 0");
+    const Block& mine = chain.blocks()[0];
+    if (g.height != 0 || !g.transactions.empty() || g.timestamp != 0 || !is_zero(g.previous_hash) || g.protocol_version != mine.protocol_version ||
+        g.chain_id != mine.chain_id)
+        fail("block 0 is not a valid genesis block");
+    if (g.state_root != mine.state_root) fail("block 0: genesis state root does not match the genesis balances");
+    for (std::size_t i = 1; i < blocks.arr.size(); ++i) {
+        const Block b = parse_block(blocks.arr[i], with_veto, "block " + std::to_string(i));
+        const ChainResult res = chain.accept_block(b);
+        if (!res.ok) fail("block " + std::to_string(i) + " (height " + std::to_string(b.height) + ") is invalid: " + res.error);
+    }
+    if (level_of(chain) != declared_level)
+        fail("the file's format label (" + tag + ") does not match what the chain contains");
+    result = std::move(chain);
+}
+
+std::string errno_text(const char* what) { return std::string(what) + ": " + std::strerror(errno); }
 
 }  // namespace
 
+bool load_chain_json_text(std::string_view text, Chain& out, std::string* error, const LoadOptions& options) {
+    try {
+        if (text.size() > options.max_file_bytes) fail("the file is larger than the allowed size");
+        Chain loaded;
+        load_document(text, loaded, options);
+        out = std::move(loaded);
+        return true;
+    } catch (const LoadError& e) {
+        if (error) *error = e.what();
+    } catch (const std::exception& e) {
+        if (error) *error = std::string("could not load chain: ") + e.what();
+    }
+    return false;
+}
+
+bool load_chain_json(const std::string& path, Chain& out, std::string* error, const LoadOptions& options) {
+    try {
+        std::error_code ec;
+        const auto status = std::filesystem::status(path, ec);
+        if (ec || !std::filesystem::is_regular_file(status)) { if (error) *error = "not a readable regular file: " + path; return false; }
+        const std::uintmax_t size = std::filesystem::file_size(path, ec);
+        if (ec) { if (error) *error = "could not read the file size"; return false; }
+        if (size > options.max_file_bytes) { if (error) *error = "the file is larger than the allowed size"; return false; }
+        std::ifstream in(path, std::ios::binary);
+        if (!in) { if (error) *error = "could not open the file"; return false; }
+        std::string text(static_cast<std::size_t>(size), '\0');
+        in.read(text.data(), static_cast<std::streamsize>(size));
+        if (static_cast<std::uintmax_t>(in.gcount()) != size) { if (error) *error = "could not read the whole file"; return false; }
+        return load_chain_json_text(text, out, error, options);
+    } catch (const std::exception& e) {
+        if (error) *error = std::string("could not load chain: ") + e.what();
+        return false;
+    }
+}
+
 bool save_chain_json(const Chain& chain, const std::string& path, std::string* error) {
+    auto set_err = [&](const std::string& m) { if (error) *error = m; };
+    if (chain.blocks().empty()) { set_err("the chain has no genesis; nothing to save"); return false; }
+    static std::atomic<unsigned long> counter{0};
+    std::string tmp;
     try {
         const std::string body = to_json(chain);
-        const std::string tmp = path + ".tmp";
+        namespace fs = std::filesystem;
+#ifndef _WIN32
+        const std::string id = std::to_string(static_cast<long>(::getpid())) + "." + std::to_string(counter.fetch_add(1));
+#else
+        const std::string id = std::to_string(counter.fetch_add(1));
+#endif
+        tmp = path + ".tmp." + id; // unique per process and per call, so two saves never share a file
+#ifndef _WIN32
+        {
+            const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+            if (fd < 0) { set_err(errno_text("could not create the temporary file")); return false; }
+            std::size_t done = 0; bool ok = true;
+            while (done < body.size()) {
+                const ssize_t n = ::write(fd, body.data() + done, body.size() - done);
+                if (n < 0) { if (errno == EINTR) continue; ok = false; break; }
+                done += static_cast<std::size_t>(n);
+            }
+            if (ok && ::fsync(fd) != 0) ok = false;
+            const int saved = errno;
+            ::close(fd);
+            if (!ok) { errno = saved; set_err(errno_text("could not write the temporary file")); ::unlink(tmp.c_str()); return false; }
+        }
+#else
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-            if (!out) { if (error) *error = "could not open file for write"; return false; }
-            out << body;
-            out.flush();
-            if (!out) { std::remove(tmp.c_str()); if (error) *error = "write failed"; return false; }
+            out << body; out.flush();
+            if (!out) { set_err("could not write the temporary file"); std::remove(tmp.c_str()); return false; }
         }
-        if (std::rename(tmp.c_str(), path.c_str()) != 0) {
-            std::remove(tmp.c_str());
-            if (error) *error = "could not replace the chain file";
-            return false;
+#endif
+        { // read it back: what is on disk must be exactly what we meant to write
+            std::ifstream in(tmp, std::ios::binary);
+            std::string back((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            if (back != body) { set_err("the temporary file does not match what was written"); std::remove(tmp.c_str()); return false; }
         }
+        if (testing::persist_stop_before_rename) { set_err("stopped before rename (test)"); return false; } // leaves tmp behind, like a crash
+        std::error_code ec;
+        fs::rename(tmp, path, ec); // atomic replace on POSIX; replaces an existing file on Windows too
+        if (ec) { set_err("could not replace the chain file: " + ec.message()); std::remove(tmp.c_str()); return false; }
+#ifndef _WIN32
+        { // make the rename itself durable
+            fs::path dir = fs::path(path).parent_path();
+            if (dir.empty()) dir = ".";
+            const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+            if (dfd >= 0) { ::fsync(dfd); ::close(dfd); }
+        }
+#endif
         return true;
     } catch (const std::exception& e) {
-        if (error) *error = e.what();
+        set_err(e.what());
+        if (!tmp.empty()) std::remove(tmp.c_str());
         return false;
     }
-}
-
-bool load_chain_json_string(const std::string& json, Chain& out, std::string* error) {
-    std::string err;
-    Chain built;
-    if (!parse_document(json, built, err)) {
-        if (error) *error = err;
-        return false;
-    }
-    out = std::move(built);
-    return true;
-}
-
-bool load_chain_json(const std::string& path, Chain& out, std::string* error) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) { if (error) *error = "could not open file for read"; return false; }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    if (!in && !in.eof()) { if (error) *error = "read failed"; return false; }
-    return load_chain_json_string(ss.str(), out, error);
 }
 
 }  // namespace taz

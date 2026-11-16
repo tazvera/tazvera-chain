@@ -1,4 +1,5 @@
 #include "taz/chain.hpp"
+#include <limits>
 namespace taz {
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
     if (!blocks_.empty() || first == second) return false;
@@ -27,6 +28,8 @@ ChainResult Chain::execute(const std::vector<Transaction>& txs, std::uint64_t he
 }
 ChainResult Chain::append_block(const std::vector<Transaction>& transactions, std::int64_t timestamp, std::int64_t max_timestamp) {
     if (blocks_.empty()) return {false,"genesis is not initialized"};
+    // Never let the height wrap back to zero (restored from Core v6.2; Core v7 had dropped it).
+    if (blocks_.back().height == std::numeric_limits<std::uint64_t>::max()) return {false,"chain height exhausted"};
     if (auto t = check_timestamp(timestamp, max_timestamp); !t.ok) return t;
     State candidate = state_; // transactional copy: failed block cannot partially mutate live state
     const std::uint64_t next_height = blocks_.back().height + 1;
@@ -38,6 +41,7 @@ ChainResult Chain::append_block(const std::vector<Transaction>& transactions, st
 ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State& candidate) const {
     if (blocks_.empty()) return {false,"genesis is not initialized"};
     const Block& tip = blocks_.back();
+    if (tip.height == std::numeric_limits<std::uint64_t>::max()) return {false,"chain height exhausted"};
     if (block.protocol_version != PROTOCOL_VERSION) return {false,"unsupported block protocol version"};
     if (block.chain_id != CHAIN_ID) return {false,"block has wrong chain ID"};
     if (block.height != tip.height + 1) return {false,"unexpected block height"};
