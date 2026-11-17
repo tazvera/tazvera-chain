@@ -22,3 +22,9 @@
 - v8.1: persistence loads by full replay (every block through `accept_block`) with a strict parser and size limits; the address of a zero-balance genesis account is not authenticated (see README). Windows saving has no `fsync` and is untested.
 - v8.1: a thief holding the key can add his own veto key to an account that has guardians but no veto, and guardians that are more than about 200 blocks late then lose permanently (test `test_thief_adds_veto_late`). Set the veto key together with the guardians.
 - v8.1: `max_timestamp` still defaults to "no limit" in `Chain`; the caller must supply a clock-drift bound. Blocks carry no producer signature (known, consensus work is not started).
+
+- v8.2: PROTOCOL_VERSION = 2. Protocol-1 chain files are refused with an explicit message.
+- v8.2: the genesis commitment (domain, chain id, protocol, both accounts sorted) is stored as block 0's `previous_hash`, so it is inside the block hash chain; zero-balance genesis addresses are authenticated (supersedes the v8.1 note above). A genesis-only file still needs an out-of-band comparison.
+- v8.2: a guardian/veto change that comes due while a recovery has reached threshold is discarded, and a veto postpones an active recovery only once (300 blocks). This replaces the v8.1 "thief veto locks forever" behaviour. Remaining delay attacks are listed in README "Known limitations".
+- v8.2: Windows save now uses FlushFileBuffers + MoveFileExW; compiled/tested only by CI if it runs there.
+- v8.2: still not production-ready: no P2P, no consensus, no professional audit, placeholder constants.

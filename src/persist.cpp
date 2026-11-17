@@ -16,6 +16,11 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#else
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 namespace taz {
@@ -234,7 +239,7 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     Parser parser(text, opt.max_nodes);
     const JVal root = parser.parse_document();
     const JVal& r = obj_of(root, "the file");
-    exact_keys(r, {"format", "chain_id", "protocol_version", "params", "genesis_balances", "blocks"}, "the file");
+    exact_keys(r, {"format", "chain_id", "protocol_version", "genesis_commitment", "params", "genesis_balances", "blocks"}, "the file");
 
     // ---- version / format ----
     const std::string& format = str_of(field(r, "format"), "format");
@@ -248,7 +253,12 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     else fail("unsupported chain file format \"" + format + "\" (this build reads v1, v2 and v4)");
 
     if (str_of(field(r, "chain_id"), "chain_id") != CHAIN_ID) fail("the file belongs to a different chain (chain ID differs)");
-    if (dec_u64(field(r, "protocol_version"), "protocol_version") != PROTOCOL_VERSION) fail("unsupported protocol version");
+    const std::uint64_t file_proto = dec_u64(field(r, "protocol_version"), "protocol_version");
+    if (file_proto != PROTOCOL_VERSION) {
+        if (file_proto < PROTOCOL_VERSION)
+            fail("chain file protocol_version is older than this build (v8.2 requires protocol 2; re-export after upgrade or use a matching binary)");
+        fail("unsupported protocol version");
+    }
 
     const JVal& p = obj_of(field(r, "params"), "params");
     exact_keys(p, {"fee_transfer_v1", "max_block_txs", "limit_window_blocks", "max_hold_blocks", "safety_delay_blocks", "max_guardians", "recovery_delay_blocks"}, "params");
@@ -297,15 +307,23 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     Chain chain;
     if (!chain.init_genesis(genesis[0].first, genesis[0].second, genesis[1].first, genesis[1].second)) fail("genesis could not be created");
     if (chain.genesis_balances() != genesis) fail("genesis balances do not match");
+    // Independent commitment: must match balances (and match file if the field is present).
+    const Hash32 expect_c = chain.genesis_commitment();
+    if (!find(r, "genesis_commitment")) fail("genesis_commitment is required for protocol 2 chain files");
+    {
+        const Hash32 file_c = hex_of<Hash32>(field(r, "genesis_commitment"), "genesis_commitment");
+        if (file_c != expect_c) fail("genesis_commitment does not match genesis_balances");
+    }
 
     // ---- blocks: block 0 must equal the genesis we just rebuilt; every other block is replayed ----
     if (blocks.arr.empty()) fail("blocks is empty (the genesis block is missing)");
     const Block g = parse_block(blocks.arr[0], with_veto, "block 0");
     const Block& mine = chain.blocks()[0];
-    if (g.height != 0 || !g.transactions.empty() || g.timestamp != 0 || !is_zero(g.previous_hash) || g.protocol_version != mine.protocol_version ||
+    if (g.height != 0 || !g.transactions.empty() || g.timestamp != 0 || g.previous_hash != mine.previous_hash || g.protocol_version != mine.protocol_version ||
         g.chain_id != mine.chain_id)
         fail("block 0 is not a valid genesis block");
     if (g.state_root != mine.state_root) fail("block 0: genesis state root does not match the genesis balances");
+    if (g.hash() != mine.hash()) fail("block 0: genesis hash does not match the genesis commitment");
     for (std::size_t i = 1; i < blocks.arr.size(); ++i) {
         const Block b = parse_block(blocks.arr[i], with_veto, "block " + std::to_string(i));
         const ChainResult res = chain.accept_block(b);
@@ -366,7 +384,7 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
 #ifndef _WIN32
         const std::string id = std::to_string(static_cast<long>(::getpid())) + "." + std::to_string(counter.fetch_add(1));
 #else
-        const std::string id = std::to_string(counter.fetch_add(1));
+        const std::string id = std::to_string(static_cast<unsigned long>(::GetCurrentProcessId())) + "." + std::to_string(counter.fetch_add(1));
 #endif
         tmp = path + ".tmp." + id; // unique per process and per call, so two saves never share a file
 #ifndef _WIN32
@@ -385,10 +403,19 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
             if (!ok) { errno = saved; set_err(errno_text("could not write the temporary file")); ::unlink(tmp.c_str()); return false; }
         }
 #else
-        {
-            std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-            out << body; out.flush();
-            if (!out) { set_err("could not write the temporary file"); std::remove(tmp.c_str()); return false; }
+        { // v8.2: real Win32 calls so the data is flushed to disk (FlushFileBuffers) before the replace
+            const std::wstring wtmp = fs::u8path(tmp).wstring();
+            HANDLE h = ::CreateFileW(wtmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h == INVALID_HANDLE_VALUE) { set_err("could not create the temporary file (Windows error " + std::to_string(::GetLastError()) + ")"); return false; }
+            bool ok = true; std::size_t done = 0;
+            while (done < body.size()) {
+                const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(body.size() - done, 1u << 20)); DWORD wrote = 0;
+                if (!::WriteFile(h, body.data() + done, chunk, &wrote, nullptr) || wrote == 0) { ok = false; break; }
+                done += wrote;
+            }
+            if (ok && !::FlushFileBuffers(h)) ok = false;
+            ::CloseHandle(h);
+            if (!ok) { set_err("could not write the temporary file"); ::DeleteFileW(wtmp.c_str()); return false; }
         }
 #endif
         { // read it back: what is on disk must be exactly what we meant to write
@@ -397,9 +424,15 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
             if (back != body) { set_err("the temporary file does not match what was written"); std::remove(tmp.c_str()); return false; }
         }
         if (testing::persist_stop_before_rename) { set_err("stopped before rename (test)"); return false; } // leaves tmp behind, like a crash
+#ifndef _WIN32
         std::error_code ec;
-        fs::rename(tmp, path, ec); // atomic replace on POSIX; replaces an existing file on Windows too
+        fs::rename(tmp, path, ec); // atomic replace on POSIX
         if (ec) { set_err("could not replace the chain file: " + ec.message()); std::remove(tmp.c_str()); return false; }
+#else
+        if (!::MoveFileExW(fs::u8path(tmp).wstring().c_str(), fs::u8path(path).wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            set_err("could not replace the chain file (Windows error " + std::to_string(::GetLastError()) + ")"); std::remove(tmp.c_str()); return false;
+        }
+#endif
 #ifndef _WIN32
         { // make the rename itself durable
             fs::path dir = fs::path(path).parent_path();

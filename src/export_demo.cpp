@@ -55,21 +55,21 @@ int main(int argc, char** argv) {
     std::int64_t ts = 1700000000; auto next = [&ts]() { return ts += 100; };
     bool ok = true;
     if (with_recovery) {
-        // 1: Alice gives Bob, Charlie and Dave a little money so that they can pay fees.
-        ok = chain.append_block({transfer(alice, bob.addr, 2000000, 0), transfer(alice, charlie.addr, 2000000, 1), transfer(alice, dave.addr, 2000000, 2), transfer(alice, vault.addr, 1000000, 3)}, next()).ok;
-        // 2: Alice names the three as guardians (any 2 can bring her funds to a new key) and an offline
-        //    "veto" key (the vault) that alone may stop a recovery.
+        // 1: Alice funds Bob, Charlie, Dave (fee payers) and the offline vault (veto key).
+        ok = chain.append_block({transfer(alice, bob.addr, 2000000, 0), transfer(alice, charlie.addr, 2000000, 1),
+                                 transfer(alice, dave.addr, 2000000, 2), transfer(alice, vault.addr, 1000000, 3)}, next()).ok;
+        // 2: Alice registers 2-of-3 guardians + independent veto key (takes effect after SAFETY_DELAY).
         ok = ok && chain.append_block({set_guardians_veto(alice, {bob.addr, charlie.addr, dave.addr}, 2, vault.addr, 4)}, next()).ok;
-        // 3-4: a first attempt (for a stranger's address) gets two votes, but Alice is still here and her vault key cancels it.
+        for (std::uint64_t i = 0; ok && i < SAFETY_DELAY_BLOCKS; ++i) ok = chain.append_block({}, next()).ok;
+        // 3: Hostile first attempt starts (one vote only). Veto clears votes while recovery is not yet active.
+        //    Under R2, a veto against an *active* recovery only postpones once; clearing early votes is a full cancel.
         ok = ok && chain.append_block({vote(bob, alice.addr, eve.addr, 0)}, next()).ok;
-        ok = ok && chain.append_block({vote(charlie, alice.addr, eve.addr, 0)}, next()).ok;
         ok = ok && chain.append_block({veto_cancel(vault, alice.addr, 0)}, next()).ok;
-        // 6-7: later Alice loses her key. Dave votes for her NEW key; Bob agrees.
+        // 4: Alice has lost her everyday key. Two guardians vote for her new key; nobody vetoes.
         ok = ok && chain.append_block({vote(dave, alice.addr, alice2.addr, 0)}, next()).ok;
         ok = ok && chain.append_block({vote(bob, alice.addr, alice2.addr, 1)}, next()).ok;
-        // Nobody cancels, so after RECOVERY_DELAY_BLOCKS the funds move to the new key.
         for (std::uint64_t i = 0; ok && i < RECOVERY_DELAY_BLOCKS; ++i) ok = chain.append_block({}, next()).ok;
-        // The new key works at once.
+        // 5: New key can spend.
         ok = ok && chain.append_block({transfer(alice2, bob.addr, 1500000, 0)}, next()).ok;
     } else if (!with_safety) {
         ok = chain.append_block({transfer(alice, bob.addr, 5000000, 0)}, next()).ok

@@ -1,10 +1,16 @@
 #include "taz/chain.hpp"
+#include "taz/crypto.hpp"
+#include <algorithm>
 #include <limits>
+#include <string_view>
 namespace taz {
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
     if (!blocks_.empty() || first == second) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
     Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
+    // v8.2: the commitment over BOTH genesis accounts (zero balances included) sits in block 0's previous_hash field
+    // (genesis has no predecessor), so it is covered by block 0's hash and, through previous_hash links, by every later block.
+    genesis.previous_hash = genesis_commitment_of(first, first_balance, second, second_balance);
     state_=genesis_state; blocks_.push_back(genesis);
     genesis_balances_.clear();
     // v8: always record both genesis accounts (including zero) so load_chain_json can rebuild.
@@ -61,5 +67,26 @@ ChainResult Chain::accept_block(const Block& block, std::int64_t max_timestamp) 
     auto r = verify(block, max_timestamp, candidate);
     if (!r.ok) return r;
     state_ = std::move(candidate); blocks_.push_back(block); return {true,{}};
+}
+
+Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Amount b1) {
+    // Canonical: the two accounts are sorted by address, so the order they were given in cannot matter.
+    std::pair<Address, Amount> e[2] = {{a0, b0}, {a1, b1}};
+    if (e[1].first < e[0].first) std::swap(e[0], e[1]);
+    std::vector<std::uint8_t> bytes;
+    constexpr std::string_view domain = "TAZVERA-GENESIS-V2";
+    bytes.insert(bytes.end(), domain.begin(), domain.end());
+    const std::string_view cid = CHAIN_ID;
+    bytes.insert(bytes.end(), cid.begin(), cid.end()); bytes.push_back(0);
+    for (int i = 3; i >= 0; --i) bytes.push_back(static_cast<std::uint8_t>((PROTOCOL_VERSION >> (8 * i)) & 0xff));
+    for (const auto& [addr, bal] : e) {
+        bytes.insert(bytes.end(), addr.begin(), addr.end());
+        for (int i = 7; i >= 0; --i) bytes.push_back(static_cast<std::uint8_t>((bal >> (8 * i)) & 0xff));
+    }
+    return sha256(bytes);
+}
+Hash32 Chain::genesis_commitment() const {
+    if (genesis_balances_.size() != 2) return Hash32{};
+    return genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second, genesis_balances_[1].first, genesis_balances_[1].second);
 }
 }

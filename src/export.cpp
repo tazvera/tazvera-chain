@@ -39,6 +39,7 @@ std::string to_json(const Chain& chain) {
     j += "{\n  \"format\": \"tazvera-chain-export-v" + std::to_string(level) + "\",\n";
     j += "  \"chain_id\": " + q(CHAIN_ID) + ",\n";
     j += "  \"protocol_version\": " + num(PROTOCOL_VERSION) + ",\n";
+    j += "  \"genesis_commitment\": " + hex(chain.genesis_commitment()) + ",\n";
     j += "  \"params\": {\"fee_transfer_v1\": " + num(FEE_TRANSFER_V1) + ", \"max_block_txs\": " + num(MAX_BLOCK_TXS)
        + ", \"limit_window_blocks\": " + num(LIMIT_WINDOW_BLOCKS) + ", \"max_hold_blocks\": " + num(MAX_HOLD_BLOCKS)
        + ", \"safety_delay_blocks\": " + num(SAFETY_DELAY_BLOCKS)
