@@ -214,9 +214,31 @@ static void test_genesis_pin() {
     { LoadOptions o; o.expected_genesis_commitment = c.genesis_commitment(); Chain out; CHECK(!load_chain_json_text(other_text, out, nullptr, o)); }
 }
 
+// v8.3: pins a documented limitation, so a future change to it is a deliberate decision and not an
+// accident. With guardians and NO veto key, the account's own key may cancel a recovery — and nothing
+// stops it from doing so again and again. v8.2's R2 rule only limits the VETO key (postpone once); it does
+// not touch this path. The mitigation is to set a veto key with the guardians (v7). If someone later makes
+// the owner-cancel path one-shot as well, this test must be updated on purpose.
+static void test_owner_key_can_cancel_without_veto() {
+    World w; Chain& c = w.c;
+    for (int round = 0; round < 3; ++round) {
+        CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
+        const Account* oa = c.state().find(w.o.addr);
+        CHECK(oa && oa->recovery.active);
+        CHECK(oa && oa->guardians.veto == Address{});            // the World account has no veto key
+        Transaction cancel = base(w.o, nx(c, w.o));              // to = zero: the account cancels its own recovery
+        cancel.kind = TxKind::RecoveryCancel; resign(cancel, w.o);
+        CHECK(put(c, {cancel}));
+        const Account* after = c.state().find(w.o.addr);
+        CHECK(after && !after->recovery.active && after->votes.empty());
+        CHECK(c.state().balance(w.n.addr) == 0);                 // nothing moved
+    }
+    conserved(c, w.total);
+}
+
 int main() {
     test_genesis(); test_pending_veto_dropped_when_recovery_agreed(); test_veto_postpones_only_once(); test_stranger_cannot_veto_or_vote();
-    test_restart_mid_recovery(); test_genesis_pin(); test_fuzz_file(); test_fuzz_transactions();
+    test_restart_mid_recovery(); test_genesis_pin(); test_owner_key_can_cancel_without_veto(); test_fuzz_file(); test_fuzz_transactions();
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Security v8.2 tests passed. This is not a security audit.\n"; return EXIT_SUCCESS;
 }
