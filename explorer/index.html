@@ -172,7 +172,9 @@ function parseChain(text) {
   need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
   need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3", "tazvera-chain-export-v4"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
   need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
-  need(Array.isArray(j.genesis_balances) && j.genesis_balances.length <= 10000, "genesis सूची गलत है");
+  // v8.3: the node rebuilds exactly two genesis accounts, and block 0's previous_hash commits to both.
+  need(Array.isArray(j.genesis_balances) && j.genesis_balances.length === 2,
+       "genesis सूची में ठीक दो खाते होने चाहिए (पुरानी v7 या उससे पहले की फ़ाइल में एक ही होता है)");
   need(j.params && typeof j.params === "object", "params गलत हैं");
   const c = {
     format: j.format, chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),

@@ -37,9 +37,18 @@ struct LoadError : std::runtime_error { using std::runtime_error::runtime_error;
 struct JVal {
     enum class Type { Obj, Arr, Str } type{Type::Str};
     std::string str;
+    std::string key;   // set only for a member of an object (see obj below)
     std::vector<JVal> arr;
-    std::vector<std::pair<std::string, JVal>> obj;
+    // v8.3: an object's members are stored as JVal with `key` set, not as std::pair<std::string, JVal>.
+    // A vector of pairs needs a complete element type when it is instantiated, and clang refuses JVal
+    // there (GCC accepts it) — which is why the clang-built fuzz job could not compile the library at all.
+    std::vector<JVal> obj;
 };
+
+// v8.3: a UTF-8 path without std::filesystem::u8path, which is deprecated in C++20 (clang warns).
+std::filesystem::path path_from_utf8(const std::string& s) {
+    return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
 
 class Parser {
 public:
@@ -101,12 +110,12 @@ private:
             if (peek() != '"') err("expected a quoted key");
             count_node();
             std::string key = string();
-            for (const auto& kv : v.obj) if (kv.first == key) err("duplicate key \"" + key + "\"");
+            for (const auto& m : v.obj) if (m.key == key) err("duplicate key \"" + key + "\"");
             if (v.obj.size() >= MAX_MEMBERS) err("object has too many members");
             ws();
             if (peek() != ':') err("expected ':'");
             ++pos_; ws();
-            v.obj.emplace_back(std::move(key), value(depth + 1)); ws();
+            JVal member = value(depth + 1); member.key = std::move(key); v.obj.push_back(std::move(member)); ws();
             const char c = peek(); ++pos_;
             if (c == '}') return v;
             if (c != ',') { --pos_; err("expected ',' or '}'"); }
@@ -118,7 +127,7 @@ private:
 // Strict, typed access. Every key set must match exactly; every number must be canonical.
 // ----------------------------------------------------------------------------------------------
 const JVal* find(const JVal& o, std::string_view key) {
-    for (const auto& kv : o.obj) if (kv.first == key) return &kv.second;
+    for (const auto& m : o.obj) if (m.key == key) return &m;
     return nullptr;
 }
 const JVal& obj_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Obj) fail(std::string(what) + " must be an object"); return v; }
@@ -128,7 +137,7 @@ const std::string& str_of(const JVal& v, std::string_view what) { if (v.type != 
 void exact_keys(const JVal& o, std::initializer_list<std::string_view> keys, const std::string& what) {
     for (std::string_view k : keys) if (!find(o, k)) fail(what + " is missing the field \"" + std::string(k) + "\"");
     if (o.obj.size() != keys.size()) {
-        for (const auto& kv : o.obj) if (std::find(keys.begin(), keys.end(), kv.first) == keys.end()) fail(what + " has an unknown field \"" + kv.first + "\"");
+        for (const auto& m : o.obj) if (std::find(keys.begin(), keys.end(), m.key) == keys.end()) fail(what + " has an unknown field \"" + m.key + "\"");
     }
 }
 const JVal& field(const JVal& o, std::string_view key) { return *find(o, key); }
@@ -409,7 +418,7 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         }
 #else
         { // v8.2: real Win32 calls so the data is flushed to disk (FlushFileBuffers) before the replace
-            const std::wstring wtmp = fs::u8path(tmp).wstring();
+            const std::wstring wtmp = path_from_utf8(tmp).wstring();
             HANDLE h = ::CreateFileW(wtmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (h == INVALID_HANDLE_VALUE) { set_err("could not create the temporary file (Windows error " + std::to_string(::GetLastError()) + ")"); return false; }
             bool ok = true; std::size_t done = 0;
@@ -424,9 +433,9 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         }
 #endif
         { // read it back: what is on disk must be exactly what we meant to write
-            // v8.3: fs::u8path, so a target under a non-ASCII directory works on Windows too (the narrow
+            // v8.3: path_from_utf8, so a target under a non-ASCII directory works on Windows too (the narrow
             // std::ifstream constructor goes through the ANSI code page there).
-            std::ifstream in(fs::u8path(tmp), std::ios::binary);
+            std::ifstream in(path_from_utf8(tmp), std::ios::binary);
             std::string back((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             if (back != body) { set_err("the temporary file does not match what was written"); std::remove(tmp.c_str()); return false; }
         }
@@ -441,7 +450,7 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         // single-shot MoveFileExW made the concurrent-save test flaky on the Windows runner.
         bool replaced = false; DWORD last = 0;
         for (int attempt = 0; attempt < 10 && !replaced; ++attempt) {
-            if (::MoveFileExW(fs::u8path(tmp).wstring().c_str(), fs::u8path(path).wstring().c_str(),
+            if (::MoveFileExW(path_from_utf8(tmp).wstring().c_str(), path_from_utf8(path).wstring().c_str(),
                               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { replaced = true; break; }
             last = ::GetLastError();
             if (last != ERROR_ACCESS_DENIED && last != ERROR_SHARING_VIOLATION && last != ERROR_LOCK_VIOLATION) break;
@@ -449,7 +458,7 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         }
         if (!replaced) {
             set_err("could not replace the chain file (Windows error " + std::to_string(last) + ")");
-            ::DeleteFileW(fs::u8path(tmp).wstring().c_str()); return false;
+            ::DeleteFileW(path_from_utf8(tmp).wstring().c_str()); return false;
         }
 #endif
 #ifndef _WIN32
