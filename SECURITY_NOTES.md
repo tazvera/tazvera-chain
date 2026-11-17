@@ -28,3 +28,12 @@
 - v8.2: a guardian/veto change that comes due while a recovery has reached threshold is discarded, and a veto postpones an active recovery only once (300 blocks). This replaces the v8.1 "thief veto locks forever" behaviour. Remaining delay attacks are listed in README "Known limitations".
 - v8.2: Windows save now uses FlushFileBuffers + MoveFileExW; compiled/tested only by CI if it runs there.
 - v8.2: still not production-ready: no P2P, no consensus, no professional audit, placeholder constants.
+
+- v8.3: the genesis commitment is checked against the file and against block 0, which proves internal consistency only. A caller that knows which chain it meant to join should set `LoadOptions::expected_genesis_commitment`; no CLI or node does that yet.
+- v8.3: the Windows replace is retried for sharing/access violations; without the retry the concurrent-save test failed on the Windows runner (it was the runner's antivirus, not the code).
+- v8.3: `.gitattributes` pins `eol=lf`. A CRLF checkout makes the demo JSON differ byte-for-byte from `to_json`, which the persistence test treats as a failure on purpose.
+- v8.3: `JVal` used `std::vector<std::pair<std::string, JVal>>`, which clang rejects (incomplete type at instantiation). Latent since v8.1; found by the clang-built fuzz job. Object members now carry a `key` field.
+- v8.7: a stale `<path>.tmp.*` file older than an hour is deleted by the next save. Nothing else is touched; failures are ignored.
+- v8.7: `LoadOptions::max_blocks` bounds a load at 200 000 blocks, on top of `max_nodes` and `max_file_bytes`. The DOM parser still holds the whole file in memory, so the real bound is `max_nodes`.
+- v8.7: the fuzz targets are a smoke test (60 s each), not a fuzzing campaign, and the corpus is not committed.
+- v8.7: with no veto key, the owner key can cancel a recovery repeatedly. Pinned by `test_owner_key_can_cancel_without_veto`. Guardian recovery is for a LOST key; against a STOLEN key it limits damage, it does not restore control.

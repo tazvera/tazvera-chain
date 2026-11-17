@@ -204,3 +204,38 @@ Remaining limit: with a veto key live, a thief controlling it can still delay a 
 12. State root is a flat hash over all accounts (O(n)); no Merkle proofs. `Mempool::submit` is O(pool size).
 13. Held transfers belong to the sender until release; receivers must not treat them as received.
 14. Not audited; the tests are mine and Grok's, not an independent review.
+
+
+## v8.3 – v8.7: hardening after v8.2
+
+Everything here is on `main` and green on Linux (GCC), Windows (mingw) and clang.
+
+- **Genesis pin** — `LoadOptions::expected_genesis_commitment`. v8.2 checks that a file's genesis commitment matches its own genesis list and block 0; that proves the file is internally consistent, not that it is the chain you meant to join. The pin compares against a value published out of band (release notes, a signed tag) and refuses a mismatch before any block is replayed. It is an API option: no CLI or node uses it yet, because neither exists.
+- **Windows save path** — the replace is retried ten times on `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`, because a single-shot `MoveFileExW` fails while antivirus or the search indexer holds the target open (this made the concurrent-save test flaky on the Windows runner). The read-back opens a UTF-8 path, so a chain file under a non-ASCII directory works.
+- **Line endings** — `.gitattributes` forces `eol=lf` on every text file. Without it a Windows checkout (`core.autocrlf=true`, the runner default) turns the demo JSON into CRLF, and the byte-exact round trip in `taz_persist_tests` can never pass there.
+- **clang portability** — `JVal` kept its object members in `std::vector<std::pair<std::string, JVal>>`. GCC accepts that, clang refuses it (the element type is incomplete when the vector is instantiated). Members are now `JVal` with a `key` field. The bug was latent from v8.1 and was found by the new clang job, not by a reader.
+- **Fuzzing** — two libFuzzer targets in `tests/fuzz/`, built only with `-DTAZ_BUILD_FUZZERS=ON`, and a separate `Fuzz (libFuzzer)` workflow: a 60-second smoke run per target on pull requests, the same run weekly. The loader target checks more than crashes: a file that loads must conserve supply (`circulating + held + burned`) and must survive a re-export/reload round trip.
+- **Explorer** — the genesis list must be exactly two accounts, and the format label must match what the chain contains. Both mirror the node's own rules, so the browser can no longer bless a file the node refuses.
+- **Loader limits** — `LoadOptions::max_blocks` (200 000) on top of `max_nodes` and `max_file_bytes`.
+- **Housekeeping** — `save_chain_json` sweeps `<path>.tmp.*` files older than an hour before writing, so a crash between write and rename no longer leaves litter behind for ever.
+- **Tests** — `test_owner_key_can_cancel_without_veto` pins limitation 4 below, so a future change to that rule is a decision and not an accident.
+
+## Known limitations (complete list, v8.7)
+
+This supersedes the v8.2 list above.
+
+1. Prototype only: no P2P, no consensus, no producer signatures on blocks, no mempool gossip, no wallet, no node binary. Not a testnet or mainnet; must not hold value.
+2. A chain file cannot authenticate itself. The genesis commitment makes tampering detectable, and `expected_genesis_commitment` lets a caller pin the chain it meant to join — but nothing uses the pin yet, so today a self-consistent chain with a different genesis loads.
+3. Dropping the LAST blocks of a file still gives a shorter, valid chain; a longer copy is not detectable from a file alone.
+4. With guardians and **no veto key**, the account's own key can cancel a recovery, repeatedly (`test_owner_key_can_cancel_without_veto`). This is deliberate — an honest owner must be able to stop guardians acting maliciously — and it means guardian recovery protects against a lost key, not fully against a stolen one. Set the veto key with the guardians.
+5. With a live veto key, a thief holding it can postpone a recovery by `VETO_POSTPONE_BLOCKS` once per recovery.
+6. Any `threshold` guardians acting together can take the funds after the delay. Choose independent people.
+7. If the guardians do not react within about `SAFETY_DELAY_BLOCKS - RECOVERY_DELAY_BLOCKS` (200 blocks) of a thief scheduling a guardian/veto change, and no recovery is under way, the change takes effect. A wallet must show pending guardian changes prominently (no wallet exists).
+8. Parameters (`RECOVERY_DELAY_BLOCKS`, `VETO_POSTPONE_BLOCKS`, `SAFETY_DELAY_BLOCKS`, fee, limits) are placeholders; block time is undecided.
+9. `Chain::append_block` / `accept_block` take `max_timestamp` from the caller; the default is no limit.
+10. Persistence is a local file: no locking between processes, no database, and the Windows path is exercised only by CI, never on a real machine.
+11. Keys: 32-byte seeds in memory only; no secure storage, no mlock; callers must wipe their own copies.
+12. The state root is a flat hash over all accounts (O(n)); no Merkle proofs. `Mempool::submit` is O(pool size).
+13. Held transfers belong to the sender until release; a receiver must not treat them as received.
+14. The fuzz corpus is not committed and the runs are short (60 s per target); it is a smoke test, not a campaign.
+15. Not audited. The tests are the author's, Grok's and this review's — not an independent security review.
