@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -48,6 +49,28 @@ struct JVal {
 // v8.3: a UTF-8 path without std::filesystem::u8path, which is deprecated in C++20 (clang warns).
 std::filesystem::path path_from_utf8(const std::string& s) {
     return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
+
+// v8.7: a crash between writing the temporary file and renaming it leaves <path>.tmp.<pid>.<n> behind for
+// ever. Sweep the ones in this directory that look exactly like ours and are more than an hour old.
+// Best effort on purpose: it never fails a save, never follows a symlink and never touches another file.
+void sweep_stale_temp_files(const std::string& path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path target = path_from_utf8(path);
+    const fs::path dir = target.has_parent_path() ? target.parent_path() : fs::path(".");
+    const std::string prefix = target.filename().string() + ".tmp.";
+    const auto cutoff = fs::file_time_type::clock::now() - std::chrono::hours(1);
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
+        std::error_code fec;
+        if (!fs::is_regular_file(it->path(), fec) || fec) continue;
+        const auto written = fs::last_write_time(it->path(), fec);
+        if (fec || written > cutoff) continue;          // younger than an hour: another process may be writing it
+        std::error_code rec;
+        fs::remove(it->path(), rec);                    // ignored: a stale file we cannot delete is not a failure
+    }
 }
 
 class Parser {
@@ -280,6 +303,7 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
 
     // ---- which transaction layout does this file use? (veto key present or not) ----
     const JVal& blocks = arr_of(field(r, "blocks"), "blocks");
+    if (blocks.arr.size() > opt.max_blocks) fail("the file holds more blocks than this loader allows");
     bool saw_tx = false, any_with_veto = false, any_without_veto = false;
     for (const JVal& b : blocks.arr) {
         if (b.type != JVal::Type::Obj) continue;
@@ -390,6 +414,7 @@ bool load_chain_json(const std::string& path, Chain& out, std::string* error, co
 bool save_chain_json(const Chain& chain, const std::string& path, std::string* error) {
     auto set_err = [&](const std::string& m) { if (error) *error = m; };
     if (chain.blocks().empty()) { set_err("the chain has no genesis; nothing to save"); return false; }
+    sweep_stale_temp_files(path);   // v8.7: housekeeping only, never fatal
     static std::atomic<unsigned long> counter{0};
     std::string tmp;
     try {

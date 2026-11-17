@@ -252,8 +252,10 @@ static void t05_integrity() {
     CHECK(refuses(rstr(text, "\"guardian_threshold\": \"2\"", "\"guardian_threshold\": \"1\""), &why));
     CHECK(refuses(rstr(text, "\"veto\": \"" + to_hex(k.v.addr) + "\"", "\"veto\": \"" + to_hex(k.x.addr) + "\""), &why));
     CHECK(refuses(rstr(text, "\"new_owner\": \"" + to_hex(k.n.addr) + "\"", "\"new_owner\": \"" + to_hex(k.x.addr) + "\"", 0), &why));
-    // KNOWN LIMIT, pinned on purpose: the address of a ZERO-balance genesis account is not authenticated by any hash.
-    // A file with that address changed still loads; the ledger (all hashes, roots, balances) is identical.
+    // v8.2 closed this: the genesis commitment in block 0's previous_hash covers BOTH genesis accounts,
+    // a zero balance included, so changing either address is refused. (Until v8.1 this was a pinned KNOWN
+    // LIMIT: the zero-balance account never reached the state root, so no block hash covered it and such a
+    // file still loaded.)
     { Key z = new_key(); Chain zc; CHECK(zc.init_genesis(k.o.addr, 100000000, z.addr, 0)); CHECK(put(zc, {transfer(k.o, k.g0.addr, 1, 0)}));
       const std::string zt = to_json(zc); Key other = new_key();
       Chain out; std::string e;

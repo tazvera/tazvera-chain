@@ -68,6 +68,13 @@ function parseChain(text) {
         pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
     });
   }
+  // v8.7: the label must match what the chain actually contains. The node refuses a mismatch too, and a
+  // file that claims "v1" while carrying guardian transactions is exactly the kind of thing a mirror should
+  // not bless. v3 was the old label for the v4 layout, so it counts as 4.
+  let level = 1;
+  for (const b of c.blocks) for (const t of b.txs) { if (t.kind >= 3) level = 4; else if (t.kind !== 0 && level < 2) level = 2; }
+  const declared = c.format === "tazvera-chain-export-v3" ? 4 : Number(c.format.slice(-1));
+  need(declared === level, "फ़ाइल का format लेबल (" + c.format + ") अंदर के लेन-देन से मेल नहीं खाता — v" + level + " होना चाहिए");
   return c;
 }
 

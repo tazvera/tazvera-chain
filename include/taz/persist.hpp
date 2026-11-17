@@ -24,6 +24,7 @@ namespace taz {
 struct LoadOptions {
     std::uint64_t max_file_bytes = 64ull * 1024 * 1024; // refuse bigger files before reading them
     std::uint64_t max_nodes = 2'000'000;               // bound on JSON values held in memory at once
+    std::uint64_t max_blocks = 200'000;                // v8.7: a file with more blocks is not one you meant to open
     // v8.3: the genesis commitment of the chain you meant to join, published out of band (release notes, a
     // signed tag, the explorer page). The file's own commitment only proves the file is internally
     // consistent: anyone can build a consistent chain with a different genesis and hand it to you, and every
