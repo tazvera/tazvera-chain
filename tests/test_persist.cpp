@@ -436,6 +436,10 @@ static void t11_repository_demo_files() {
         if (ok) { CHECK(out.height() > 0); CHECK(slurp(e.path()) == to_json(out)); }
     }
     CHECK(n >= 3);   // plain, safety and recovery demos
+#else
+    // v8.3: without TAZ_SOURCE_DIR this function used to compile to nothing, so a hand-written build
+    // reported success for a check that never ran. Fail loudly instead.
+    CHECK(false && "TAZ_SOURCE_DIR must be defined for taz_persist_tests (see CMakeLists.txt)");
 #endif
 }
 

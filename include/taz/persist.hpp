@@ -1,6 +1,7 @@
 #pragma once
 #include "taz/chain.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -23,6 +24,11 @@ namespace taz {
 struct LoadOptions {
     std::uint64_t max_file_bytes = 64ull * 1024 * 1024; // refuse bigger files before reading them
     std::uint64_t max_nodes = 2'000'000;               // bound on JSON values held in memory at once
+    // v8.3: the genesis commitment of the chain you meant to join, published out of band (release notes, a
+    // signed tag, the explorer page). The file's own commitment only proves the file is internally
+    // consistent: anyone can build a consistent chain with a different genesis and hand it to you, and every
+    // hash inside it will agree. This pin is what answers "is this the right chain?" — leave it empty to skip.
+    std::optional<Hash32> expected_genesis_commitment{};
 };
 
 // Crash-safe: the data goes to a new temporary file next to the target, is flushed to disk and read back,

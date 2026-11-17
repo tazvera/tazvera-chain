@@ -314,6 +314,11 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
         const Hash32 file_c = hex_of<Hash32>(field(r, "genesis_commitment"), "genesis_commitment");
         if (file_c != expect_c) fail("genesis_commitment does not match genesis_balances");
     }
+    // v8.3: the commitment above only proves the file agrees with itself. If the caller knows which chain it
+    // meant to join, compare against that value too — a different genesis is a different chain, however
+    // consistent it looks.
+    if (opt.expected_genesis_commitment && *opt.expected_genesis_commitment != expect_c)
+        fail("the genesis commitment does not match the value pinned for this chain (wrong chain, or a rebuilt genesis)");
 
     // ---- blocks: block 0 must equal the genesis we just rebuilt; every other block is replayed ----
     if (blocks.arr.empty()) fail("blocks is empty (the genesis block is missing)");
@@ -419,7 +424,9 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         }
 #endif
         { // read it back: what is on disk must be exactly what we meant to write
-            std::ifstream in(tmp, std::ios::binary);
+            // v8.3: fs::u8path, so a target under a non-ASCII directory works on Windows too (the narrow
+            // std::ifstream constructor goes through the ANSI code page there).
+            std::ifstream in(fs::u8path(tmp), std::ios::binary);
             std::string back((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             if (back != body) { set_err("the temporary file does not match what was written"); std::remove(tmp.c_str()); return false; }
         }
@@ -429,8 +436,20 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         fs::rename(tmp, path, ec); // atomic replace on POSIX
         if (ec) { set_err("could not replace the chain file: " + ec.message()); std::remove(tmp.c_str()); return false; }
 #else
-        if (!::MoveFileExW(fs::u8path(tmp).wstring().c_str(), fs::u8path(path).wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            set_err("could not replace the chain file (Windows error " + std::to_string(::GetLastError()) + ")"); std::remove(tmp.c_str()); return false;
+        // v8.3: the replace can fail for a few milliseconds while another process holds the target open
+        // (antivirus, the search indexer, a reader). Retry the sharing/access errors before giving up; a
+        // single-shot MoveFileExW made the concurrent-save test flaky on the Windows runner.
+        bool replaced = false; DWORD last = 0;
+        for (int attempt = 0; attempt < 10 && !replaced; ++attempt) {
+            if (::MoveFileExW(fs::u8path(tmp).wstring().c_str(), fs::u8path(path).wstring().c_str(),
+                              MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { replaced = true; break; }
+            last = ::GetLastError();
+            if (last != ERROR_ACCESS_DENIED && last != ERROR_SHARING_VIOLATION && last != ERROR_LOCK_VIOLATION) break;
+            ::Sleep(static_cast<DWORD>(10 * (attempt + 1)));
+        }
+        if (!replaced) {
+            set_err("could not replace the chain file (Windows error " + std::to_string(last) + ")");
+            ::DeleteFileW(fs::u8path(tmp).wstring().c_str()); return false;
         }
 #endif
 #ifndef _WIN32

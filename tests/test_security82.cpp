@@ -198,9 +198,25 @@ static void test_fuzz_transactions() {
     std::cout << "fuzz transactions: " << ok << " blocks accepted, " << bad << " refused, supply conserved\n";
 }
 
+// v8.3: the file's own commitment proves internal consistency only. A pin supplied by the caller is what
+// distinguishes "a chain" from "the chain I meant to join".
+static void test_genesis_pin() {
+    Key a = new_key(), b = new_key(), d = new_key();
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(put(c, {transfer(a, b.addr, 1000, 0)}));
+    const std::string text = to_json(c);
+    { LoadOptions o; o.expected_genesis_commitment = c.genesis_commitment(); Chain out; CHECK(load_chain_json_text(text, out, nullptr, o)); }
+    { LoadOptions o; o.expected_genesis_commitment = Hash32{1}; Chain out; CHECK(!load_chain_json_text(text, out, nullptr, o)); }
+    // an internally consistent chain with a different genesis is refused by the pin, accepted without it
+    Chain other; CHECK(other.init_genesis(a.addr, BIG, d.addr, 0)); CHECK(put(other, {transfer(a, d.addr, 1000, 0)}));
+    const std::string other_text = to_json(other);
+    CHECK(other.genesis_commitment() != c.genesis_commitment());
+    { Chain out; CHECK(load_chain_json_text(other_text, out, nullptr)); }
+    { LoadOptions o; o.expected_genesis_commitment = c.genesis_commitment(); Chain out; CHECK(!load_chain_json_text(other_text, out, nullptr, o)); }
+}
+
 int main() {
     test_genesis(); test_pending_veto_dropped_when_recovery_agreed(); test_veto_postpones_only_once(); test_stranger_cannot_veto_or_vote();
-    test_restart_mid_recovery(); test_fuzz_file(); test_fuzz_transactions();
+    test_restart_mid_recovery(); test_genesis_pin(); test_fuzz_file(); test_fuzz_transactions();
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Security v8.2 tests passed. This is not a security audit.\n"; return EXIT_SUCCESS;
 }
