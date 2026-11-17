@@ -37,3 +37,8 @@
 - v8.7: `LoadOptions::max_blocks` bounds a load at 200 000 blocks, on top of `max_nodes` and `max_file_bytes`. The DOM parser still holds the whole file in memory, so the real bound is `max_nodes`.
 - v8.7: the fuzz targets are a smoke test (60 s each), not a fuzzing campaign, and the corpus is not committed.
 - v8.7: with no veto key, the owner key can cancel a recovery repeatedly. Pinned by `test_owner_key_can_cancel_without_veto`. Guardian recovery is for a LOST key; against a STOLEN key it limits damage, it does not restore control.
+
+- v8.8: `load_chain_json` converts the path once and uses it for `status`, `file_size` and `ifstream`. Before this, saving under a non-ASCII directory worked but loading it failed on Windows (narrow `std::string` went through the ANSI code page).
+- v8.8: `LoadOptions::require_genesis_pin` is off by default. It exists so the future node can refuse to load a chain whose genesis it cannot identify. Turning it on changes nothing else.
+- v8.8: the duplicate copies of `persist.cpp`, `persist.hpp`, the workflow files and the tests that sat in the repository root are removed. They were never compiled, but two files with the same name and different content is exactly how a security fix gets lost.
+- v8.8: guardian and veto limits are now stated together in one README section, so a reader does not have to assemble them from five places.

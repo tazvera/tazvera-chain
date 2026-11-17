@@ -352,6 +352,10 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     // consistent it looks.
     if (opt.expected_genesis_commitment && *opt.expected_genesis_commitment != expect_c)
         fail("the genesis commitment does not match the value pinned for this chain (wrong chain, or a rebuilt genesis)");
+    // v8.8: preparation for the node, which must never load a chain it cannot identify. The flag is off by
+    // default so no existing caller changes behaviour; the node will set it.
+    if (opt.require_genesis_pin && !opt.expected_genesis_commitment)
+        fail("this build requires a pinned genesis commitment: set LoadOptions::expected_genesis_commitment");
 
     // ---- blocks: block 0 must equal the genesis we just rebuilt; every other block is replayed ----
     if (blocks.arr.empty()) fail("blocks is empty (the genesis block is missing)");
@@ -394,12 +398,16 @@ bool load_chain_json_text(std::string_view text, Chain& out, std::string* error,
 bool load_chain_json(const std::string& path, Chain& out, std::string* error, const LoadOptions& options) {
     try {
         std::error_code ec;
-        const auto status = std::filesystem::status(path, ec);
+        // v8.8: one UTF-8 to native conversion for every filesystem call below. status(), file_size() and
+        // ifstream each took a narrow std::string, which on Windows goes through the ANSI code page, so a
+        // chain file under a non-ASCII directory could not be opened even though saving it worked (v8.3).
+        const std::filesystem::path file = path_from_utf8(path);
+        const auto status = std::filesystem::status(file, ec);
         if (ec || !std::filesystem::is_regular_file(status)) { if (error) *error = "not a readable regular file: " + path; return false; }
-        const std::uintmax_t size = std::filesystem::file_size(path, ec);
+        const std::uintmax_t size = std::filesystem::file_size(file, ec);
         if (ec) { if (error) *error = "could not read the file size"; return false; }
         if (size > options.max_file_bytes) { if (error) *error = "the file is larger than the allowed size"; return false; }
-        std::ifstream in(path, std::ios::binary);
+        std::ifstream in(file, std::ios::binary);
         if (!in) { if (error) *error = "could not open the file"; return false; }
         std::string text(static_cast<std::size_t>(size), '\0');
         in.read(text.data(), static_cast<std::streamsize>(size));
