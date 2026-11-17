@@ -45,17 +45,7 @@ static bool same_chain(const Chain& a, const Chain& b) {
     return a.state().state_root() == b.state().state_root() && a.height() == b.height() && to_json(a) == to_json(b);
 }
 
-// A genesis account with a ZERO balance is not covered by any hash or by the state root (it has no effect on the
-// ledger), so its address can be altered without detection. Everything that matters (every block hash, every state
-// root, every balance) must still be identical. This helper recognises exactly that case and nothing else.
-static bool same_ledger_only_zero_genesis_address_differs(const Chain& a, const Chain& b) {
-    if (a.blocks().size() != b.blocks().size() || a.state().state_root() != b.state().state_root()) return false;
-    for (std::size_t i = 0; i < a.blocks().size(); ++i) if (a.blocks()[i].hash() != b.blocks()[i].hash()) return false;
-    const auto& ga = a.genesis_balances(); const auto& gb = b.genesis_balances();
-    if (ga.size() != gb.size()) return false;
-    for (std::size_t i = 0; i < ga.size(); ++i) { if (ga[i].second != gb[i].second) return false; if (ga[i].first != gb[i].first && ga[i].second != 0) return false; }
-    return true;
-}
+// v8.2: block 0 commits to BOTH genesis accounts (zero balances included), so any accepted file must be exactly the same chain.
 struct Keys { Key o = new_key(), g0 = new_key(), g1 = new_key(), g2 = new_key(), v = new_key(), n = new_key(), x = new_key(); };
 // A chain that uses every feature: plain transfers, safety rules with a held transfer, guardians with a veto
 // key, votes, a veto cancel and a recovery that really completes. `mid` receives copies taken along the way.
@@ -66,10 +56,9 @@ static Chain full_chain(const Keys& k, std::vector<Chain>* mid = nullptr) {
     CHECK(put(c, {safety(k.o, 0, 500000, 10, 4)})); CHECK(put(c, {transfer(k.o, k.x.addr, 600000, 5)})); snap(); // a transfer is being held here
     empty_until(c, c.height() + 11); snap();
     CHECK(put(c, {setg(k.o, {k.g0.addr, k.g1.addr, k.g2.addr}, 2, k.v.addr, 6)})); snap();
-    CHECK(put(c, {vote(k.g0, k.o.addr, k.x.addr, 0), vote(k.g1, k.o.addr, k.x.addr, 0)})); snap(); // a recovery is waiting here
-    CHECK(put(c, {vcancel(k.v, k.o.addr, 0)}));
-    CHECK(put(c, {vote(k.g0, k.o.addr, k.n.addr, 1), vote(k.g1, k.o.addr, k.n.addr, 1)})); snap();
-    empty_until(c, c.state().find(k.o.addr)->recovery.ready_height); snap();   // the recovery completes
+    CHECK(put(c, {vote(k.g0, k.o.addr, k.n.addr, 0), vote(k.g1, k.o.addr, k.n.addr, 0)})); snap(); // recovery waiting
+    CHECK(put(c, {vcancel(k.v, k.o.addr, 0)})); snap(); // R2: postpone once
+    empty_until(c, c.state().find(k.o.addr)->recovery.ready_height); snap();   // recovery completes to n
     CHECK(put(c, {transfer(k.n, k.x.addr, 1000, 0)})); snap();
     return c;
 }
@@ -172,9 +161,9 @@ static void t03_strict_json() {
         {"comment", "// hi\n" + good}, {"block comment", rstr(good, "{\n", "{ /* x */\n")},
         {"BOM", std::string("\xEF\xBB\xBF") + good}, {"NUL byte", rstr(good, "\"format\"", std::string("\"for\0mat\"", 9))},
         {"single quotes", rstr(good, "\"format\"", "'format'")},
-        {"number instead of string", rstr(good, "\"protocol_version\": \"1\",\n  \"params\"", "\"protocol_version\": 1,\n  \"params\"")},
-        {"true", rstr(good, "\"protocol_version\": \"1\",\n  \"params\"", "\"protocol_version\": true,\n  \"params\"")},
-        {"null", rstr(good, "\"protocol_version\": \"1\",\n  \"params\"", "\"protocol_version\": null,\n  \"params\"")},
+        {"number instead of string", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": 2")},
+        {"true", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": true")},
+        {"null", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": null")},
         {"duplicate key", rstr(good, "\"chain_id\"", "\"format\": \"x\", \"chain_id\"")},
         {"escape in string", rstr(good, "tazvera-local-prototype-v1", "tazvera-local\\u002dprototype-v1")},
         {"control char in string", rstr(good, "tazvera-local-prototype-v1", "tazvera-local\tprototype-v1")},
@@ -219,7 +208,7 @@ static void t04_replay() {
     auto without = [&](std::size_t drop) { std::vector<std::size_t> o; for (std::size_t i : all) if (i != drop) o.push_back(i); return o; };
     std::string why;
     CHECK(refuses(join_blocks(s, without(5)), &why) && why.find("block 5") != std::string::npos);      // a block is missing
-    CHECK(refuses(join_blocks(s, without(n - 1)), &why) == false || true);                              // (dropping the LAST block is a shorter but valid chain)
+    { Chain shorter; std::string e2; CHECK(!refuses(join_blocks(s, without(n - 1)), &e2)); }               // dropping the LAST block gives a shorter but valid chain (limitation: README)
     { auto o = all; std::swap(o[7], o[8]); CHECK(refuses(join_blocks(s, o)));}                          // two blocks swapped
     { auto o = all; o.insert(o.begin() + 9, 8); CHECK(refuses(join_blocks(s, o)));}                     // a block repeated
     { auto o = all; o.push_back(n - 1); CHECK(refuses(join_blocks(s, o)));}                             // the last block twice
@@ -253,10 +242,10 @@ static void t05_integrity() {
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 0), &why) && why.find("chain") != std::string::npos);
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 3), &why));
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 5), &why));
-    // protocol version: header, block, transaction
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"1\"", "\"protocol_version\": \"2\"", 0), &why));
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"1\"", "\"protocol_version\": \"2\"", 2), &why));
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"1\"", "\"protocol_version\": \"2\"", 4), &why));
+    // protocol version: header, block, transaction — change 2 → 1 (older) or 2 → 3 (unsupported)
+    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 0), &why));
+    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 2), &why));
+    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"3\"", 4), &why));
     // kinds and guardian data
     CHECK(refuses(rstr(text, "\"kind\": \"3\"", "\"kind\": \"6\""), &why));
     CHECK(refuses(rstr(text, "\"kind\": \"3\"", "\"kind\": \"1\""), &why));
@@ -268,8 +257,8 @@ static void t05_integrity() {
     { Key z = new_key(); Chain zc; CHECK(zc.init_genesis(k.o.addr, 100000000, z.addr, 0)); CHECK(put(zc, {transfer(k.o, k.g0.addr, 1, 0)}));
       const std::string zt = to_json(zc); Key other = new_key();
       Chain out; std::string e;
-      CHECK(load_chain_json_text(rstr(zt, to_hex(z.addr), to_hex(other.addr)), out, &e));
-      CHECK(same_ledger_only_zero_genesis_address_differs(out, zc) && !same_chain(out, zc));
+      // v8.2: genesis_commitment covers zero-balance addresses too
+      CHECK(refuses(rstr(zt, to_hex(z.addr), to_hex(other.addr)), &why));
       // but a NON-zero genesis balance or address is fully protected
       CHECK(refuses(rstr(zt, to_hex(k.o.addr), to_hex(other.addr), 0), &why)); }
     // the original is untouched by all of this
@@ -316,7 +305,7 @@ static void t07_atomic_save() {
     CHECK(leftovers(d) == 1);                                                          // the stale temporary file is still there ...
     CHECK(save_chain_json(c3, p, &err));                                               // ... and does not get in the way
     { Chain l; CHECK(load_chain_json(p, l, &err) && same_chain(l, c3)); }
-    for (auto& e : fs::directory_iterator(d)) if (e.path().filename().string().find(".tmp.") != std::string::npos) { Chain l = sentinel(); CHECK(!load_chain_json(e.path().string(), l, &err) || true); }
+    for (auto& e : fs::directory_iterator(d)) if (e.path().filename().string().find(".tmp.") != std::string::npos) { Chain l = sentinel(); CHECK(load_chain_json(e.path().string(), l, &err)); CHECK(same_chain(l, c3)); } // the stale tmp file is a complete, valid copy of the file that was being saved
     // a damaged target (as an unsafe writer could leave) is refused, then a normal save repairs it
     { std::ofstream f(p, std::ios::binary | std::ios::trunc); const std::string t = to_json(c3); f.write(t.data(), static_cast<std::streamsize>(t.size() / 3)); }
     { Chain l = sentinel(); CHECK(!load_chain_json(p, l, &err)); }
@@ -400,7 +389,7 @@ static void t09_versions() {
         std::string repl = p; repl.insert(repl.size() - 2, "1");
         CHECK(refuses(rstr(tg, p, repl), &why) && why.find("differs") != std::string::npos);
     }
-    CHECK(refuses(rstr(tp, "\"protocol_version\": \"1\"", "\"protocol_version\": \"2\"", 0)));
+    CHECK(refuses(rstr(tp, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 0)));
     // old layouts (no guardian fields at all) are refused with a clear reason
     CHECK(refuses(std::regex_replace(tp6, std::regex("\"new_owner\": \"[0-9a-f]{40}\", \"guardian_threshold\": \"[0-9]+\", \"guardians\": \\[\\], "), ""), &why));
 }
@@ -426,11 +415,11 @@ static void t10_random_damage() {
             if (m == text) continue;
             ++total; Chain out; std::string err;
             if (load_chain_json_text(m, out, &err)) {      // accepted: then it MUST be exactly the same chain (e.g. only whitespace changed)
-                ++accepted; if (!same_chain(out, *chain) && !same_ledger_only_zero_genesis_address_differs(out, *chain)) { std::cerr << "ACCEPTED A DIFFERENT CHAIN: " << (m.size()==text.size()? "same-length edit at ":"edit at ") << pos << " kind " << kind << "\n   original: " << text.substr(pos>30?pos-30:0, 70) << "\n   mutated:  " << m.substr(pos>30?pos-30:0, 70) << "\n"; ++failures; }
+                ++accepted; if (!same_chain(out, *chain)) { std::cerr << "ACCEPTED A DIFFERENT CHAIN: " << (m.size()==text.size()? "same-length edit at ":"edit at ") << pos << " kind " << kind << "\n   original: " << text.substr(pos>30?pos-30:0, 70) << "\n   mutated:  " << m.substr(pos>30?pos-30:0, 70) << "\n"; ++failures; }
             }
         }
     }
-    std::cout << "random damage: " << total << " damaged files, " << accepted << " loaded with an identical ledger (whitespace, or the unauthenticated zero genesis address), the rest refused\n";
+    std::cout << "random damage: " << total << " damaged files, " << accepted << " loaded with an identical ledger (whitespace-only edits), the rest refused\n";
     CHECK(total > 6000);
 }
 

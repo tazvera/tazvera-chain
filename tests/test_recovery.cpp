@@ -216,7 +216,7 @@ static void test_guardian_changes_are_delayed() {
     empty_until(c, ready2);
     CHECK(c.state().find(o.addr)->guardians.is_default() && c.state().find(o.addr)->votes.empty()); // votes belonged to the old list
     CHECK(!put(c, {vote(g1, o.addr, w.n.addr, nx(c, g1))}));
-    (void)ready;
+    CHECK(ready2 > ready);
 }
 
 // The thief scenario: a stolen key swaps in the thief's helpers, but the real guardians were already
@@ -313,13 +313,12 @@ static void test_held_funds_and_statements() {
 }
 
 static void test_state_roots_and_export() {
-    World a(2), b(2);
+    World a(2);
     CHECK(to_json(a.c).find("tazvera-chain-export-v4") != std::string::npos);
     World p(2, false); CHECK(to_json(p.c).find("tazvera-chain-export-v1") != std::string::npos); // no guardians used => still v1
     CHECK(put(p.c, {safety(p.o, 0, 0, 0, nx(p.c, p.o))})); CHECK(to_json(p.c).find("tazvera-chain-export-v2") != std::string::npos);
     // different guardian data => different roots
-    World x(2), y(3), z(2);
-    CHECK(x.c.state().state_root() != y.c.state().state_root() || x.o.addr != y.o.addr); // (keys differ anyway; real comparison below)
+    World x(2);
     State s1, s2; s1.set_balance(x.o.addr, 5000000); s2.set_balance(x.o.addr, 5000000);
     for (State* s : {&s1, &s2}) { s->set_balance(x.g[0].addr, 100000); s->set_balance(x.g[1].addr, 100000); }
     CHECK(s1.state_root() == s2.state_root());
@@ -332,7 +331,6 @@ static void test_state_roots_and_export() {
     CHECK(s3.state_root() != s4.state_root());                           // and so is WHICH new address was voted for
     // large numbers stay exact in the JSON
     CHECK(to_json(a.c).find("\"guardian_threshold\": \"2\"") != std::string::npos);
-    (void)b; (void)z;
 }
 
 
@@ -416,18 +414,17 @@ static void test_veto_key() {
     { auto t = vcancel(v, o.addr, nx(c, v)); t.to = w.x.addr; CHECK(!c.append_block({t}, g_ts++).ok); } // retargeted after signing
     // a thief tries to remove the veto: it only waits, so the guardians finish first
     CHECK(!put(c, {setg_veto(o, three, 2, Address{}, nx(c, o))}));                            // refused while a recovery waits
-    // the legitimate owner, who still holds the offline veto key, may cancel
+    // R2: legitimate veto postpones once; recovery still completes afterward
     const Amount before = c.state().balance(o.addr), vb = c.state().balance(v.addr);
     CHECK(put(c, {vcancel(v, o.addr, nx(c, v))}));
-    CHECK(!c.state().find(o.addr)->recovery.active && c.state().balance(v.addr) == vb - F && c.state().balance(o.addr) == before);
-    CHECK(!put(c, {vcancel(v, o.addr, nx(c, v))}));                                           // nothing left to cancel
-    empty_until(c, ready + 3);
-    CHECK(c.state().balance(w.n.addr) == 0 && c.state().balance(o.addr) == before);
-    conserved(c, w.total);
-    // second round: nobody cancels, the guardians win
-    CHECK(put(c, {vote(g0, o.addr, w.n.addr, nx(c, g0)), vote(g1, o.addr, w.n.addr, nx(c, g1))}));
+    CHECK(c.state().find(o.addr)->recovery.active);
+    CHECK(c.state().find(o.addr)->recovery.veto_postponed);
+    CHECK(c.state().balance(v.addr) == vb - F && c.state().balance(o.addr) == before);
+    CHECK(!put(c, {vcancel(v, o.addr, nx(c, v))})); // second postpone refused
     empty_until(c, c.state().find(o.addr)->recovery.ready_height);
-    CHECK(c.state().balance(w.n.addr) == before && c.state().find(o.addr)->guardians.is_default()); // veto key is retired with the guardians
+    CHECK(c.state().balance(w.n.addr) == before); // guardians still win after postpone
+    CHECK(c.state().find(o.addr)->guardians.is_default());
+    conserved(c, w.total);
     conserved(c, w.total);
     // statements: both the veto key and the protected account show the cancel
     const auto sv = wallet_statement(c, v.addr), so = wallet_statement(c, o.addr);
@@ -447,8 +444,9 @@ static void test_veto_cancel_signature_covers_account() {
     CHECK(s.find(o.addr)->recovery.active && s.find(p.addr)->recovery.active);
     auto t = vcancel(v, o.addr, 0); t.to = p.addr;                   // signed for o, aimed at p
     State copy = s; CHECK(!copy.apply(t, 3).ok); CHECK(copy.find(p.addr)->recovery.active);
-    CHECK(s.apply(vcancel(v, o.addr, 0), 3).ok);                      // control: the honest one works
-    CHECK(!s.find(o.addr)->recovery.active && s.find(p.addr)->recovery.active);
+    CHECK(s.apply(vcancel(v, o.addr, 0), 3).ok);                      // R2: postpones o only
+    CHECK(s.find(o.addr)->recovery.active && s.find(o.addr)->recovery.veto_postponed);
+    CHECK(s.find(p.addr)->recovery.active && !s.find(p.addr)->recovery.veto_postponed);
 }
 
 static void test_veto_changes_are_delayed_and_in_root() {
@@ -488,21 +486,22 @@ static void test_thief_adds_veto_late() {
         CHECK(c.state().find(w.o.addr)->guardians.is_default());
         conserved(c, w.total);
     }
-    { // (b) guardians sleep for 500 blocks
+    { // (b) guardians sleep for SAFETY_DELAY: thief veto activates, but R2 only postpones once
         World w(2); Chain& c = w.c; const Key& thief_veto = w.x;
         CHECK(put(c, {setg_veto(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, thief_veto.addr, nx(c, w.o))}));
         empty_until(c, c.height() + SAFETY_DELAY_BLOCKS);
-        CHECK(c.state().find(w.o.addr)->guardians.veto == thief_veto.addr);          // the thief's veto is now in force
+        CHECK(c.state().find(w.o.addr)->guardians.veto == thief_veto.addr);
         CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
         CHECK(c.state().find(w.o.addr)->recovery.active);
-        CHECK(put(c, {vcancel(thief_veto, w.o.addr, nx(c, thief_veto))}));            // the thief cancels the recovery
-        CHECK(!c.state().find(w.o.addr)->recovery.active);
-        // the owner asks to remove the veto, the thief (same key) resends the current setting and cancels that change
-        CHECK(put(c, {setg(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, nx(c, w.o))}));
-        CHECK(c.state().find(w.o.addr)->pending_guardians.active);
-        CHECK(put(c, {setg_veto(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, thief_veto.addr, nx(c, w.o))}));
-        CHECK(!c.state().find(w.o.addr)->pending_guardians.active);
-        CHECK(c.state().find(w.o.addr)->guardians.veto == thief_veto.addr);
+        const auto ready1 = c.state().find(w.o.addr)->recovery.ready_height;
+        CHECK(put(c, {vcancel(thief_veto, w.o.addr, nx(c, thief_veto))})); // postpone, not permanent cancel
+        CHECK(c.state().find(w.o.addr)->recovery.active);
+        CHECK(c.state().find(w.o.addr)->recovery.veto_postponed);
+        CHECK(c.state().find(w.o.addr)->recovery.ready_height >= ready1 + VETO_POSTPONE_BLOCKS
+              || c.state().find(w.o.addr)->recovery.ready_height > ready1);
+        CHECK(!put(c, {vcancel(thief_veto, w.o.addr, nx(c, thief_veto))})); // second veto fails
+        empty_until(c, c.state().find(w.o.addr)->recovery.ready_height);
+        CHECK(c.state().balance(w.n.addr) > 0); // recovery still completes
         conserved(c, w.total);
     }
 }
@@ -515,8 +514,6 @@ static void test_random_run() {
     std::uint64_t seed = 987654321; auto rnd = [&seed](std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; };
     int blocks_ok = 0, scheduled = 0, executed = 0, cancelled = 0, swaps = 0, vetos = 0;
     auto accept = [&](const std::vector<Transaction>& txs) {
-        const bool had_rec = [&] { for (auto& x : k) if (auto* a = prod.state().find(x.addr)) if (a->recovery.active) return true; return false; }();
-        (void)had_rec;
         if (!prod.append_block(txs, g_ts).ok) { conserved(prod, total); ++g_ts; return false; }
         ++g_ts; ++blocks_ok;
         CHECK(foll.accept_block(prod.blocks().back()).ok);
@@ -565,7 +562,6 @@ static void test_random_run() {
                     for (int q = 0; q < K; ++q) if (k[q].addr == wa->guardians.veto && static_cast<std::size_t>(q) != f) { txs.push_back(vcancel(k[q], k[who].addr, local[q]++)); ++vetos; }
             }
         }
-        const Block* before_tip = &prod.blocks().back(); (void)before_tip;
         std::size_t pend_before = 0; for (auto& x : k) if (auto* a = prod.state().find(x.addr)) if (a->recovery.active) ++pend_before;
         if (!accept(txs)) continue;
         std::size_t pend_after = 0; for (auto& x : k) if (auto* a = prod.state().find(x.addr)) if (a->recovery.active) ++pend_after;

@@ -25,7 +25,12 @@ struct GuardianConfig {
 // Changing the guardians is always delayed (a thief must not be able to name his own helpers at once).
 struct PendingGuardians { bool active{false}; GuardianConfig config{}; std::uint64_t ready_height{0}; };
 // An agreed recovery that is waiting out its delay; the owner may cancel until ready_height.
-struct PendingRecovery { bool active{false}; Address target{}; std::uint64_t ready_height{0}; };
+struct PendingRecovery {
+    bool active{false};
+    Address target{};
+    std::uint64_t ready_height{0};
+    bool veto_postponed{false}; // R2: veto may postpone once, not cancel forever
+};
 struct Account {
     Amount balance{0};
     std::uint64_t nonce{0};

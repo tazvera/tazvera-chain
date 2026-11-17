@@ -69,7 +69,7 @@ static void test_rejections() {
     CHECK(!chain.append_block({make_tx(alice, bob.addr, std::numeric_limits<Amount>::max(), 0)}, 1).ok);
     CHECK(!chain.append_block({make_tx(alice, bob.addr, std::numeric_limits<Amount>::max() - FEE_TRANSFER_V1 + 1, 0)}, 1).ok);
     // wrong protocol version
-    auto wrong_ver = make_tx(alice, bob.addr, 1, 0); wrong_ver.protocol_version = 2; resign(wrong_ver, alice.sk);
+    auto wrong_ver = make_tx(alice, bob.addr, 1, 0); wrong_ver.protocol_version = 99; resign(wrong_ver, alice.sk);
     CHECK(!chain.append_block({wrong_ver}, 1).ok);
     CHECK(chain.height() == 0); CHECK(chain.state().state_root() == root);
 }

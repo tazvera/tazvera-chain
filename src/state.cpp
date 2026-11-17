@@ -77,8 +77,14 @@ BlockEvents State::begin_block(std::uint64_t height) {
             if (acc.safety.daily_limit == 0) { acc.window_index = 0; acc.window_spent = 0; }
         }
         if (acc.pending_guardians.active && acc.pending_guardians.ready_height <= height) {
-            acc.guardians = acc.pending_guardians.config; acc.pending_guardians = PendingGuardians{};
-            acc.votes.clear(); // votes belonged to the old list of guardians
+            if (acc.recovery.active) {
+                // v8.2: a guardian/veto change that comes due while the guardians' recovery is already agreed is DISCARDED.
+                // A thief who held the owner key could otherwise slip in its own veto key just before the recovery runs.
+                acc.pending_guardians = PendingGuardians{};
+            } else {
+                acc.guardians = acc.pending_guardians.config; acc.pending_guardians = PendingGuardians{};
+                acc.votes.clear(); // votes belonged to the old list of guardians
+            }
         }
     }
     // 3) carry out every agreed recovery whose waiting time is over, in a fixed order: (ready height, address)
@@ -202,14 +208,24 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
             sender.balance -= tx.fee; sender.nonce += 1;
             sender.recovery = PendingRecovery{}; sender.votes.clear();
             accounts_[tx.from] = sender;
-        } else { // ... or the veto key of another account does it (the veto key pays the fee from its own account)
+        } else { // veto key of another account (pays fee from its own balance)
             const auto pit = accounts_.find(tx.to);
             if (pit == accounts_.end()) return fail("no such account");
             Account prot = pit->second;
             if (prot.guardians.veto != tx.from) return fail("sender is not the veto key of this account");
             if (!prot.recovery.active && prot.votes.empty()) return fail("no recovery to cancel");
             sender.balance -= tx.fee; sender.nonce += 1;
-            prot.recovery = PendingRecovery{}; prot.votes.clear();
+            // R2: active recovery is postponed once; votes-only can still be cleared fully.
+            if (prot.recovery.active) {
+                if (prot.recovery.veto_postponed) return fail("veto already postponed this recovery");
+                const std::uint64_t base = prot.recovery.ready_height > height ? prot.recovery.ready_height : height;
+                if (base > UINT64_MAX - VETO_POSTPONE_BLOCKS) return fail("veto postpone overflow");
+                prot.recovery.ready_height = base + VETO_POSTPONE_BLOCKS;
+                prot.recovery.veto_postponed = true;
+                // votes already cleared when recovery scheduled; keep recovery active
+            } else {
+                prot.votes.clear();
+            }
             accounts_[tx.from] = sender; accounts_[tx.to] = prot;
         }
         break;
@@ -253,7 +269,7 @@ Hash32 State::state_root() const {
             put_guardians(a.pending_guardians.config); put_u64(bytes, a.pending_guardians.ready_height);
             put_u64(bytes, a.votes.size());
             for (const auto& [g, target] : a.votes) { put_addr(g); put_addr(target); }
-            put_u8(bytes, a.recovery.active ? 1 : 0); put_addr(a.recovery.target); put_u64(bytes, a.recovery.ready_height);
+            put_u8(bytes, a.recovery.active ? 1 : 0); put_addr(a.recovery.target); put_u64(bytes, a.recovery.ready_height); put_u8(bytes, a.recovery.veto_postponed ? 1 : 0);
         }
     }
     put_u64(bytes, burned_);

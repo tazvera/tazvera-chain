@@ -1,5 +1,6 @@
 #pragma once
 #include "taz/block.hpp"
+#include "taz/crypto.hpp"
 #include "taz/state.hpp"
 #include <limits>
 #include <utility>
@@ -8,6 +9,7 @@ struct ChainResult { bool ok{false}; std::string error; };
 
 inline constexpr std::int64_t NO_TIMESTAMP_LIMIT = std::numeric_limits<std::int64_t>::max();
 
+Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount);
 class Chain {
 public:
     bool init_genesis(const Address& first, Amount first_balance,
@@ -32,6 +34,8 @@ public:
     const std::vector<Block>& blocks() const noexcept { return blocks_; }
     // Non-zero genesis balances, in the order they were given (needed to re-verify the chain offline).
     const std::vector<std::pair<Address, Amount>>& genesis_balances() const noexcept { return genesis_balances_; }
+    // Canonical commitment over ordered genesis (address||balance). Verify out-of-band for integrity.
+    Hash32 genesis_commitment() const;
 private:
     ChainResult check_timestamp(std::int64_t timestamp, std::int64_t max_timestamp) const;
     ChainResult execute(const std::vector<Transaction>& txs, std::uint64_t height, State& candidate) const;

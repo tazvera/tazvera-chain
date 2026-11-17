@@ -164,7 +164,7 @@ static void test_loosening_is_delayed() {
         CHECK(put(c, {safety(a, 1000, 0, 0, 1)}));       CHECK(c.state().find(a.addr)->pending.active); // hold switched off
         CHECK(put(c, {safety(a, 1000, 5000, 10, 2)}));   CHECK(!c.state().find(a.addr)->pending.active);
         CHECK(put(c, {safety(a, 1000, 5000, 3, 3)}));    CHECK(c.state().find(a.addr)->pending.active);  // shorter hold
-        CHECK(put(c, {safety(a, 1000, 9000, 10, 4)}));   CHECK(c.state().find(a.addr)->pending.active == false || true);
+        CHECK(put(c, {safety(a, 1000, 9000, 10, 4)}));   CHECK(c.state().find(a.addr)->pending.active); // higher hold threshold = loosening, must wait
         CHECK(put(c, {safety(a, 1000, 4000, 12, 5)}));   CHECK(c.state().find(a.addr)->safety.hold_threshold == 4000); // tighter in all ways
     }
 }

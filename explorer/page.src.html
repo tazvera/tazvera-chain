@@ -438,7 +438,13 @@ async function verifyChain(c) {
 
   for (let i = 0; i < c.blocks.length; i++) {
     const b = c.blocks[i]; const h = i;
-    tick("link", i === 0 ? /^0{64}$/.test(b.prev) : b.prev === c.blocks[i - 1].hash, h, i === 0 ? "genesis का previous hash शून्य नहीं है" : "previous hash पिछले ब्लॉक से नहीं मिलता");
+    let linkOk;
+    if (i === 0) { // v8.2: block 0's previous_hash IS the commitment over both genesis accounts (zero balances included)
+      const ge = c.genesis.slice().sort((x, y) => (x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
+      const gc = ge.length === 2 ? toHex(await sha(cat(enc.encode("TAZVERA-GENESIS-V2"), enc.encode(c.chainId), new Uint8Array([0]), u32(b.version), ...ge.flatMap((g) => [hexToBytes(g.address), u64(g.balance)])))) : "";
+      linkOk = b.prev === gc;
+    } else linkOk = b.prev === c.blocks[i - 1].hash;
+    tick("link", linkOk, h, i === 0 ? "genesis का commitment (previous hash) genesis खातों से नहीं मिलता" : "previous hash पिछले ब्लॉक से नहीं मिलता");
     if (b.height !== BigInt(i)) fail(h, "height क्रम में नहीं है");
     if (b.version !== c.version || b.chainId !== c.chainId) fail(h, "ब्लॉक का version या chain ID अलग है");
     tick("time", i === 0 ? b.ts === 0n : b.ts > c.blocks[i - 1].ts, h, "timestamp पिछले ब्लॉक से सख़्ती से बड़ा नहीं है");
