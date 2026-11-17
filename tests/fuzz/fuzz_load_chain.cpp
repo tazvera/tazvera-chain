@@ -4,6 +4,7 @@
 // Two things are checked, not just "does it crash":
 //   1. a file that loads must not blow up on anything we then do with the chain;
 //   2. a file that loads must conserve supply: circulating + held + burned == the genesis total.
+#include "taz/export.hpp"   // to_json, for the re-export/reload round trip below
 #include "taz/persist.hpp"
 #include <cstddef>
 #include <cstdint>
