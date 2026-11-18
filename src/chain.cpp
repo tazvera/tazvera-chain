@@ -4,6 +4,17 @@
 #include <limits>
 #include <string_view>
 namespace taz {
+namespace {
+// v9: what a producer signs. Domain separated from transactions and from the block hash itself.
+std::vector<std::uint8_t> block_signable(const Hash32& block_hash) {
+    std::vector<std::uint8_t> out;
+    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V1";
+    out.insert(out.end(), domain.begin(), domain.end());
+    out.insert(out.end(), block_hash.begin(), block_hash.end());
+    return out;
+}
+}
+
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
     if (!blocks_.empty() || first == second) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
@@ -81,17 +92,6 @@ ChainResult Chain::accept_block(const Block& block, std::int64_t max_timestamp) 
     auto r = verify(block, max_timestamp, candidate);
     if (!r.ok) return r;
     state_ = std::move(candidate); blocks_.push_back(block); return {true,{}};
-}
-
-namespace {
-// v9: what a producer signs. Domain separated from transactions and from the block hash itself.
-std::vector<std::uint8_t> block_signable(const Hash32& block_hash) {
-    std::vector<std::uint8_t> out;
-    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V1";
-    out.insert(out.end(), domain.begin(), domain.end());
-    out.insert(out.end(), block_hash.begin(), block_hash.end());
-    return out;
-}
 }
 
 ChainResult Chain::set_producers(std::vector<Address> producers) {
