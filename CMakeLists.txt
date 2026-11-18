@@ -65,6 +65,10 @@ target_link_libraries(taz_persist_tests PRIVATE tazcore Threads::Threads)
 target_compile_definitions(taz_persist_tests PRIVATE TAZ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME taz_persist_tests COMMAND taz_persist_tests)
 
+add_executable(taz_producer_tests tests/test_producer.cpp)
+target_link_libraries(taz_producer_tests PRIVATE tazcore)
+add_test(NAME taz_producer_tests COMMAND taz_producer_tests)
+
 add_executable(taz_security82_tests tests/test_security82.cpp)
 target_link_libraries(taz_security82_tests PRIVATE tazcore)
 add_test(NAME taz_security82_tests COMMAND taz_security82_tests)

@@ -38,7 +38,7 @@ function str(v, what) { need(typeof v === "string" && v.length <= 200, what + " 
 function parseChain(text) {
   let j; try { j = JSON.parse(text); } catch { throw new FormatError("फ़ाइल सही JSON नहीं है"); }
   need(j && typeof j === "object", "फ़ाइल का ढाँचा गलत है");
-  need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3", "tazvera-chain-export-v4"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
+  need(["tazvera-chain-export-v1", "tazvera-chain-export-v2", "tazvera-chain-export-v3", "tazvera-chain-export-v4", "tazvera-chain-export-v5"].includes(j.format), "यह Tazvera की export फ़ाइल नहीं लगती (format गलत)");
   need(Array.isArray(j.blocks) && j.blocks.length >= 1 && j.blocks.length <= 100000, "ब्लॉकों की सूची गलत है");
   // v8.3: the node rebuilds exactly two genesis accounts, and block 0's previous_hash commits to both.
   need(Array.isArray(j.genesis_balances) && j.genesis_balances.length === 2,
@@ -59,6 +59,7 @@ function parseChain(text) {
     c.blocks.push({
       height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
       prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
+      producer: hxOr(b.producer, 20, ZERO20, "producer"),   // v9: absent on chains that do not use producer signatures
       txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 5n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
         txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
@@ -72,7 +73,10 @@ function parseChain(text) {
   // file that claims "v1" while carrying guardian transactions is exactly the kind of thing a mirror should
   // not bless. v3 was the old label for the v4 layout, so it counts as 4.
   let level = 1;
-  for (const b of c.blocks) for (const t of b.txs) { if (t.kind >= 3) level = 4; else if (t.kind !== 0 && level < 2) level = 2; }
+  for (const b of c.blocks) {
+    if (b.producer !== ZERO20 && level < 5) level = 5;   // v9: blocks carry producer signatures
+    for (const t of b.txs) { const need = t.kind >= 3 ? 4 : (t.kind !== 0 ? 2 : 1); if (need > level) level = need; }
+  }
   const declared = c.format === "tazvera-chain-export-v3" ? 4 : Number(c.format.slice(-1));
   need(declared === level, "फ़ाइल का format लेबल (" + c.format + ") अंदर के लेन-देन से मेल नहीं खाता — v" + level + " होना चाहिए");
   return c;

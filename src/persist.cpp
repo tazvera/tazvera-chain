@@ -183,6 +183,18 @@ const JVal* find(const JVal& o, std::string_view key) {
 const JVal& obj_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Obj) fail(std::string(what) + " must be an object"); return v; }
 const JVal& arr_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Arr) fail(std::string(what) + " must be an array"); return v; }
 const std::string& str_of(const JVal& v, std::string_view what) { if (v.type != JVal::Type::Str) fail(std::string(what) + " must be a string"); return v.str; }
+// v9: the same check when some fields may be absent (a block written before v9 has no producer keys).
+void exact_keys_with_optional(const JVal& o, std::initializer_list<std::string_view> required,
+                              std::initializer_list<std::string_view> optional, const std::string& what) {
+    for (std::string_view k : required) if (!find(o, k)) fail(what + " is missing the field \"" + std::string(k) + "\"");
+    for (const auto& m : o.obj) {
+        bool known = false;
+        for (std::string_view k : required) if (k == m.key) known = true;
+        for (std::string_view k : optional) if (k == m.key) known = true;
+        if (!known) fail(what + " has an unknown field \"" + m.key + "\"");
+    }
+}
+
 // The object must have exactly these keys (no more, no fewer).
 void exact_keys(const JVal& o, std::initializer_list<std::string_view> keys, const std::string& what) {
     for (std::string_view k : keys) if (!find(o, k)) fail(what + " is missing the field \"" + std::string(k) + "\"");
@@ -269,7 +281,8 @@ Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
 
 Block parse_block(const JVal& jv, bool with_veto, const std::string& where) {
     const JVal& o = obj_of(jv, where);
-    exact_keys(o, {"height", "protocol_version", "chain_id", "previous_hash", "timestamp", "state_root", "hash", "transactions"}, where);
+    exact_keys_with_optional(o, {"height", "protocol_version", "chain_id", "previous_hash", "timestamp", "state_root", "hash", "transactions"},
+                             {"producer", "producer_pubkey", "producer_signature"}, where);
     Block b;
     b.height = dec_u64(field(o, "height"), where + ".height");
     const std::uint64_t pv = dec_u64(field(o, "protocol_version"), where + ".protocol_version");
@@ -279,6 +292,13 @@ Block parse_block(const JVal& jv, bool with_veto, const std::string& where) {
     b.previous_hash = hex_of<Hash32>(field(o, "previous_hash"), where + ".previous_hash");
     b.timestamp = dec_i64(field(o, "timestamp"), where + ".timestamp");
     b.state_root = hex_of<Hash32>(field(o, "state_root"), where + ".state_root");
+    if (const JVal* pr = find(o, "producer")) {     // v9: absent on every block written before v9
+        b.producer = hex_of<Address>(*pr, where + ".producer");
+        b.producer_pubkey = hex_of<PubKey>(field(o, "producer_pubkey"), where + ".producer_pubkey");
+        b.producer_signature = hex_of<Signature>(field(o, "producer_signature"), where + ".producer_signature");
+    } else if (find(o, "producer_pubkey") || find(o, "producer_signature")) {
+        fail(where + " has a producer key or signature without a producer");
+    }
     const JVal& txs = arr_of(field(o, "transactions"), where + ".transactions");
     if (txs.arr.size() > MAX_BLOCK_TXS) fail(where + " has too many transactions");
     for (std::size_t i = 0; i < txs.arr.size(); ++i) b.transactions.push_back(parse_tx(txs.arr[i], with_veto, where + " tx " + std::to_string(i)));
@@ -288,8 +308,12 @@ Block parse_block(const JVal& jv, bool with_veto, const std::string& where) {
 
 int level_of(const Chain& c) {
     int level = 1;
-    for (const Block& b : c.blocks()) for (const Transaction& tx : b.transactions) {
-        if (tx.kind >= TxKind::SetGuardians) level = 4; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
+    for (const Block& b : c.blocks()) {
+        if (b.producer != Address{} && level < 5) level = 5;      // v9: producer signatures
+        for (const Transaction& tx : b.transactions) {
+            const int need = tx.kind >= TxKind::SetGuardians ? 4 : (tx.kind != TxKind::Transfer ? 2 : 1);
+            if (need > level) level = need;
+        }
     }
     return level;
 }
@@ -309,7 +333,8 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     else if (tag == "v2") { declared_level = 2; expects_veto = false; }     // safety rules; same
     else if (tag == "v4") declared_level = 4;
     else if (tag == "v3") declared_level = 4;                               // v7 label before "-v4" existed; checked below
-    else fail("unsupported chain file format \"" + format + "\" (this build reads v1, v2 and v4)");
+    else if (tag == "v5") declared_level = 5;                               // v9: blocks carry producer signatures
+    else fail("unsupported chain file format \"" + format + "\" (this build reads v1, v2, v4 and v5)");
 
     if (str_of(field(r, "chain_id"), "chain_id") != CHAIN_ID) fail("the file belongs to a different chain (chain ID differs)");
     const std::uint64_t file_proto = dec_u64(field(r, "protocol_version"), "protocol_version");
@@ -393,10 +418,28 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
         fail("block 0 is not a valid genesis block");
     if (g.state_root != mine.state_root) fail("block 0: genesis state root does not match the genesis balances");
     if (g.hash() != mine.hash()) fail("block 0: genesis hash does not match the genesis commitment");
-    for (std::size_t i = 1; i < blocks.arr.size(); ++i) {
-        const Block b = parse_block(blocks.arr[i], with_veto, "block " + std::to_string(i));
-        const ChainResult res = chain.accept_block(b);
-        if (!res.ok) fail("block " + std::to_string(i) + " (height " + std::to_string(b.height) + ") is invalid: " + res.error);
+    std::vector<Block> parsed;
+    for (std::size_t i = 1; i < blocks.arr.size(); ++i)
+        parsed.push_back(parse_block(blocks.arr[i], with_veto, "block " + std::to_string(i)));
+    // v9: the producer set is not stored separately — it is implied by the order the blocks name. Adopt it
+    // before replaying, because every block is checked against it.
+    if (!parsed.empty() && parsed[0].producer != Address{}) {
+        std::vector<Address> inferred;
+        for (const Block& b : parsed) {
+            if (b.producer == Address{}) fail("a block does not name a producer while the earlier ones do");
+            bool seen = false;
+            for (const Address& known : inferred) if (known == b.producer) seen = true;
+            if (!seen) {
+                inferred.push_back(b.producer);
+                if (inferred.size() > 64) fail("too many producers");
+            }
+        }
+        const ChainResult pr = chain.adopt_producer_set(inferred);
+        if (!pr.ok) fail(pr.error);
+    }
+    for (std::size_t i = 0; i < parsed.size(); ++i) {
+        const ChainResult res = chain.accept_block(parsed[i]);
+        if (!res.ok) fail("block " + std::to_string(i + 1) + " (height " + std::to_string(parsed[i].height) + ") is invalid: " + res.error);
     }
     if (level_of(chain) != declared_level)
         fail("the file's format label (" + tag + ") does not match what the chain contains");

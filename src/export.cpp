@@ -58,6 +58,12 @@ std::string to_json(const Chain& chain) {
         j += "      \"protocol_version\": " + num(b.protocol_version) + ",\n";
         j += "      \"chain_id\": " + q(b.chain_id) + ",\n";
         j += "      \"previous_hash\": " + hex(b.previous_hash) + ",\n";
+        // v9: only a block that claims a producer carries these, so a v8 chain exports byte for byte as before.
+        if (b.producer != Address{}) {
+            j += "      \"producer\": " + hex(b.producer) + ",\n";
+            j += "      \"producer_pubkey\": " + hex(b.producer_pubkey) + ",\n";
+            j += "      \"producer_signature\": " + hex(b.producer_signature) + ",\n";
+        }
         j += "      \"timestamp\": " + snum(b.timestamp) + ",\n";
         j += "      \"state_root\": " + hex(b.state_root) + ",\n";
         j += "      \"hash\": " + hex(b.hash()) + ",\n";
