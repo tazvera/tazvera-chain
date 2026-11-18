@@ -95,6 +95,7 @@ ChainResult Chain::accept_block(const Block& block, std::int64_t max_timestamp) 
 }
 
 ChainResult Chain::set_producers(std::vector<Address> producers) {
+    if (!producers_.empty()) return {false, "the producer set is already set"};
     if (blocks_.size() > 1) return {false, "the producer set must be set before the first block"};
     if (producers.empty()) return {false, "the producer set cannot be empty"};
     if (producers.size() > 64) return {false, "too many producers"};
