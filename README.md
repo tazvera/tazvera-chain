@@ -293,6 +293,20 @@ chain — was reported as broken (rules 5/10, state root 2/808).
   Space Grotesk from Google, a network request in a page that promises to need none), a clearer control split,
   and hashes that wrap instead of overflowing.
 
+## Version, today
+
+The current core version is **8.11**, in one place (`CORE_VERSION` in `include/taz/types.hpp`), mirrored by this
+title and read by CMake. `t15_version_consistency` fails the build if those ever disagree again.
+
+Two things that are easy to misread:
+
+- **The genesis pin is designed, not enforced.** `PIN_ENFORCEMENT_PLAN.md` describes a node that does not exist
+  yet. No caller sets `expected_genesis_commitment` or `require_genesis_pin`, so genesis authentication today
+  means tamper detection only.
+- **Documentation fixes do not change the version.** A later change that touches only comments or documents
+  keeps 8.11. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
+  deliberate, documented decision — neither has changed since v8.2.
+
 ## v8.11: the save path cannot be killed by its own housekeeping
 
 Version 8.11 is the release where the version itself is finally consistent: `CORE_VERSION` in

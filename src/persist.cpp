@@ -76,7 +76,7 @@ void sweep_stale_temp_files(const std::string& path) noexcept {
     std::error_code ec;
     const fs::path target = path_from_utf8(path);
     const fs::path dir = target.has_parent_path() ? target.parent_path() : fs::path(".");
-    // v8.12: build the prefix in UTF-8. path::string() returns the narrow *native* encoding, which on Windows
+    // v8.11: build the prefix in UTF-8. path::string() returns the narrow *native* encoding, which on Windows
     // is the ANSI code page: a file name outside that code page comes back lossy ("?") or throws, so the
     // prefix never matched and the stale temporary file of such a name was never swept. u8string() is UTF-8
     // on every platform, and the file name we compare against is converted the same way.

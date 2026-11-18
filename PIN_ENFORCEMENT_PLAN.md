@@ -1,9 +1,10 @@
 # Genesis pin enforcement — plan, not protection
 
-**Status: not enforced anywhere today.** This document exists so that nobody reads the pin code and concludes
-that genesis authentication is solved.
+**Status: not enforced anywhere today.** The current core version is **8.11**; everything in this document
+about the node, the handshake and the pin being mandatory describes work that has **not** been implemented.
+This document exists so that nobody reads the pin code and concludes that genesis authentication is solved.
 
-## What is true today (v8.12)
+## What is true today (Core v8.11)
 
 - `Chain::genesis_commitment()` commits to the genesis account list, the chain ID, the protocol version, the
   parameters and block 0's hash. It is written into every exported chain file.
@@ -88,7 +89,7 @@ taznode --genesis <file> --expect-genesis <64 hex>   # or: expect_genesis = "<64
 - No document may call the pin "production security" before there is a node, independent validators and an
   external audit.
 
-## Node implementation sketch (v8.12) — written down, NOT written
+## Node implementation sketch — written down, NOT written
 
 This is the shape the v9 node should take. None of it exists: there is no `taznode`, no config file and no
 handshake. Treat it as a design to review, not as work done.

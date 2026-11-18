@@ -556,7 +556,7 @@ static void t18_stale_cleanup_unicode() {
     const fs::path dir = utf8_path(dir_utf8);
     std::error_code ec; fs::create_directories(dir, ec); CHECK(!ec);
     if (ec) return;
-    // v8.12: the file NAME is non-ASCII too, not just the directory. That is the case that broke: the sweep
+    // v8.11: the file NAME is non-ASCII too, not just the directory. That is the case that broke: the sweep
     // built its prefix from filename().string(), which on Windows is the ANSI code page.
     const std::string target = dir_utf8 + "/\xE0\xA4\x9A\xE0\xA5\x87\xE0\xA4\xA8-\xE0\xA4\x9F\xE0\xA5\x87\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\x9F.json"; // चेन-टेस्ट.json
     const std::string old_tmp = target + ".tmp.111111.1";
