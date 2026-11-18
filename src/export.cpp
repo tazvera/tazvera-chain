@@ -56,7 +56,18 @@ std::string to_json(const Chain& chain) {
         j += std::string(first ? "" : ",") + "\n    {\"address\": " + hex(addr) + ", \"balance\": " + num(bal) + "}";
         first = false;
     }
-    j += "\n  ],\n  \"blocks\": [";
+    j += "\n  ],\n";
+    // v9: the producer list is part of the genesis manifest and is authenticated by genesis_commitment above.
+    if (!chain.producers().empty()) {
+        j += "  \"genesis_producers\": [";
+        bool first_p = true;
+        for (const Address& p : chain.producers()) {
+            j += std::string(first_p ? "" : ",") + "\n    " + hex(p);
+            first_p = false;
+        }
+        j += "\n  ],\n";
+    }
+    j += "  \"blocks\": [";
     for (std::size_t i = 0; i < chain.blocks().size(); ++i) {
         const Block& b = chain.blocks()[i];
         j += std::string(i ? "," : "") + "\n    {\n";

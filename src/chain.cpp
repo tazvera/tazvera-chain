@@ -105,6 +105,14 @@ ChainResult Chain::set_producers(std::vector<Address> producers) {
             if (producers[i] == producers[j]) return {false, "the same producer is listed twice"};
     }
     producers_ = std::move(producers);
+    // v9 P1: block 0 carries the genesis commitment, and that commitment now covers the producer list. Called
+    // before the first block (the only time this is allowed) there is nothing else to invalidate, so the
+    // commitment is recomputed here — otherwise a chain built with init_genesis() then set_producers() would
+    // hold a block 0 that commits no producers while genesis_commitment() claims it does, and every reload
+    // would be refused.
+    if (blocks_.size() == 1 && genesis_balances_.size() == 2)
+        blocks_[0].previous_hash = genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second,
+                                                         genesis_balances_[1].first, genesis_balances_[1].second, producers_);
     return {true, {}};
 }
 
@@ -146,11 +154,19 @@ ChainResult Chain::append_block_signed(const std::vector<Transaction>& transacti
 }
 
 Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Amount b1) {
+    return genesis_commitment_of(a0, b0, a1, b1, {});
+}
+
+Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Amount b1,
+                             const std::vector<Address>& producers) {
     // Canonical: the two accounts are sorted by address, so the order they were given in cannot matter.
     std::pair<Address, Amount> e[2] = {{a0, b0}, {a1, b1}};
     if (e[1].first < e[0].first) std::swap(e[0], e[1]);
     std::vector<std::uint8_t> bytes;
-    constexpr std::string_view domain = "TAZVERA-GENESIS-V2";
+    // v9: a chain with producers commits them too, under its own domain, so a v8 chain keeps its exact value.
+    constexpr std::string_view domain_v2 = "TAZVERA-GENESIS-V2";
+    constexpr std::string_view domain_v3 = "TAZVERA-GENESIS-V3";
+    const std::string_view domain = producers.empty() ? domain_v2 : domain_v3;
     bytes.insert(bytes.end(), domain.begin(), domain.end());
     const std::string_view cid = CHAIN_ID;
     bytes.insert(bytes.end(), cid.begin(), cid.end()); bytes.push_back(0);
@@ -159,10 +175,33 @@ Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Am
         bytes.insert(bytes.end(), addr.begin(), addr.end());
         for (int i = 7; i >= 0; --i) bytes.push_back(static_cast<std::uint8_t>((bal >> (8 * i)) & 0xff));
     }
+    if (!producers.empty()) {
+        const std::uint32_t n = static_cast<std::uint32_t>(producers.size());
+        for (int i = 3; i >= 0; --i) bytes.push_back(static_cast<std::uint8_t>((n >> (8 * i)) & 0xff));
+        for (const Address& p : producers) bytes.insert(bytes.end(), p.begin(), p.end());   // order matters
+    }
     return sha256(bytes);
 }
 Hash32 Chain::genesis_commitment() const {
     if (genesis_balances_.size() != 2) return Hash32{};
-    return genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second, genesis_balances_[1].first, genesis_balances_[1].second);
+    return genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second,
+                                 genesis_balances_[1].first, genesis_balances_[1].second, producers_);
+}
+
+bool Chain::init_genesis(const Address& first, Amount first_balance,
+                         const Address& second, Amount second_balance, std::vector<Address> producers) {
+    if (producers.empty()) return init_genesis(first, first_balance, second, second_balance);
+    // The set is validated exactly as set_producers() validates it, before anything is committed.
+    if (!blocks_.empty() || first == second) return false;
+    const ChainResult pr = set_producers(std::move(producers));
+    if (!pr.ok) return false;
+    State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
+    Block genesis; genesis.height = 0; genesis.timestamp = 0; genesis.state_root = genesis_state.state_root();
+    genesis.previous_hash = genesis_commitment_of(first, first_balance, second, second_balance, producers_);
+    state_ = genesis_state; blocks_.push_back(genesis);
+    genesis_balances_.clear();
+    genesis_balances_.emplace_back(first, first_balance);
+    genesis_balances_.emplace_back(second, second_balance);
+    return true;
 }
 }
