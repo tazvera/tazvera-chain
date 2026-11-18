@@ -59,6 +59,12 @@ public:
     // Canonical commitment over ordered genesis (address||balance). Verify out-of-band for integrity.
     Hash32 genesis_commitment() const;
 private:
+    // v9 P4: build a block without touching the chain, so a caller can sign it before anything is committed.
+    // append_block() is prepare + commit; append_block_signed() is prepare + sign + commit, which leaves no
+    // path where a block is committed and then fails to be signed.
+    ChainResult prepare_block(const std::vector<Transaction>& transactions, std::int64_t timestamp,
+                              std::int64_t max_timestamp, Block& out, State& next_state) const;
+    void commit_block(Block block, State next_state);
     ChainResult check_timestamp(std::int64_t timestamp, std::int64_t max_timestamp) const;
     ChainResult execute(const std::vector<Transaction>& txs, std::uint64_t height, State& candidate) const;
     ChainResult verify(const Block& block, std::int64_t max_timestamp, State& candidate) const;

@@ -178,6 +178,21 @@ static void t10_tampered_producer_list() {
     CHECK(!load_chain_json_text(text, out, &err));
 }
 
+
+// v9 P3: the message names the chain and the height, so one block's signature cannot be moved to another
+// block made by the same producer.
+static void t11_signature_bound_to_height() {
+    Key o = new_key(), g = new_key(), p1 = new_key();
+    Chain c; CHECK(c.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr}));
+    CHECK(c.append_block_signed({transfer(o, g.addr, 10, 0)}, ts++, p1.sk, p1.pk).ok);
+    CHECK(c.append_block_signed({transfer(o, g.addr, 20, 1)}, ts++, p1.sk, p1.pk).ok);
+    Block b = c.blocks()[2];
+    b.producer_signature = c.blocks()[1].producer_signature;      // same producer, different height
+    Chain target; CHECK(target.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr}));
+    CHECK(target.append_block_signed({transfer(o, g.addr, 10, 0)}, ts++, p1.sk, p1.pk).ok);
+    CHECK(!target.accept_block(b).ok);
+}
+
 int main() {
     t01_set_producers_rules();
     t02_round_robin();
@@ -189,6 +204,7 @@ int main() {
     t08_restart_keeps_producers();
     t09_commitment_commits_producers();
     t10_tampered_producer_list();
+    t11_signature_bound_to_height();
     if (failures == 0) { std::cout << "producer tests: all passed\n"; return 0; }
     std::cerr << "producer tests: " << failures << " failure(s)\n";
     return 1;
