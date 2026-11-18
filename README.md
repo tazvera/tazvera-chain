@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v8.2
+# TAZVERA Chain — Core v8.8
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -184,10 +184,10 @@ Remaining limit: with a veto key live, a thief controlling it can still delay a 
 - Always-true assertions (`|| true`, `(void)` dead variables, a helper that always returned false, a comparison that was always true) were removed or turned into real checks.
 - Fuzz: 6000 damaged chain files and 4000 random (partly invalid or badly signed) transaction blocks per run; failed blocks must not change state; supply must stay conserved.
 - Mutation check performed by hand: removing the discard rule or the block-0 binding makes `taz_security82_tests` fail.
-- CI (`.github/workflows/ci.yml`): Release build + tests, and a Debug build with `-fsanitize=address,undefined` + tests, on Linux; a Windows job (OpenSSL via vcpkg). The Windows job has not been run by the author; its result is whatever GitHub shows.
+- CI, four workflows, all green on `main`: `ci.yml` (Linux, Release build + tests, and a Debug build with `-fsanitize=address,undefined` + tests), `windows.yml` (MSYS2 UCRT64, mingw-w64, OpenSSL from the MSYS2 packages, `ctest`), `fuzz.yml` (clang, `-DTAZ_BUILD_FUZZERS=ON`, 60 s per libFuzzer target) and the explorer demo files are checked by `taz_persist_tests`. The Windows job runs on every push and pull request and passes; it is CI-tested, not author-tested on a real Windows machine.
 
 ### 4. Windows
-`save_chain_json` on Windows now uses `CreateFileW` (CREATE_NEW), `WriteFile`, `FlushFileBuffers` and `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`, with UTF-8 paths. It has **not been compiled or run on Windows by the author** (no Windows machine). Directory metadata flush is not done on Windows.
+Saving: `CreateFileW` (CREATE_NEW), `WriteFile`, `FlushFileBuffers`, then `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)` — retried ten times on `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`, because antivirus and the search indexer hold the target open for a few milliseconds. The read-back and every path in `load_chain_json` (`status`, `file_size`, `ifstream`) go through one UTF-8 to native conversion, so a chain file under a non-ASCII directory works; `taz_persist_tests` has a test that saves and loads one (`t13_non_ascii_path`). Directory metadata is still not flushed on Windows, and the Windows path is exercised by CI only — nobody has run this on a real Windows machine yet.
 
 ## Known limitations (complete list for v8.2)
 1. Prototype only: no P2P, no consensus, no producer signatures on blocks, no mempool gossip, no wallet. Not a testnet or mainnet; must not hold value.
@@ -199,7 +199,7 @@ Remaining limit: with a veto key live, a thief controlling it can still delay a 
 7. If the guardians do not react within about `SAFETY_DELAY_BLOCKS - RECOVERY_DELAY_BLOCKS` (200 blocks) of a thief scheduling a veto/guardian change, and no recovery is under way, the change takes effect. Wallets must show pending guardian changes prominently (wallet not built).
 8. Parameters (`RECOVERY_DELAY_BLOCKS`, `VETO_POSTPONE_BLOCKS`, `SAFETY_DELAY_BLOCKS`, fee, limits) are placeholders; block time is undecided.
 9. `Chain::append_block`/`accept_block` take `max_timestamp` from the caller; default is no limit.
-10. Persistence is a local file: no locking between processes, no database. Windows save code is untested by the author (see above). Files must come from a build with the same constants.
+10. Persistence is a local file: no locking between processes, no database. The Windows save and load paths are exercised by CI on every push, but nobody has run them on a real Windows machine. Files must come from a build with the same constants.
 11. Keys: 32-byte seeds in memory only; no secure storage, no mlock; callers must wipe their copies.
 12. State root is a flat hash over all accounts (O(n)); no Merkle proofs. `Mempool::submit` is O(pool size).
 13. Held transfers belong to the sender until release; receivers must not treat them as received.
@@ -239,3 +239,20 @@ This supersedes the v8.2 list above.
 13. Held transfers belong to the sender until release; a receiver must not treat them as received.
 14. The fuzz corpus is not committed and the runs are short (60 s per target); it is a smoke test, not a campaign.
 15. Not audited. The tests are the author's, Grok's and this review's — not an independent security review.
+
+## v8.8: Windows load paths, pin preparation, repository hygiene
+
+- **Windows load** — `load_chain_json` converted to a native path once (`status`, `file_size`, `ifstream`). Saving a file under a non-ASCII directory already worked since v8.3; loading it did not.
+- **Tests** — `t13_non_ascii_path` saves and loads a chain inside a directory named `taz-टेस्ट-ü`, on every platform, so the Windows fix cannot regress silently.
+- **Pin preparation** — `LoadOptions::require_genesis_pin` (off by default). A node must never load a chain it cannot identify; the future node binary sets this flag, and a later version makes it the default. Nothing changes for library callers today.
+- **Repository hygiene** — the files that an upload had left in the repository root (`persist.cpp`, `chain.cpp`, `ci.yml`, `fuzz.yml`, `windows.yml`, `test_persist.cpp` and the rest) are removed. The build reads `src/`, `include/taz/`, `tests/`, `explorer/` and `.github/workflows/` only, so the duplicates were never compiled — but a reader could not tell which `persist.cpp` was real, and that is a security problem of its own.
+
+## Guardian and veto — known limits, in one place
+
+These are deliberate properties of the design, not bugs waiting to be found:
+
+1. **Without a veto key, the owner key can cancel a recovery — repeatedly.** Pinned by `test_owner_key_can_cancel_without_veto`. It exists so an honest owner can stop guardians acting maliciously. Guardian recovery is protection for a **lost** key; against a **stolen** key it limits damage, it does not restore control.
+2. **A veto key can postpone an agreed recovery once**, by `VETO_POSTPONE_BLOCKS`, and a second veto is refused. A thief holding the veto key therefore delays a recovery, and cannot stop it.
+3. **A guardian or veto change that comes due while a recovery is already agreed is discarded**, so a thief cannot slip a veto key in just before the recovery runs.
+4. **The race window is `SAFETY_DELAY_BLOCKS - RECOVERY_DELAY_BLOCKS` (200 blocks).** If guardians do not react within it after a thief schedules a guardian change, and no recovery is under way, the change takes effect. Set the veto key together with the guardians, not later.
+5. **Any `threshold` guardians together can take the funds** after the delay. Choose independent people; this cannot be prevented cryptographically.

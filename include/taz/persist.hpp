@@ -30,6 +30,10 @@ struct LoadOptions {
     // consistent: anyone can build a consistent chain with a different genesis and hand it to you, and every
     // hash inside it will agree. This pin is what answers "is this the right chain?" — leave it empty to skip.
     std::optional<Hash32> expected_genesis_commitment{};
+    // v8.8: a node must never load a chain it cannot identify. When this is true a load without a pin is
+    // refused instead of silently skipping the check. Off by default, so library users and the existing
+    // tests are unaffected; the future node binary sets it, and a later version makes it the default.
+    bool require_genesis_pin = false;
 };
 
 // Crash-safe: the data goes to a new temporary file next to the target, is flushed to disk and read back,

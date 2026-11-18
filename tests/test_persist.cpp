@@ -445,9 +445,41 @@ static void t11_repository_demo_files() {
 #endif
 }
 
+// v8.8: UTF-8 paths, independent of the platform's native encoding. The library takes a std::string holding
+// UTF-8 bytes; std::filesystem::path needs the same bytes wrapped in a u8string.
+static std::string utf8_of(const fs::path& p) { const std::u8string u = p.u8string(); return std::string(u.begin(), u.end()); }
+static fs::path utf8_path(const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); }
+
+// v8.8: a chain file under a directory whose name is not ASCII. On Windows this used to fail at status(),
+// file_size() and ifstream, because all three took a narrow std::string (ANSI code page) even though saving
+// the same path already worked.
+static void t13_non_ascii_path() {
+    const std::string name = "taz-\xE0\xA4\x9F\xE0\xA5\x87\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\x9F-\xC3\xBC"; // taz-टेस्ट-ü
+    const std::string dir_utf8 = utf8_of(tmpdir()) + "/" + name;
+    const fs::path dir = utf8_path(dir_utf8);
+    std::error_code ec; fs::create_directories(dir, ec); CHECK(!ec);
+    if (ec) return;                                            // cannot create it here: nothing to test
+    Keys k; Chain c = full_chain(k); std::string err;
+    const std::string file = dir_utf8 + "/chain.json";
+    CHECK(save_chain_json(c, file, &err));
+    { Chain out; CHECK(load_chain_json(file, out, &err)); CHECK(same_chain(out, c)); }
+    { Chain out = sentinel(); CHECK(!load_chain_json(dir_utf8 + "/missing.json", out, &err) && !err.empty()); }
+    fs::remove_all(dir, ec);
+}
+
+// v8.8: the flag the future node will set. A load with no pin is refused when it is on, and nothing changes
+// when it is off, which is what keeps the library compatible.
+static void t14_require_genesis_pin() {
+    Keys k; Chain c = plain_chain(k.o, k.g0); const std::string text = to_json(c); std::string why;
+    LoadOptions strict; strict.require_genesis_pin = true;
+    { Chain out = sentinel(); CHECK(!load_chain_json_text(text, out, &why, strict)); }
+    { LoadOptions o = strict; o.expected_genesis_commitment = c.genesis_commitment(); Chain out; CHECK(load_chain_json_text(text, out, &why, o)); }
+    { LoadOptions o; Chain out; CHECK(load_chain_json_text(text, out, &why, o)); }
+}
+
 int main() {
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;
