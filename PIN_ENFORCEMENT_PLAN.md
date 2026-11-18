@@ -3,7 +3,7 @@
 **Status: not enforced anywhere today.** This document exists so that nobody reads the pin code and concludes
 that genesis authentication is solved.
 
-## What is true today (v8.11)
+## What is true today (v8.12)
 
 - `Chain::genesis_commitment()` commits to the genesis account list, the chain ID, the protocol version, the
   parameters and block 0's hash. It is written into every exported chain file.
@@ -87,3 +87,55 @@ taznode --genesis <file> --expect-genesis <64 hex>   # or: expect_genesis = "<64
   no security gain.
 - No document may call the pin "production security" before there is a node, independent validators and an
   external audit.
+
+## Node implementation sketch (v8.12) — written down, NOT written
+
+This is the shape the v9 node should take. None of it exists: there is no `taznode`, no config file and no
+handshake. Treat it as a design to review, not as work done.
+
+```cpp
+// taznode/main.cpp  (does not exist yet)
+struct NodeConfig {
+    std::string genesis_file;          // required
+    std::optional<Hash32> expect_genesis;   // required to start; parsed from --expect-genesis or the config
+    std::string listen;                // e.g. 127.0.0.1:9100
+    std::vector<std::string> peers;
+    std::string data_file;             // where save_chain_json writes
+};
+
+int main(int argc, char** argv) {
+    const NodeConfig cfg = parse_args(argc, argv);        // exits 2 with a clear message on a bad flag
+    if (!cfg.expect_genesis) {
+        std::cerr << "refusing to start: --expect-genesis <64 hex> is required\n";
+        return 2;                                          // test node_refuses_without_pin
+    }
+    taz::LoadOptions opt;
+    opt.require_genesis_pin = true;                        // the node never runs unpinned
+    opt.expected_genesis_commitment = cfg.expect_genesis;
+
+    taz::Chain chain;
+    std::string err;
+    if (!taz::load_chain_json(cfg.genesis_file, chain, &err, opt)) {   // tests 1-3
+        std::cerr << "cannot load " << cfg.genesis_file << ": " << err << "\n";
+        return 1;
+    }
+    // test 5: one line an operator can compare with the release notes
+    std::cout << "chain_id=" << taz::CHAIN_ID
+              << " protocol=" << taz::PROTOCOL_VERSION
+              << " genesis=" << to_hex(chain.genesis_commitment()) << "\n";
+    ...
+}
+
+// peer handshake (does not exist yet)
+//   hello   : magic, protocol_version, chain_id, genesis_commitment, best_height
+//   on recv : if genesis_commitment != our pinned value -> close the connection before any block is sent
+//             (test node_wrong_pin_never_exchanges_blocks)
+```
+
+**Why the flag is not simply made mandatory in the library:** `load_chain_json` is also used by the test suite,
+the explorer's demo files and anyone embedding the core. Making the pin mandatory there would break every
+caller today and protect nobody, because the missing piece is the *node*, not the flag.
+
+**What would make this "done":** `taznode` builds and runs, tests 1–6 from the table above pass in CI, and the
+handshake comparison is exercised by two nodes on a wrong pin. Until then the correct sentence is
+"the pin exists and is unused", and that is what the README says.
