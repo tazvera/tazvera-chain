@@ -15,6 +15,13 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Explorer page is up to date
+        # v8.9: explorer/index.html is a generated file (page.src.html + the demo JSON). Nothing rebuilds it
+        # automatically, so it can silently fall behind the rules the node enforces. This fails the build if
+        # rebuilding changes a single byte.
+        run: |
+          python3 explorer/build.py
+          git diff --exit-code -- explorer/index.html
   sanitizers:
     runs-on: ubuntu-24.04
     steps:
