@@ -54,13 +54,14 @@ std::filesystem::path path_from_utf8(const std::string& s) {
 // v8.7: a crash between writing the temporary file and renaming it leaves <path>.tmp.<pid>.<n> behind for
 // ever. Sweep the ones in this directory that look exactly like ours and are more than an hour old.
 // Best effort on purpose: it never fails a save, never follows a symlink and never touches another file.
-void sweep_stale_temp_files(const std::string& path) {
+void sweep_stale_temp_files(const std::string& path) noexcept {
     namespace fs = std::filesystem;
     std::error_code ec;
     const fs::path target = path_from_utf8(path);
     const fs::path dir = target.has_parent_path() ? target.parent_path() : fs::path(".");
     const std::string prefix = target.filename().string() + ".tmp.";
     const auto cutoff = fs::file_time_type::clock::now() - std::chrono::hours(1);
+    try {   // v8.9: housekeeping must never break a save, so even an allocation failure stops here
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         const std::string name = it->path().filename().string();
         if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
@@ -70,6 +71,9 @@ void sweep_stale_temp_files(const std::string& path) {
         if (fec || written > cutoff) continue;          // younger than an hour: another process may be writing it
         std::error_code rec;
         fs::remove(it->path(), rec);                    // ignored: a stale file we cannot delete is not a failure
+    }
+    } catch (...) {
+        // A stale file that survives is not an error. Never propagate anything from here.
     }
 }
 
@@ -422,10 +426,11 @@ bool load_chain_json(const std::string& path, Chain& out, std::string* error, co
 bool save_chain_json(const Chain& chain, const std::string& path, std::string* error) {
     auto set_err = [&](const std::string& m) { if (error) *error = m; };
     if (chain.blocks().empty()) { set_err("the chain has no genesis; nothing to save"); return false; }
-    sweep_stale_temp_files(path);   // v8.7: housekeeping only, never fatal
     static std::atomic<unsigned long> counter{0};
     std::string tmp;
     try {
+        // v8.9: inside the try, and the helper is noexcept, so no filesystem error can escape save_chain_json.
+        sweep_stale_temp_files(path);   // housekeeping only, never fatal
         const std::string body = to_json(chain);
         namespace fs = std::filesystem;
 #ifndef _WIN32

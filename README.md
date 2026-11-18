@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v8.8
+# TAZVERA Chain — Core v8.9
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -244,7 +244,7 @@ This supersedes the v8.2 list above.
 
 - **Windows load** — `load_chain_json` converted to a native path once (`status`, `file_size`, `ifstream`). Saving a file under a non-ASCII directory already worked since v8.3; loading it did not.
 - **Tests** — `t13_non_ascii_path` saves and loads a chain inside a directory named `taz-टेस्ट-ü`, on every platform, so the Windows fix cannot regress silently.
-- **Pin preparation** — `LoadOptions::require_genesis_pin` (off by default). A node must never load a chain it cannot identify; the future node binary sets this flag, and a later version makes it the default. Nothing changes for library callers today.
+- **Pin preparation — not yet enforced.** `LoadOptions::expected_genesis_commitment` and `require_genesis_pin` exist and **neither is set by any caller**, because there is no node and no CLI. Genesis authentication today means tamper detection only. See `PIN_ENFORCEMENT_PLAN.md`; do not describe this as production security.
 - **Repository hygiene** — the files that an upload had left in the repository root (`persist.cpp`, `chain.cpp`, `ci.yml`, `fuzz.yml`, `windows.yml`, `test_persist.cpp` and the rest) are removed. The build reads `src/`, `include/taz/`, `tests/`, `explorer/` and `.github/workflows/` only, so the duplicates were never compiled — but a reader could not tell which `persist.cpp` was real, and that is a security problem of its own.
 
 ## Guardian and veto — known limits, in one place
@@ -256,3 +256,17 @@ These are deliberate properties of the design, not bugs waiting to be found:
 3. **A guardian or veto change that comes due while a recovery is already agreed is discarded**, so a thief cannot slip a veto key in just before the recovery runs.
 4. **The race window is `SAFETY_DELAY_BLOCKS - RECOVERY_DELAY_BLOCKS` (200 blocks).** If guardians do not react within it after a thief schedules a guardian change, and no recovery is under way, the change takes effect. Set the veto key together with the guardians, not later.
 5. **Any `threshold` guardians together can take the funds** after the delay. Choose independent people; this cannot be prevented cryptographically.
+
+## v8.9: one version, a safe sweep, and an honest pin
+
+- **Version, one place.** `include/taz/types.hpp` holds `CORE_VERSION`; `CMakeLists.txt` reads it and the test
+  suite compares it with the README title (`t15_version_consistency`). CMake had said `0.8.2` while the README
+  said v8.8, and nothing failed.
+- **The sweep can no longer break a save.** `sweep_stale_temp_files()` is `noexcept`, has its own catch-all,
+  and is called inside the `try` of `save_chain_json`. `t16_save_never_throws` proves a failing save returns
+  `false` instead of throwing.
+- **Cleanup under a non-ASCII path.** `t13_non_ascii_path` now also proves that a two-hour-old temporary file
+  next to a `taz-टेस्ट-ü` target is swept, and that a young one is left alone for the process that may still
+  be writing it.
+- **The pin is described as a plan.** `PIN_ENFORCEMENT_PLAN.md` says what is enforced today (nothing), what
+  the node will enforce in v9, and what the library will default to in v10.
