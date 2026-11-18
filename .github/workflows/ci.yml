@@ -15,6 +15,16 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Chains the core wrote for the veto rules
+        run: |
+          mkdir -p gen
+          ./build/taz_gen_veto_demo gen
+      - name: Explorer agrees with the core
+        run: node explorer/check_demos.js gen
+      - name: Explorer page is up to date
+        run: |
+          python3 explorer/build.py
+          git diff --exit-code -- explorer/index.html
   sanitizers:
     runs-on: ubuntu-24.04
     steps:
