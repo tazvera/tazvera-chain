@@ -4,6 +4,17 @@
 #include <limits>
 #include <string_view>
 namespace taz {
+namespace {
+// v9: what a producer signs. Domain separated from transactions and from the block hash itself.
+std::vector<std::uint8_t> block_signable(const Hash32& block_hash) {
+    std::vector<std::uint8_t> out;
+    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V1";
+    out.insert(out.end(), domain.begin(), domain.end());
+    out.insert(out.end(), block_hash.begin(), block_hash.end());
+    return out;
+}
+}
+
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
     if (!blocks_.empty() || first == second) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
@@ -52,6 +63,20 @@ ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State&
     if (block.chain_id != CHAIN_ID) return {false,"block has wrong chain ID"};
     if (block.height != tip.height + 1) return {false,"unexpected block height"};
     if (block.previous_hash != tip.hash()) return {false,"previous hash does not match chain tip"};
+    // v9: producer rules. A chain without a producer set must not carry producer fields, so an unsigned v8
+    // chain and a chain that silently claims authorship never verify the same way.
+    if (producers_.empty()) {
+        if (block.producer != Address{} || block.producer_pubkey != PubKey{} || block.producer_signature != Signature{})
+            return {false,"this chain has no producer set, so a block must not claim a producer"};
+    } else {
+        if (block.producer != producers_[(block.height - 1) % producers_.size()])
+            return {false,"block is not signed by the producer expected for this height"};
+        if (address_from_pubkey(block.producer_pubkey) != block.producer)
+            return {false,"the block public key does not match its producer address"};
+        const auto msg = block_signable(block.hash());
+        if (!taz::verify(block.producer_pubkey, msg, block.producer_signature))
+            return {false,"block signature does not verify"};
+    }
     if (auto t = check_timestamp(block.timestamp, max_timestamp); !t.ok) return t;
     candidate = state_;
     if (auto r = execute(block.transactions, block.height, candidate); !r.ok) return r;
@@ -67,6 +92,57 @@ ChainResult Chain::accept_block(const Block& block, std::int64_t max_timestamp) 
     auto r = verify(block, max_timestamp, candidate);
     if (!r.ok) return r;
     state_ = std::move(candidate); blocks_.push_back(block); return {true,{}};
+}
+
+ChainResult Chain::set_producers(std::vector<Address> producers) {
+    if (!producers_.empty()) return {false, "the producer set is already set"};
+    if (blocks_.size() > 1) return {false, "the producer set must be set before the first block"};
+    if (producers.empty()) return {false, "the producer set cannot be empty"};
+    if (producers.size() > 64) return {false, "too many producers"};
+    for (std::size_t i = 0; i < producers.size(); ++i) {
+        if (producers[i] == Address{}) return {false, "a producer cannot be the zero address"};
+        for (std::size_t j = i + 1; j < producers.size(); ++j)
+            if (producers[i] == producers[j]) return {false, "the same producer is listed twice"};
+    }
+    producers_ = std::move(producers);
+    return {true, {}};
+}
+
+ChainResult Chain::adopt_producer_set(std::vector<Address> producers) {
+    if (!producers_.empty()) return {false, "the producer set is already set"};
+    if (producers.empty() || producers.size() > 64) return {false, "bad producer set size"};
+    for (std::size_t i = 0; i < producers.size(); ++i) {
+        if (producers[i] == Address{}) return {false, "a producer cannot be the zero address"};
+        for (std::size_t j = i + 1; j < producers.size(); ++j)
+            if (producers[i] == producers[j]) return {false, "the same producer is listed twice"};
+    }
+    for (const Block& b : blocks_) {
+        if (b.height == 0) continue;
+        if (b.producer != producers[(b.height - 1) % producers.size()])
+            return {false, "a block names a producer the round robin does not expect"};
+    }
+    producers_ = std::move(producers);
+    return {true, {}};
+}
+
+ChainResult Chain::append_block_signed(const std::vector<Transaction>& transactions, std::int64_t timestamp,
+                                       const PrivKey& producer_key, const PubKey& producer_pubkey,
+                                       std::int64_t max_timestamp) {
+    if (producers_.empty()) return {false, "this chain has no producer set"};
+    if (address_from_pubkey(producer_pubkey) != producers_[height() % producers_.size()])
+        return {false, "this key is not the producer expected for the next height"};
+    // Sign a probe first: signing cannot fail after this, so a block is never committed unsigned.
+    Signature probe{};
+    const std::vector<std::uint8_t> test_message{'p'};
+    if (!sign(producer_key, test_message, probe)) return {false, "the producer key cannot sign"};
+    const ChainResult r = append_block(transactions, timestamp, max_timestamp);
+    if (!r.ok) return r;
+    Block& b = blocks_.back();
+    b.producer = address_from_pubkey(producer_pubkey);
+    b.producer_pubkey = producer_pubkey;
+    const auto msg = block_signable(b.hash());
+    if (!sign(producer_key, msg, b.producer_signature)) return {false, "the block could not be signed"};
+    return {true, {}};
 }
 
 Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Amount b1) {

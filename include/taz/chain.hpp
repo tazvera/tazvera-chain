@@ -21,6 +21,21 @@ public:
     ChainResult append_block(const std::vector<Transaction>& transactions, std::int64_t timestamp,
                              std::int64_t max_timestamp = NO_TIMESTAMP_LIMIT);
 
+    // v9: the producer set. Empty means "this chain does not use producer signatures", and then every block
+    // must leave the producer fields zero — which is how a v8 chain keeps verifying exactly as before.
+    // Round robin: the first block after genesis (height 1) is made by producers[0], and block h by
+    // producers[(h - 1) % producers.size()].
+    const std::vector<Address>& producers() const noexcept { return producers_; }
+    // Only before the first non-genesis block; rejects an empty list, the zero address and duplicates.
+    ChainResult set_producers(std::vector<Address> producers);
+    // Loader path: adopt a set derived from blocks that are already in the chain, after checking that every
+    // block names the producer the round robin would expect.
+    ChainResult adopt_producer_set(std::vector<Address> producers);
+    // Append a block and sign it as the producer expected for that height.
+    ChainResult append_block_signed(const std::vector<Transaction>& transactions, std::int64_t timestamp,
+                                    const PrivKey& producer_key, const PubKey& producer_pubkey,
+                                    std::int64_t max_timestamp = NO_TIMESTAMP_LIMIT);
+
     // Fully check a block produced elsewhere WITHOUT changing the chain: version, chain ID,
     // height, previous hash, timestamp, block size, every transaction, and the claimed state root.
     ChainResult validate_block(const Block& block,
@@ -42,6 +57,7 @@ private:
     ChainResult verify(const Block& block, std::int64_t max_timestamp, State& candidate) const;
     std::vector<Block> blocks_;
     std::vector<std::pair<Address, Amount>> genesis_balances_;
+    std::vector<Address> producers_;
     State state_;
 };
 }
