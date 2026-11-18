@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v8.9
+# TAZVERA Chain — Core v8.10
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -270,3 +270,25 @@ These are deliberate properties of the design, not bugs waiting to be found:
   be writing it.
 - **The pin is described as a plan.** `PIN_ENFORCEMENT_PLAN.md` says what is enforced today (nothing), what
   the node will enforce in v9, and what the library will default to in v10.
+
+## v8.10: the explorer learns the veto rules, and a check that keeps it honest
+
+The browser verifier is a second implementation of the same rules, and it had never been taught what the C++
+state machine gained in v8.2. The result was worse than a cosmetic bug: the "family recovery" demo — a valid
+chain — was reported as broken (rules 5/10, state root 2/808).
+
+- **Fixed in both copies of the script** (`explorer/page.src.html` and `explorer/script.src.js`): the state
+  root carries `veto_postponed` again; a live veto key postpones an active recovery once by 300 blocks instead
+  of cancelling it; a guardian/veto change that comes due while a recovery is already agreed is discarded.
+- **New cross-check** — `explorer/check_demos.js` runs the explorer's own code in Node (a small DOM stub: no
+  browser, no npm) against the three demo chains and fails if they disagree. Control run against the previous
+  script: `demo_recovery_chain.json` fails with "state root does not match"; against the fixed one all three
+  pass (32/32, 80/80, 3272/3272 checks) and a tampered copy is refused.
+- **Chains the core wrote** — `taz_gen_veto_demo` writes three more files (a one-shot veto postpone, a
+  discarded pending veto, an owner who cancels twice without a veto key). CI generates them and passes the
+  directory to the same check, so the rules are tested where they are hardest.
+- **CI** — two steps: `node explorer/check_demos.js` (plus the generated directory) and a rebuild check that
+  fails if `explorer/index.html` is stale.
+- **Layout** — the page keeps the v8.10 redesign: system fonts only (the previous version fetched Inter and
+  Space Grotesk from Google, a network request in a page that promises to need none), a clearer control split,
+  and hashes that wrap instead of overflowing.

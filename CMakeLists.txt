@@ -79,3 +79,8 @@ if(TAZ_BUILD_FUZZERS)
         target_link_options(${target} PRIVATE -fsanitize=fuzzer,address,undefined)
     endforeach()
 endif()
+
+# v8.10: writes chain files that exercise the veto rules, so the explorer cross-check can be run against
+# chains the C++ core itself produced (not only against the three shipped demos).
+add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
+target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
