@@ -5,11 +5,15 @@
 #include <string_view>
 namespace taz {
 namespace {
-// v9: what a producer signs. Domain separated from transactions and from the block hash itself.
-std::vector<std::uint8_t> block_signable(const Hash32& block_hash) {
+// v9: what a producer signs. The chain ID and the height are in the message itself, so a signature says in
+// its own bytes which chain and which height it belongs to — not only implicitly, through the block hash.
+std::vector<std::uint8_t> block_signable(const std::string& chain_id, std::uint64_t height, const Hash32& block_hash) {
     std::vector<std::uint8_t> out;
-    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V1";
+    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V2";
     out.insert(out.end(), domain.begin(), domain.end());
+    out.insert(out.end(), chain_id.begin(), chain_id.end());
+    out.push_back(0);
+    for (int i = 7; i >= 0; --i) out.push_back(static_cast<std::uint8_t>((height >> (8 * i)) & 0xff));
     out.insert(out.end(), block_hash.begin(), block_hash.end());
     return out;
 }
@@ -43,7 +47,8 @@ ChainResult Chain::execute(const std::vector<Transaction>& txs, std::uint64_t he
     }
     return {true,{}};
 }
-ChainResult Chain::append_block(const std::vector<Transaction>& transactions, std::int64_t timestamp, std::int64_t max_timestamp) {
+ChainResult Chain::prepare_block(const std::vector<Transaction>& transactions, std::int64_t timestamp,
+                                 std::int64_t max_timestamp, Block& out, State& next_state) const {
     if (blocks_.empty()) return {false,"genesis is not initialized"};
     // Never let the height wrap back to zero (restored from Core v6.2; Core v7 had dropped it).
     if (blocks_.back().height == std::numeric_limits<std::uint64_t>::max()) return {false,"chain height exhausted"};
@@ -53,7 +58,21 @@ ChainResult Chain::append_block(const std::vector<Transaction>& transactions, st
     if (auto r = execute(transactions, next_height, candidate); !r.ok) return r;
     Block block; block.height=next_height; block.previous_hash=blocks_.back().hash();
     block.timestamp=timestamp; block.transactions=transactions; block.state_root=candidate.state_root();
-    state_=std::move(candidate); blocks_.push_back(std::move(block)); return {true,{}};
+    out = std::move(block); next_state = std::move(candidate);
+    return {true,{}};
+}
+
+void Chain::commit_block(Block block, State next_state) {
+    state_ = std::move(next_state);
+    blocks_.push_back(std::move(block));
+}
+
+ChainResult Chain::append_block(const std::vector<Transaction>& transactions, std::int64_t timestamp, std::int64_t max_timestamp) {
+    Block block; State next;
+    const ChainResult r = prepare_block(transactions, timestamp, max_timestamp, block, next);
+    if (!r.ok) return r;
+    commit_block(std::move(block), std::move(next));
+    return {true,{}};
 }
 ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State& candidate) const {
     if (blocks_.empty()) return {false,"genesis is not initialized"};
@@ -73,7 +92,7 @@ ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State&
             return {false,"block is not signed by the producer expected for this height"};
         if (address_from_pubkey(block.producer_pubkey) != block.producer)
             return {false,"the block public key does not match its producer address"};
-        const auto msg = block_signable(block.hash());
+        const auto msg = block_signable(block.chain_id, block.height, block.hash());
         if (!taz::verify(block.producer_pubkey, msg, block.producer_signature))
             return {false,"block signature does not verify"};
     }
@@ -139,17 +158,16 @@ ChainResult Chain::append_block_signed(const std::vector<Transaction>& transacti
     if (producers_.empty()) return {false, "this chain has no producer set"};
     if (address_from_pubkey(producer_pubkey) != producers_[height() % producers_.size()])
         return {false, "this key is not the producer expected for the next height"};
-    // Sign a probe first: signing cannot fail after this, so a block is never committed unsigned.
-    Signature probe{};
-    const std::vector<std::uint8_t> test_message{'p'};
-    if (!sign(producer_key, test_message, probe)) return {false, "the producer key cannot sign"};
-    const ChainResult r = append_block(transactions, timestamp, max_timestamp);
+    // v9 P4: build the block, sign it, and only then commit. A failed signature leaves the chain untouched —
+    // there is no ordering in which a block is committed unsigned.
+    Block block; State next;
+    const ChainResult r = prepare_block(transactions, timestamp, max_timestamp, block, next);
     if (!r.ok) return r;
-    Block& b = blocks_.back();
-    b.producer = address_from_pubkey(producer_pubkey);
-    b.producer_pubkey = producer_pubkey;
-    const auto msg = block_signable(b.hash());
-    if (!sign(producer_key, msg, b.producer_signature)) return {false, "the block could not be signed"};
+    block.producer = address_from_pubkey(producer_pubkey);
+    block.producer_pubkey = producer_pubkey;
+    const auto msg = block_signable(block.chain_id, block.height, block.hash());
+    if (!sign(producer_key, msg, block.producer_signature)) return {false, "the block could not be signed"};
+    commit_block(std::move(block), std::move(next));
     return {true, {}};
 }
 
