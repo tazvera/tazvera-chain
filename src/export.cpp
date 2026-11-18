@@ -31,9 +31,15 @@ std::string to_json(const Chain& chain) {
     // Format label: v1 = plain transfers only, v2 = safety rules, v4 = guardian recovery with the veto key (Core v7 rules).
     // "v3" is deliberately never written: Core v6 used it for guardian chains WITHOUT the veto key, whose signatures
     // and state roots differ from today's rules, so the two layouts must not share a label.
+    // v9: this is a second copy of the level rule (the loader has one too) and it must agree with it, or a
+    // file is written with a label the loader refuses. Producers make a chain level 5.
     int level = 1;
-    for (const Block& b : chain.blocks()) for (const Transaction& tx : b.transactions) {
-        if (tx.kind >= TxKind::SetGuardians) level = 4; else if (tx.kind != TxKind::Transfer && level < 2) level = 2;
+    for (const Block& b : chain.blocks()) {
+        if (b.producer != Address{} && level < 5) level = 5;
+        for (const Transaction& tx : b.transactions) {
+            const int need = tx.kind >= TxKind::SetGuardians ? 4 : (tx.kind != TxKind::Transfer ? 2 : 1);
+            if (need > level) level = need;
+        }
     }
     std::string j;
     j += "{\n  \"format\": \"tazvera-chain-export-v" + std::to_string(level) + "\",\n";
