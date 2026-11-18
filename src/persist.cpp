@@ -46,6 +46,11 @@ struct JVal {
     std::vector<JVal> obj;
 };
 
+// v8.3: a UTF-8 path without std::filesystem::u8path, which is deprecated in C++20 (clang warns).
+std::filesystem::path path_from_utf8(const std::string& s) {
+    return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
+
 // v8.11: delete a file named by a UTF-8 path. std::remove() takes a narrow path, which on Windows goes
 // through the ANSI code page, so a temporary file under a non-ASCII directory survived every error path in
 // save_chain_json. std::filesystem::remove() uses the wide API there.
@@ -57,10 +62,6 @@ void remove_file_utf8(const std::string& path) noexcept {
     }
 }
 
-// v8.3: a UTF-8 path without std::filesystem::u8path, which is deprecated in C++20 (clang warns).
-std::filesystem::path path_from_utf8(const std::string& s) {
-    return std::filesystem::path(std::u8string(s.begin(), s.end()));
-}
 
 // v8.7: a crash between writing the temporary file and renaming it leaves <path>.tmp.<pid>.<n> behind for
 // ever. Sweep the ones in this directory that look exactly like ours and are more than an hour old.
