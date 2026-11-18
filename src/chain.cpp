@@ -69,7 +69,7 @@ ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State&
         if (block.producer != Address{} || block.producer_pubkey != PubKey{} || block.producer_signature != Signature{})
             return {false,"this chain has no producer set, so a block must not claim a producer"};
     } else {
-        if (block.producer != producers_[block.height % producers_.size()])
+        if (block.producer != producers_[(block.height - 1) % producers_.size()])
             return {false,"block is not signed by the producer expected for this height"};
         if (address_from_pubkey(block.producer_pubkey) != block.producer)
             return {false,"the block public key does not match its producer address"};
@@ -118,7 +118,7 @@ ChainResult Chain::adopt_producer_set(std::vector<Address> producers) {
     }
     for (const Block& b : blocks_) {
         if (b.height == 0) continue;
-        if (b.producer != producers[b.height % producers.size()])
+        if (b.producer != producers[(b.height - 1) % producers.size()])
             return {false, "a block names a producer the round robin does not expect"};
     }
     producers_ = std::move(producers);
@@ -129,7 +129,7 @@ ChainResult Chain::append_block_signed(const std::vector<Transaction>& transacti
                                        const PrivKey& producer_key, const PubKey& producer_pubkey,
                                        std::int64_t max_timestamp) {
     if (producers_.empty()) return {false, "this chain has no producer set"};
-    if (address_from_pubkey(producer_pubkey) != producers_[(height() + 1) % producers_.size()])
+    if (address_from_pubkey(producer_pubkey) != producers_[height() % producers_.size()])
         return {false, "this key is not the producer expected for the next height"};
     // Sign a probe first: signing cannot fail after this, so a block is never committed unsigned.
     Signature probe{};

@@ -23,7 +23,8 @@ public:
 
     // v9: the producer set. Empty means "this chain does not use producer signatures", and then every block
     // must leave the producer fields zero — which is how a v8 chain keeps verifying exactly as before.
-    // Round robin: the producer expected at height h is producers[h % producers.size()].
+    // Round robin: the first block after genesis (height 1) is made by producers[0], and block h by
+    // producers[(h - 1) % producers.size()].
     const std::vector<Address>& producers() const noexcept { return producers_; }
     // Only before the first non-genesis block; rejects an empty list, the zero address and duplicates.
     ChainResult set_producers(std::vector<Address> producers);
