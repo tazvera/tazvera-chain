@@ -76,10 +76,17 @@ void sweep_stale_temp_files(const std::string& path) noexcept {
     std::error_code ec;
     const fs::path target = path_from_utf8(path);
     const fs::path dir = target.has_parent_path() ? target.parent_path() : fs::path(".");
-    const std::string prefix = target.filename().string() + ".tmp.";
+    // v8.12: build the prefix in UTF-8. path::string() returns the narrow *native* encoding, which on Windows
+    // is the ANSI code page: a file name outside that code page comes back lossy ("?") or throws, so the
+    // prefix never matched and the stale temporary file of such a name was never swept. u8string() is UTF-8
+    // on every platform, and the file name we compare against is converted the same way.
+    const std::u8string target_name8 = target.filename().u8string();
+    std::string prefix(target_name8.begin(), target_name8.end());
+    prefix += ".tmp.";
     const auto cutoff = fs::file_time_type::clock::now() - std::chrono::hours(1);
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-        const std::string name = it->path().filename().string();
+        const std::u8string name8 = it->path().filename().u8string();
+        const std::string name(name8.begin(), name8.end());
         if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
         std::error_code fec;
         if (!fs::is_regular_file(it->path(), fec) || fec) continue;

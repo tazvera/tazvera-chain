@@ -556,10 +556,15 @@ static void t18_stale_cleanup_unicode() {
     const fs::path dir = utf8_path(dir_utf8);
     std::error_code ec; fs::create_directories(dir, ec); CHECK(!ec);
     if (ec) return;
-    const std::string target = dir_utf8 + "/chain.json";
+    // v8.12: the file NAME is non-ASCII too, not just the directory. That is the case that broke: the sweep
+    // built its prefix from filename().string(), which on Windows is the ANSI code page.
+    const std::string target = dir_utf8 + "/\xE0\xA4\x9A\xE0\xA5\x87\xE0\xA4\xA8-\xE0\xA4\x9F\xE0\xA5\x87\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\x9F.json"; // चेन-टेस्ट.json
     const std::string old_tmp = target + ".tmp.111111.1";
     const std::string new_tmp = target + ".tmp.222222.1";
     const std::string other = dir_utf8 + "/notes.txt";
+    const std::string other_tmp = dir_utf8 + "/\xE0\xA4\xA6\xE0\xA5\x82\xE0\xA4\xB8\xE0\xA4\xB0.json.tmp.333333.1"; // दूसर.json.tmp...
+    { std::ofstream out(utf8_path(other_tmp), std::ios::binary); out << "not ours"; }
+    fs::last_write_time(utf8_path(other_tmp), fs::file_time_type::clock::now() - std::chrono::hours(3));
     { std::ofstream out(utf8_path(old_tmp), std::ios::binary); out << "old"; }
     { std::ofstream out(utf8_path(new_tmp), std::ios::binary); out << "new"; }
     { std::ofstream out(utf8_path(other), std::ios::binary); out << "keep me"; }
@@ -569,6 +574,7 @@ static void t18_stale_cleanup_unicode() {
     CHECK(!fs::exists(utf8_path(old_tmp)));                     // old enough: swept
     CHECK(fs::exists(utf8_path(new_tmp)));                      // too young: left alone
     CHECK(fs::exists(utf8_path(other)));                        // not ours: untouched
+    CHECK(fs::exists(utf8_path(other_tmp)));                    // old temp file of a DIFFERENT name: not ours
     { Chain out; CHECK(load_chain_json(target, out, &err)); CHECK(same_chain(out, c)); }
     fs::remove_all(dir, ec);
 }
