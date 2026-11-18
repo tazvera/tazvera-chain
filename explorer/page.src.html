@@ -189,7 +189,7 @@ function el(tag, cls, text) {
 }
 const short = (h, n = 10) => (h.length > n * 2 + 1 ? h.slice(0, n) + "…" + h.slice(-6) : h);
 const fmt = (bi) => bi.toLocaleString("en-IN");
-const ZERO20 = "0".repeat(40), ZERO32 = "0".repeat(64);
+const ZERO20 = "0".repeat(40), ZERO32 = "0".repeat(64), ZERO64 = "0".repeat(128);
 
 /* ---------- byte helpers (must match the C++ serialisation exactly) ---------- */
 function hexToBytes(h) { const o = new Uint8Array(h.length / 2); for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16); return o; }
@@ -237,6 +237,8 @@ function parseChain(text) {
       height: dec(b.height, "height"), version: Number(dec(b.protocol_version, "block version")), chainId: str(b.chain_id, "block chain_id"),
       prev: hx(b.previous_hash, 32, "previous_hash"), ts: sdec(b.timestamp, "timestamp"), root: hx(b.state_root, 32, "state_root"), hash: hx(b.hash, 32, "hash"),
       producer: hxOr(b.producer, 20, ZERO20, "producer"),   // v9: absent on chains that do not use producer signatures
+      producerKey: hxOr(b.producer_pubkey, 32, ZERO32, "producer_pubkey"),
+      producerSig: hxOr(b.producer_signature, 64, ZERO64, "producer_signature"),
       txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 5n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
         txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
@@ -496,6 +498,7 @@ async function verifyChain(c) {
     txid: { label: "लेन-देन की ID", ok: 0, n: 0 },
     bind: { label: "पते और public key का मेल", ok: 0, n: 0 },
     sig: { label: "Ed25519 हस्ताक्षर", ok: 0, n: 0, unsup: 0 },
+    producer: { label: "producer हस्ताक्षर (block authorship)", ok: 0, n: 0, unsup: 0 },
     rules: { label: "नियम (nonce, बैलेंस, फ़ीस, सीमा, रुकावट)", ok: 0, n: 0 },
     root: { label: "state root (हर ब्लॉक के बाद)", ok: 0, n: 0 },
     time: { label: "समय का क्रम", ok: 0, n: 0 },
@@ -568,6 +571,12 @@ async function verifyChain(c) {
     } else { cats.root.n++; if (fails.length < 40 && !fails.some((m) => m.startsWith("state की जाँच"))) fails.push("state की जाँच रोक दी गई, क्योंकि ऊपर के किसी ब्लॉक में गड़बड़ी मिली"); }
     const calcHash = toHex(await sha(cat(enc.encode("TAZVERA-BLOCK-V1"), u32(b.version), lp(b.chainId), u64(b.height), hexToBytes(b.prev),
       u64(b.ts), u64(BigInt(b.txs.length)), ...txids, hexToBytes(b.root))));
+    const hasP = b.producer !== ZERO20, hasK = b.producerKey !== ZERO32, hasS = b.producerSig !== ZERO64;
+    if (hasP || hasK || hasS) {
+      cats.producer.n++;
+      if (hasP && hasK && hasS) cats.producer.unsup++;   // present, but this page does not verify it yet
+      else fails.push("ब्लॉक #" + h + ": producer, public key और signature — तीनों एक साथ होने चाहिए");
+    }
     tick("hash", calcHash === b.hash, h, "ब्लॉक hash सामग्री से नहीं मिलता");
   }
   return { cats, fails, S, history, stateBroken };
@@ -578,10 +587,15 @@ let current = null; // { chain, report }
 function renderVerdict(c, r) {
   const box = $("result"); box.replaceChildren(); box.hidden = false;
   const anyFail = r.fails.length > 0; const sigsSkipped = r.cats.sig.unsup > 0;
-  const v = el("div", "verdict " + (anyFail ? "bad" : sigsSkipped ? "warn" : "ok"));
-  v.append(el("div", "big", anyFail ? "चेन में गड़बड़ी मिली" : sigsSkipped ? "hash और state सही, हस्ताक्षर जाँचे नहीं गए" : "चेन सही है"));
+  const producerSkipped = r.cats.producer.unsup > 0;   // v9: never claim a check this page does not do
+  const v = el("div", "verdict " + (anyFail ? "bad" : (sigsSkipped || producerSkipped) ? "warn" : "ok"));
+  v.append(el("div", "big", anyFail ? "चेन में गड़बड़ी मिली" :
+    producerSkipped ? "hash और state सही, producer हस्ताक्षर जाँचे नहीं गए" :
+    sigsSkipped ? "hash और state सही, हस्ताक्षर जाँचे नहीं गए" : "चेन सही है"));
   v.append(el("p", "", anyFail ? "फ़ाइल में कुछ बदला गया है या वह नियमों के अनुसार नहीं है। नीचे देखिए कहाँ।" :
-    sigsSkipped ? "इस ब्राउज़र में Ed25519 की जाँच उपलब्ध नहीं है। हस्ताक्षर किसी नए ब्राउज़र में जाँचिए।" : "हर ब्लॉक, हर लेन-देन और हर हस्ताक्षर इस पेज ने खुद दोबारा जाँचा।"));
+    sigsSkipped ? "इस ब्राउज़र में Ed25519 की जाँच उपलब्ध नहीं है। हस्ताक्षर किसी नए ब्राउज़र में जाँचिए।" :
+    producerSkipped ? "हर ब्लॉक का hash, हर state root और हर लेन-देन का हस्ताक्षर जाँचा गया। ब्लॉक पर लिखा producer हस्ताक्षर अभी यह पेज जाँचता नहीं — उसे node जाँचेगा।" :
+    "हर ब्लॉक का hash, हर state root और हर लेन-देन का हस्ताक्षर इस पेज ने खुद दोबारा जाँचा।"));
   v.append(el("p", "muted", c.blocks.length + " ब्लॉक · " + c.blocks.reduce((a, b) => a + b.txs.length, 0) + " लेन-देन · chain ID: " + c.chainId));
   box.append(v);
 
