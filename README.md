@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v8.11
+# TAZVERA Chain — Core v9.0
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -295,7 +295,7 @@ chain — was reported as broken (rules 5/10, state root 2/808).
 
 ## Version, today
 
-The current core version is **8.11**, in one place (`CORE_VERSION` in `include/taz/types.hpp`), mirrored by this
+The current core version is **9.0**, in one place (`CORE_VERSION` in `include/taz/types.hpp`), mirrored by this
 title and read by CMake. `t15_version_consistency` fails the build if those ever disagree again.
 
 Two things that are easy to misread:
@@ -304,8 +304,22 @@ Two things that are easy to misread:
   yet. No caller sets `expected_genesis_commitment` or `require_genesis_pin`, so genesis authentication today
   means tamper detection only.
 - **Documentation fixes do not change the version.** A later change that touches only comments or documents
-  keeps 8.11. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
+  keeps the version it was written against. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
   deliberate, documented decision — neither has changed since v8.2.
+
+## v9.0: a block says who made it
+
+The producer signature is in: each block can carry `producer`, `producer_pubkey` and `producer_signature`, and
+the chain checks that the expected producer made it, that the key belongs to that address, and that the
+signature covers the block.
+
+**This is authorship, not consensus.** It is one key signing one block. There is no peer-to-peer network, no
+voting, no quorum, no finality and no fork choice — those are separate milestones, and calling this "consensus"
+would be wrong. The producer list is committed in the genesis manifest (domain `TAZVERA-GENESIS-V3`), so it
+cannot be swapped by whoever hands you a file.
+
+A chain written before v9 keeps its exact block hashes, state roots and export bytes: the three fields live on
+the block but not inside its hash, and the export writes them only when a block actually claims a producer.
 
 ## v8.11: the save path cannot be killed by its own housekeeping
 

@@ -102,9 +102,13 @@ static void t06_export_round_trip() {
     CHECK(text.find("\"producer\"") != std::string::npos);
     CHECK(text.find("tazvera-chain-export-v5") != std::string::npos);
     Chain out; std::string err;
-    CHECK(load_chain_json_text(text, out, &err));
+    const bool loaded = load_chain_json_text(text, out, &err);
+    CHECK(loaded);
+    if (!loaded) { std::cerr << "Export load failed: " << err << "\n"; return; }   // a load error must read as one
     CHECK(out.height() == c.height());
     CHECK(out.producers().size() == 2);
+    CHECK(out.blocks().size() == c.blocks().size());
+    if (out.blocks().size() != c.blocks().size()) return;                          // never index what is not there
     CHECK(out.blocks()[1].producer == p1.addr);
     CHECK(out.blocks()[2].producer == p2.addr);
     if (!out.blocks().empty()) CHECK(to_json(out) == text);   // byte identical re-export (guard: no crash on failure)
@@ -193,6 +197,19 @@ static void t11_signature_bound_to_height() {
     CHECK(!target.accept_block(b).ok);
 }
 
+
+// the public key must hash to the producer address, or a valid signature proves nothing about who made the block
+static void t12_wrong_producer_pubkey() {
+    Key o = new_key(), g = new_key(), p1 = new_key(), impostor = new_key();
+    Chain a; CHECK(a.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr}));
+    CHECK(a.append_block_signed({transfer(o, g.addr, 10, 0)}, ts++, p1.sk, p1.pk).ok);
+    Block b = a.blocks()[1];
+    b.producer_pubkey = impostor.pk;          // the address still says p1, the key says someone else
+    Chain target; CHECK(target.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr}));
+    const ChainResult r = target.accept_block(b);
+    CHECK(!r.ok);
+}
+
 int main() {
     t01_set_producers_rules();
     t02_round_robin();
@@ -205,6 +222,7 @@ int main() {
     t09_commitment_commits_producers();
     t10_tampered_producer_list();
     t11_signature_bound_to_height();
+    t12_wrong_producer_pubkey();
     if (failures == 0) { std::cout << "producer tests: all passed\n"; return 0; }
     std::cerr << "producer tests: " << failures << " failure(s)\n";
     return 1;
