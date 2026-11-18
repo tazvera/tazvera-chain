@@ -525,9 +525,29 @@ static void t16_save_never_throws() {
     CHECK(!threw);
 }
 
+// v8.11: when a save fails, the temporary file must still be removed — and under a non-ASCII directory the
+// old cleanup could not do it, because std::remove() takes a narrow path (ANSI on Windows). The target here is
+// a directory, so the replace always fails and the error path runs.
+static void t17_cleanup_on_failure_utf8() {
+    const std::string name = "taz-\xE0\xA4\x9F\xE0\xA5\x87\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\x9F-fail"; // taz-टेस्ट-fail
+    const std::string dir_utf8 = utf8_of(tmpdir()) + "/" + name;
+    const fs::path dir = utf8_path(dir_utf8);
+    std::error_code ec; fs::create_directories(dir, ec); CHECK(!ec);
+    if (ec) return;
+    fs::create_directories(utf8_path(dir_utf8 + "/target.json"), ec);   // a directory where the file should go
+    CHECK(!ec);
+    Keys k; Chain c = plain_chain(k.o, k.g0); std::string err;
+    CHECK(!save_chain_json(c, dir_utf8 + "/target.json", &err));
+    CHECK(!err.empty());
+    std::size_t tmp = 0;
+    for (auto& e : fs::directory_iterator(dir)) if (e.path().filename().string().find(".tmp.") != std::string::npos) ++tmp;
+    CHECK(tmp == 0);                                                   // no half-written file left behind
+    fs::remove_all(dir, ec);
+}
+
 int main() {
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;

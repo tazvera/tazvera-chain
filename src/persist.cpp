@@ -46,6 +46,17 @@ struct JVal {
     std::vector<JVal> obj;
 };
 
+// v8.11: delete a file named by a UTF-8 path. std::remove() takes a narrow path, which on Windows goes
+// through the ANSI code page, so a temporary file under a non-ASCII directory survived every error path in
+// save_chain_json. std::filesystem::remove() uses the wide API there.
+void remove_file_utf8(const std::string& path) noexcept {
+    try {
+        std::error_code ec;
+        std::filesystem::remove(path_from_utf8(path), ec);   // a failure here is not worth reporting
+    } catch (...) {
+    }
+}
+
 // v8.3: a UTF-8 path without std::filesystem::u8path, which is deprecated in C++20 (clang warns).
 std::filesystem::path path_from_utf8(const std::string& s) {
     return std::filesystem::path(std::u8string(s.begin(), s.end()));
@@ -55,13 +66,17 @@ std::filesystem::path path_from_utf8(const std::string& s) {
 // ever. Sweep the ones in this directory that look exactly like ours and are more than an hour old.
 // Best effort on purpose: it never fails a save, never follows a symlink and never touches another file.
 void sweep_stale_temp_files(const std::string& path) noexcept {
+    // v8.11: the try starts at the very first statement. path_from_utf8() allocates a std::filesystem::path
+    // and converts UTF-8 on Windows, and filename().string() allocates too. Both used to sit OUTSIDE the try,
+    // and because this function is noexcept, a bad_alloc or a filesystem_error there called std::terminate —
+    // the opposite of what "housekeeping never breaks a save" is supposed to mean.
+    try {
     namespace fs = std::filesystem;
     std::error_code ec;
     const fs::path target = path_from_utf8(path);
     const fs::path dir = target.has_parent_path() ? target.parent_path() : fs::path(".");
     const std::string prefix = target.filename().string() + ".tmp.";
     const auto cutoff = fs::file_time_type::clock::now() - std::chrono::hours(1);
-    try {   // v8.9: housekeeping must never break a save, so even an allocation failure stops here
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         const std::string name = it->path().filename().string();
         if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
@@ -475,13 +490,13 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
             // std::ifstream constructor goes through the ANSI code page there).
             std::ifstream in(path_from_utf8(tmp), std::ios::binary);
             std::string back((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-            if (back != body) { set_err("the temporary file does not match what was written"); std::remove(tmp.c_str()); return false; }
+            if (back != body) { set_err("the temporary file does not match what was written"); remove_file_utf8(tmp); return false; }
         }
         if (testing::persist_stop_before_rename) { set_err("stopped before rename (test)"); return false; } // leaves tmp behind, like a crash
 #ifndef _WIN32
         std::error_code ec;
         fs::rename(tmp, path, ec); // atomic replace on POSIX
-        if (ec) { set_err("could not replace the chain file: " + ec.message()); std::remove(tmp.c_str()); return false; }
+        if (ec) { set_err("could not replace the chain file: " + ec.message()); remove_file_utf8(tmp); return false; }
 #else
         // v8.3: the replace can fail for a few milliseconds while another process holds the target open
         // (antivirus, the search indexer, a reader). Retry the sharing/access errors before giving up; a
@@ -510,7 +525,7 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         return true;
     } catch (const std::exception& e) {
         set_err(e.what());
-        if (!tmp.empty()) std::remove(tmp.c_str());
+        if (!tmp.empty()) remove_file_utf8(tmp);
         return false;
     }
 }
