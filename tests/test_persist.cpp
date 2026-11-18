@@ -545,9 +545,37 @@ static void t17_cleanup_on_failure_utf8() {
     fs::remove_all(dir, ec);
 }
 
+// v8.11: the stale-file sweep on its own, under a non-ASCII directory. t13 checks it as part of the save/load
+// round trip; this test is only about the sweep, so a regression here names the right thing.
+//   - a temporary file older than an hour is removed;
+//   - one younger than that is left alone (another process may still be writing it);
+//   - nothing else in the directory is touched.
+static void t18_stale_cleanup_unicode() {
+    const std::string name = "taz-\xE0\xA4\x9F\xE0\xA5\x87\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\x9F-sweep"; // taz-टेस्ट-sweep
+    const std::string dir_utf8 = utf8_of(tmpdir()) + "/" + name;
+    const fs::path dir = utf8_path(dir_utf8);
+    std::error_code ec; fs::create_directories(dir, ec); CHECK(!ec);
+    if (ec) return;
+    const std::string target = dir_utf8 + "/chain.json";
+    const std::string old_tmp = target + ".tmp.111111.1";
+    const std::string new_tmp = target + ".tmp.222222.1";
+    const std::string other = dir_utf8 + "/notes.txt";
+    { std::ofstream out(utf8_path(old_tmp), std::ios::binary); out << "old"; }
+    { std::ofstream out(utf8_path(new_tmp), std::ios::binary); out << "new"; }
+    { std::ofstream out(utf8_path(other), std::ios::binary); out << "keep me"; }
+    fs::last_write_time(utf8_path(old_tmp), fs::file_time_type::clock::now() - std::chrono::hours(2));
+    Keys k; Chain c = plain_chain(k.o, k.g0); std::string err;
+    CHECK(save_chain_json(c, target, &err));                    // the save runs the sweep first
+    CHECK(!fs::exists(utf8_path(old_tmp)));                     // old enough: swept
+    CHECK(fs::exists(utf8_path(new_tmp)));                      // too young: left alone
+    CHECK(fs::exists(utf8_path(other)));                        // not ours: untouched
+    { Chain out; CHECK(load_chain_json(target, out, &err)); CHECK(same_chain(out, c)); }
+    fs::remove_all(dir, ec);
+}
+
 int main() {
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8(); t18_stale_cleanup_unicode();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;

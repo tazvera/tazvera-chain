@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v8.10
+# TAZVERA Chain — Core v8.11
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -292,3 +292,22 @@ chain — was reported as broken (rules 5/10, state root 2/808).
 - **Layout** — the page keeps the v8.10 redesign: system fonts only (the previous version fetched Inter and
   Space Grotesk from Google, a network request in a page that promises to need none), a clearer control split,
   and hashes that wrap instead of overflowing.
+
+## v8.11: the save path cannot be killed by its own housekeeping
+
+Version 8.11 is the release where the version itself is finally consistent: `CORE_VERSION` in
+`include/taz/types.hpp`, the CMake project version (read from that constant) and this title. They had drifted
+apart for six releases before v8.9 introduced `t15_version_consistency`, which now fails the build if they do.
+
+- **`sweep_stale_temp_files()` cannot terminate the process.** It is `noexcept`, and its UTF-8 to native path
+  conversion (`path_from_utf8`) and `filename().string()` sat outside its `try`. Both allocate, and the first
+  also converts encodings on Windows, so a `bad_alloc` or a `filesystem_error` there reached a `noexcept`
+  boundary and called `std::terminate` — housekeeping killing the process it exists to protect. The `try` now
+  starts at the first statement.
+- **Cleanup works for non-ASCII names.** Three error paths in `save_chain_json` deleted the temporary file with
+  `std::remove(tmp.c_str())`, which takes a narrow path (the ANSI code page on Windows), so a temporary file
+  under a non-ASCII directory survived every failed save. Replaced by `remove_file_utf8()`, which uses
+  `std::filesystem::remove` (the wide API on Windows) and is itself `noexcept` with its own catch.
+- **Tests:** `t17_cleanup_on_failure_utf8` forces a failed save inside `taz-टेस्ट-fail` and asserts no `.tmp.`
+  file survives; `t18_stale_cleanup_unicode` checks the sweep itself under a non-ASCII directory — an old
+  temporary file is removed and a young one is left alone for the process that may still be writing it.
