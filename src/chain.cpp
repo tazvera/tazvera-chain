@@ -105,6 +105,14 @@ ChainResult Chain::set_producers(std::vector<Address> producers) {
             if (producers[i] == producers[j]) return {false, "the same producer is listed twice"};
     }
     producers_ = std::move(producers);
+    // v9 P1: block 0 carries the genesis commitment, and that commitment now covers the producer list. Called
+    // before the first block (the only time this is allowed) there is nothing else to invalidate, so the
+    // commitment is recomputed here — otherwise a chain built with init_genesis() then set_producers() would
+    // hold a block 0 that commits no producers while genesis_commitment() claims it does, and every reload
+    // would be refused.
+    if (blocks_.size() == 1 && genesis_balances_.size() == 2)
+        blocks_[0].previous_hash = genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second,
+                                                         genesis_balances_[1].first, genesis_balances_[1].second, producers_);
     return {true, {}};
 }
 
