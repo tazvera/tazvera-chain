@@ -7,6 +7,7 @@
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -464,6 +465,20 @@ static void t13_non_ascii_path() {
     CHECK(save_chain_json(c, file, &err));
     { Chain out; CHECK(load_chain_json(file, out, &err)); CHECK(same_chain(out, c)); }
     { Chain out = sentinel(); CHECK(!load_chain_json(dir_utf8 + "/missing.json", out, &err) && !err.empty()); }
+    // v8.9: the cleanup path under a non-ASCII name. The sweep builds its prefix from the target's file
+    // name, so this is exactly where a Windows path conversion could go wrong.
+    const std::string stale = file + ".tmp.999999.1";
+    { std::ofstream out(utf8_path(stale), std::ios::binary); out << "half written"; }
+    fs::last_write_time(utf8_path(stale), fs::file_time_type::clock::now() - std::chrono::hours(2));
+    CHECK(save_chain_json(c, file, &err));
+    CHECK(!fs::exists(utf8_path(stale)));                       // old enough: swept
+    // a young temporary file belongs to another process that may still be writing it
+    const std::string young = file + ".tmp.999999.2";
+    { std::ofstream out(utf8_path(young), std::ios::binary); out << "in progress"; }
+    CHECK(save_chain_json(c, file, &err));
+    CHECK(fs::exists(utf8_path(young)));                        // too young: left alone
+    fs::remove(utf8_path(young));
+    { Chain out; CHECK(load_chain_json(file, out, &err)); CHECK(same_chain(out, c)); }
     fs::remove_all(dir, ec);
 }
 
@@ -477,9 +492,42 @@ static void t14_require_genesis_pin() {
     { LoadOptions o; Chain out; CHECK(load_chain_json_text(text, out, &why, o)); }
 }
 
+// v8.9: the version is written in exactly one place (include/taz/types.hpp) and the README must agree.
+// Before this, CMake said 0.8.2 while the README said v8.8, and nothing failed.
+static void t15_version_consistency() {
+#ifdef TAZ_SOURCE_DIR
+    const fs::path root = fs::path(TAZ_SOURCE_DIR);
+    const std::string readme = slurp(root / "README.md");
+    const std::string first_line = readme.substr(0, readme.find('\n'));
+    CHECK(first_line.find(std::string(CORE_VERSION)) != std::string::npos);
+    const std::string types = slurp(root / "include" / "taz" / "types.hpp");
+    CHECK(types.find("CORE_VERSION") != std::string::npos);
+    const std::string cmake = slurp(root / "CMakeLists.txt");
+    CHECK(cmake.find("TAZ_CORE_VERSION") != std::string::npos);       // CMake reads the constant
+    CHECK(cmake.find("VERSION 0.") == std::string::npos);             // no hard-coded old version left
+#else
+    CHECK(false && "TAZ_SOURCE_DIR must be defined for taz_persist_tests (see CMakeLists.txt)");
+#endif
+}
+
+// v8.9: save_chain_json is documented as "returns false and sets *error on any problem". The stale-file
+// sweep used to run outside the try block, so a filesystem_error from it could escape the function.
+static void t16_save_never_throws() {
+    Keys k; Chain c = plain_chain(k.o, k.g0); std::string err;
+    const fs::path d = tmpdir() / "t16"; std::error_code ec; fs::create_directories(d, ec);
+    fs::create_directories(d / "dir.json", ec);
+    bool threw = false;
+    try {
+        CHECK(!save_chain_json(c, (d / "dir.json").string(), &err));          // target is a directory
+        CHECK(!save_chain_json(c, (d / "no_such_dir" / "x.json").string(), &err));
+        CHECK(save_chain_json(c, (d / "ok.json").string(), &err));            // and a good one still works
+    } catch (...) { threw = true; }
+    CHECK(!threw);
+}
+
 int main() {
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;

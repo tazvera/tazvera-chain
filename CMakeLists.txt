@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(tazvera_chain_core VERSION 0.8.2 LANGUAGES CXX)
+
+# v8.9: the version lives in include/taz/types.hpp (CORE_VERSION) and nowhere else. taz_persist_tests
+# compares it with the README title, so a drifted document fails CI instead of surviving a review.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/taz/types.hpp" TAZ_TYPES_HPP)
+string(REGEX MATCH "CORE_VERSION = \"([0-9]+\\.[0-9]+)\"" _taz_version_match "${TAZ_TYPES_HPP}")
+set(TAZ_CORE_VERSION "${CMAKE_MATCH_1}")
+if(NOT TAZ_CORE_VERSION)
+    message(FATAL_ERROR "CORE_VERSION not found in include/taz/types.hpp")
+endif()
+message(STATUS "TAZVERA core version ${TAZ_CORE_VERSION}")
+
+project(tazvera_chain_core VERSION ${TAZ_CORE_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
