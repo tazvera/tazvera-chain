@@ -322,7 +322,8 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     Parser parser(text, opt.max_nodes);
     const JVal root = parser.parse_document();
     const JVal& r = obj_of(root, "the file");
-    exact_keys(r, {"format", "chain_id", "protocol_version", "genesis_commitment", "params", "genesis_balances", "blocks"}, "the file");
+    exact_keys_with_optional(r, {"format", "chain_id", "protocol_version", "genesis_commitment", "params", "genesis_balances", "blocks"},
+                             {"genesis_producers"}, "the file");
 
     // ---- version / format ----
     const std::string& format = str_of(field(r, "format"), "format");
@@ -390,7 +391,17 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     }
     if (genesis[0].first == genesis[1].first) fail("genesis_balances lists the same address twice");
     Chain chain;
-    if (!chain.init_genesis(genesis[0].first, genesis[0].second, genesis[1].first, genesis[1].second)) fail("genesis could not be created");
+    // v9: the producer list lives in the genesis manifest, so it is authenticated by the commitment instead of
+    // being inferred from whatever the blocks happen to name.
+    std::vector<Address> declared_producers;
+    if (const JVal* pr = find(r, "genesis_producers")) {
+        const JVal& arr = arr_of(*pr, "genesis_producers");
+        if (arr.arr.empty() || arr.arr.size() > 64) fail("genesis_producers must list between 1 and 64 addresses");
+        for (std::size_t i = 0; i < arr.arr.size(); ++i)
+            declared_producers.push_back(hex_of<Address>(arr.arr[i], "genesis_producers[" + std::to_string(i) + "]"));
+    }
+    if (!chain.init_genesis(genesis[0].first, genesis[0].second, genesis[1].first, genesis[1].second, declared_producers))
+        fail("genesis could not be created");
     if (chain.genesis_balances() != genesis) fail("genesis balances do not match");
     // Independent commitment: must match balances (and match file if the field is present).
     const Hash32 expect_c = chain.genesis_commitment();
@@ -421,22 +432,8 @@ void load_document(std::string_view text, Chain& result, const LoadOptions& opt)
     std::vector<Block> parsed;
     for (std::size_t i = 1; i < blocks.arr.size(); ++i)
         parsed.push_back(parse_block(blocks.arr[i], with_veto, "block " + std::to_string(i)));
-    // v9: the producer set is not stored separately — it is implied by the order the blocks name. Adopt it
-    // before replaying, because every block is checked against it.
-    if (!parsed.empty() && parsed[0].producer != Address{}) {
-        std::vector<Address> inferred;
-        for (const Block& b : parsed) {
-            if (b.producer == Address{}) fail("a block does not name a producer while the earlier ones do");
-            bool seen = false;
-            for (const Address& known : inferred) if (known == b.producer) seen = true;
-            if (!seen) {
-                inferred.push_back(b.producer);
-                if (inferred.size() > 64) fail("too many producers");
-            }
-        }
-        const ChainResult pr = chain.adopt_producer_set(inferred);
-        if (!pr.ok) fail(pr.error);
-    }
+    // v9: nothing is inferred here any more. The producer list came from the genesis manifest above and is
+    // already authenticated by the commitment; every block is then checked against it by accept_block().
     for (std::size_t i = 0; i < parsed.size(); ++i) {
         const ChainResult res = chain.accept_block(parsed[i]);
         if (!res.ok) fail("block " + std::to_string(i + 1) + " (height " + std::to_string(parsed[i].height) + ") is invalid: " + res.error);

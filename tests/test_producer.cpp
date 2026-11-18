@@ -125,6 +125,59 @@ static void t07_v8_chain_unchanged() {
     CHECK(to_json(out) == text);
 }
 
+
+// v9 P1/P2: the producer list is committed in the genesis manifest, so a restart keeps it — and the order,
+// which is the schedule — without inferring anything from the blocks.
+static void t08_restart_keeps_producers() {
+    Key o = new_key(), g = new_key(), p1 = new_key(), p2 = new_key();
+    Chain c; CHECK(c.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr, p2.addr}));
+    CHECK(c.producers().size() == 2);
+    CHECK(c.append_block_signed({transfer(o, g.addr, 10, 0)}, ts++, p1.sk, p1.pk).ok);
+    CHECK(c.append_block_signed({transfer(o, g.addr, 10, 1)}, ts++, p2.sk, p2.pk).ok);
+    const std::string text = to_json(c);
+    CHECK(text.find("genesis_producers") != std::string::npos);
+    Chain out; std::string err;
+    CHECK(load_chain_json_text(text, out, &err));
+    if (out.producers().size() != 2) { CHECK(false); return; }
+    CHECK(out.producers()[0] == p1.addr);              // same list
+    CHECK(out.producers()[1] == p2.addr);              // same order
+    CHECK(out.genesis_commitment() == c.genesis_commitment());
+    // height 3 belongs to p1: the round robin survives the restart
+    CHECK(!out.append_block_signed({}, ts++, p2.sk, p2.pk).ok);
+    CHECK(out.append_block_signed({}, ts++, p1.sk, p1.pk).ok);
+}
+
+// the commitment must actually commit the list: same balances, different producers, different commitment
+static void t09_commitment_commits_producers() {
+    Key o = new_key(), g = new_key(), p1 = new_key(), p2 = new_key();
+    Chain plain; CHECK(plain.init_genesis(o.addr, 1000, g.addr, 0));
+    Chain with;  CHECK(with.init_genesis(o.addr, 1000, g.addr, 0, {p1.addr}));
+    Chain two;   CHECK(two.init_genesis(o.addr, 1000, g.addr, 0, {p1.addr, p2.addr}));
+    CHECK(plain.genesis_commitment() != with.genesis_commitment());
+    CHECK(with.genesis_commitment() != two.genesis_commitment());
+    // and the same list in a different order is a different chain
+    Chain swapped; CHECK(swapped.init_genesis(o.addr, 1000, g.addr, 0, {p2.addr, p1.addr}));
+    CHECK(swapped.genesis_commitment() != two.genesis_commitment());
+    // block 0 carries that commitment, so every later block inherits it through previous_hash
+    CHECK(with.blocks()[0].previous_hash == with.genesis_commitment());
+}
+
+// editing the declared producer list in a file must be refused
+static void t10_tampered_producer_list() {
+    Key o = new_key(), g = new_key(), p1 = new_key(), p2 = new_key();
+    Chain c; CHECK(c.init_genesis(o.addr, 1000000, g.addr, 0, {p1.addr, p2.addr}));
+    CHECK(c.append_block_signed({transfer(o, g.addr, 10, 0)}, ts++, p1.sk, p1.pk).ok);
+    std::string text = to_json(c);
+    const std::string p2hex = to_hex(p2.addr);
+    const std::string p1hex = to_hex(p1.addr);
+    const std::size_t at = text.find(p2hex);            // the second producer in the manifest
+    CHECK(at != std::string::npos);
+    if (at == std::string::npos) return;
+    text.replace(at, p2hex.size(), p1hex);              // claim the chain had one producer twice
+    Chain out; std::string err;
+    CHECK(!load_chain_json_text(text, out, &err));
+}
+
 int main() {
     t01_set_producers_rules();
     t02_round_robin();
@@ -133,6 +186,9 @@ int main() {
     t05_tampered_signature();
     t06_export_round_trip();
     t07_v8_chain_unchanged();
+    t08_restart_keeps_producers();
+    t09_commitment_commits_producers();
+    t10_tampered_producer_list();
     if (failures == 0) { std::cout << "producer tests: all passed\n"; return 0; }
     std::cerr << "producer tests: " << failures << " failure(s)\n";
     return 1;

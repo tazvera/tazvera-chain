@@ -10,10 +10,17 @@ struct ChainResult { bool ok{false}; std::string error; };
 inline constexpr std::int64_t NO_TIMESTAMP_LIMIT = std::numeric_limits<std::int64_t>::max();
 
 Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount);
+// v9: when a chain declares producers, the list is committed as well — in the order given, because that order
+// IS the round-robin schedule. An empty list keeps the v8 commitment (domain V2) byte for byte.
+Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount, const std::vector<Address>& producers);
 class Chain {
 public:
     bool init_genesis(const Address& first, Amount first_balance,
                       const Address& second, Amount second_balance);
+    // v9: the same, with the producer list committed into the genesis commitment. An empty list behaves
+    // exactly like the call above, so nothing written before v9 changes.
+    bool init_genesis(const Address& first, Amount first_balance,
+                      const Address& second, Amount second_balance, std::vector<Address> producers);
 
     // Build and commit a block from local transactions.
     // Timestamps must be strictly increasing and <= max_timestamp. The caller supplies the
