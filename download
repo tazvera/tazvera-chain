@@ -1,9 +1,0 @@
-# v8.3: every text file is checked out with LF on every platform. Without this, a Windows checkout
-# (core.autocrlf=true, which is the default on GitHub's windows runners) turns the demo JSON files into
-# CRLF, and taz_persist_tests' byte-exact round trip (t11) fails there for a reason that has nothing to
-# do with the code. The chain file format is plain ASCII JSON with LF line endings.
-* text=auto eol=lf
-explorer/** linguist-vendored
-*.html linguist-detectable=false
-*.js linguist-detectable=false
-*.json linguist-generated
