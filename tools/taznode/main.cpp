@@ -235,6 +235,8 @@ int main(int argc, char** argv) {
         const std::uint16_t port = static_cast<std::uint16_t>(parsed_port);
 
         std::string net_err;
+        taz::Socket socket;        // client side
+        taz::Socket peer_socket;   // server side
         if (!taz::net_startup(&net_err)) return usage_error("network start failed: " + net_err);
         const taz::Hello ours = taz::hello_for(chain);
         taz::Hello theirs;
@@ -247,24 +249,19 @@ int main(int argc, char** argv) {
                 taz::net_cleanup();
                 return 3;
             }
-            std::cout << "taznode: listening on 127.0.0.1:" << listener.port << " — waiting for one peer\n";
-            taz::Socket peer;
-            if (!taz::accept_one(listener.socket, peer, &net_err)) {
+            std::cout << "taznode: listening on 127.0.0.1:" << listener.port << " - waiting for one peer\n";
+            if (!taz::accept_one(listener.socket, peer_socket, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
                 return 3;
             }
-            exchanged = taz::exchange_hello(peer, ours, theirs, false, &net_err);   // the peer speaks first
+            exchanged = taz::exchange_hello(peer_socket, ours, theirs, false, &net_err);   // the peer speaks first
         } else {
-            taz::Socket socket;
             if (!taz::connect_loopback(port, socket, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
                 return 3;
             }
             exchanged = taz::exchange_hello(socket, ours, theirs, true, &net_err);
         }
-        taz::net_cleanup();
         if (!exchanged) {
             std::cerr << "taznode: the handshake failed: " << net_err << "\n";
             return 3;
@@ -278,6 +275,57 @@ int main(int argc, char** argv) {
                   << " protocol=" << theirs.protocol_version
                   << " height=" << theirs.best_height
                   << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+
+        // ---- chain sync: the node that is behind asks for nothing, the one that is ahead offers ----
+        // This is catch-up, not gossip: the whole chain travels, the receiver validates it exactly as it would
+        // validate a file, and only a strictly longer chain with the same genesis is adopted.
+        const std::string our_chain = taz::to_json(chain);
+        if (our_chain.size() > taz::kMaxPayloadBytes) {
+            std::cerr << "taznode: our chain is larger than one message; sync over several messages is not built yet\n";
+            return 3;
+        }
+        if (!listen_port.empty()) {
+            // server side: we already sent nothing, so read the peer's chain if it has one to offer
+            std::uint8_t type = 0;
+            std::string payload;
+            if (!taz::recv_message(peer_socket, type, payload, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                return 3;
+            }
+            if (type != taz::kMsgChain) {
+                std::cerr << "taznode: the peer did not offer a chain\n";
+                return 3;
+            }
+            taz::Chain incoming;
+            std::string load_err;
+            if (!taz::load_chain_json_text(payload, incoming, &load_err)) {
+                std::cerr << "taznode: the peer's chain is not valid: " << load_err << "\n";
+                return 3;
+            }
+            if (incoming.genesis_commitment() != chain.genesis_commitment()) {
+                std::cerr << "taznode: the peer's chain has a different genesis; refused\n";
+                return 3;
+            }
+            if (incoming.height() <= chain.height()) {
+                std::cout << "taznode: kept our chain (height " << chain.height()
+                          << ", peer offered " << incoming.height() << ")\n";
+                return 0;
+            }
+            std::string save_err;
+            if (!taz::save_chain_json(incoming, chain_file, &save_err)) {
+                std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
+                return 3;
+            }
+            std::cout << "taznode: adopted the peer's chain height=" << incoming.height() << "\n";
+            return 0;
+        }
+
+        // client side: offer our chain
+        if (!taz::send_message(socket, taz::kMsgChain, our_chain, &net_err)) {
+            std::cerr << "taznode: " << net_err << "\n";
+            return 3;
+        }
+        std::cout << "taznode: offered our chain height=" << chain.height() << " bytes=" << our_chain.size() << "\n";
         return 0;
     }
 
