@@ -300,9 +300,11 @@ title and read by CMake. `t15_version_consistency` fails the build if those ever
 
 Two things that are easy to misread:
 
-- **The genesis pin is designed, not enforced.** `PIN_ENFORCEMENT_PLAN.md` describes a node that does not exist
-  yet. No caller sets `expected_genesis_commitment` or `require_genesis_pin`, so genesis authentication today
-  means tamper detection only.
+- **The genesis pin has an enforcement point, but no node calls it yet.** `load_chain_at_startup()`
+  (`include/taz/startup.hpp`) refuses to load a chain without a commitment that came from outside the file, and
+  `taz_startup_tests` proves the five cases. What is still missing is the node that would use it: nothing here
+  sets a pin in a real deployment, so genesis authentication today still means tamper detection.
+  `load_chain_json()` remains the *import* path, documented as unauthenticated.
 - **Documentation fixes do not change the version.** A later change that touches only comments or documents
   keeps the version it was written against. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
   deliberate, documented decision — neither has changed since v8.2.

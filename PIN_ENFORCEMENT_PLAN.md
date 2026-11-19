@@ -1,8 +1,12 @@
 # Genesis pin enforcement — plan, not protection
 
-**Status: not enforced anywhere today.** The current core version is **8.11**; everything in this document
-about the node, the handshake and the pin being mandatory describes work that has **not** been implemented.
-This document exists so that nobody reads the pin code and concludes that genesis authentication is solved.
+**Status (v9.0): the enforcement point exists; no node calls it yet.** `taz/startup.hpp` provides
+`load_chain_at_startup()`, which fails closed when no trusted commitment is configured, and the pin is compared
+against the commitment the loader *recomputes* from the genesis balances — never against the value written
+inside the file. `taz_startup_tests` covers the five cases: right pin, wrong pin, missing pin, a self-consistent
+forgery, and v8/v9 file compatibility. What is still missing is the caller: there is no node binary, so nothing
+in a real deployment sets a pin today. Everything else in this document — the handshake, the config file, the
+startup log line — describes work that has **not** been implemented.
 
 ## What is true today (Core v8.11)
 
