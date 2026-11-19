@@ -318,7 +318,25 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: the peer's chain has a different genesis; refused\n";
                 return false;
             }
-            if (incoming.height() <= chain.height()) {
+            // A chain far ahead of ours is not catch-up, it is a claim we cannot verify in reasonable time:
+            // loading replays every block, so a peer could hand us work that takes minutes to check.
+            constexpr std::uint64_t kMaxSyncAhead = 1000;
+            if (incoming.height() > chain.height() + kMaxSyncAhead) {
+                std::cerr << "taznode: the peer's chain is " << (incoming.height() - chain.height())
+                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused\n";
+                return false;
+            }
+            if (incoming.height() == chain.height()) {
+                // Same height, same genesis, different state root: two chains of the same age that disagree.
+                // Keep ours, but say so — silence here is how a split goes unnoticed.
+                if (incoming.state().state_root() != chain.state().state_root())
+                    std::cerr << "taznode: warning: same height (" << chain.height()
+                              << ") but a different state root - possible fork, keeping our chain\n";
+                else
+                    std::cout << "taznode: peer is at the same height and the same state root\n";
+                return true;
+            }
+            if (incoming.height() < chain.height()) {
                 std::cout << "taznode: kept our chain (height " << chain.height()
                           << ", peer offered " << incoming.height() << ")\n";
                 return true;
