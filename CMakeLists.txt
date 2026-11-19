@@ -29,9 +29,13 @@ add_library(tazcore
     src/persist.cpp
     src/startup.cpp
     src/hello.cpp
+    src/net.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
+if(WIN32)
+    target_link_libraries(tazcore PUBLIC ws2_32)   # v9.0: sockets on Windows
+endif()
 target_compile_options(tazcore PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 
 # v9.0: the first node binary. It loads a chain through the pinned startup path and prints what it loaded;
@@ -82,6 +86,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(taz_persist_tests PRIVATE tazcore Threads::Threads)
 target_compile_definitions(taz_persist_tests PRIVATE TAZ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME taz_persist_tests COMMAND taz_persist_tests)
+
+add_executable(taz_net_tests tests/test_net.cpp)
+target_link_libraries(taz_net_tests PRIVATE tazcore)
+add_test(NAME taz_net_tests COMMAND taz_net_tests)
 
 add_executable(taz_hello_tests tests/test_hello.cpp)
 target_link_libraries(taz_hello_tests PRIVATE tazcore)
