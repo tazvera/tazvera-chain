@@ -10,6 +10,7 @@
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -40,14 +41,16 @@ int usage_error(const std::string& why) {
     return 2;
 }
 
-bool is_hex64(const std::string& s) {
-    if (s.size() != 64) return false;
+// from_hex() maps every character it is given, including ones that are not hex at all ("z" becomes a byte),
+// so every caller must check the text first. This is that check.
+bool is_hex(const std::string& s) {
     for (char c : s) {
         const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
         if (!ok) return false;
     }
     return true;
 }
+bool is_hex64(const std::string& s) { return s.size() == 64 && is_hex(s); }
 
 std::vector<std::uint8_t> from_hex(const std::string& s) {
     auto nib = [](char c) -> int {
@@ -63,7 +66,7 @@ std::vector<std::uint8_t> from_hex(const std::string& s) {
 }
 
 bool parse_address(const std::string& s, taz::Address& out) {
-    if (s.size() != 40) return false;
+    if (s.size() != 40 || !is_hex(s)) return false;
     const std::vector<std::uint8_t> raw = from_hex(s);
     if (raw.size() != out.size()) return false;
     for (std::size_t i = 0; i < out.size(); ++i) out[i] = raw[i];
@@ -86,12 +89,19 @@ bool read_key_file(const std::string& path, taz::PrivKey& sk, taz::PubKey& pk, s
         v.erase(0, i);
     };
     trim(seed_hex); trim(pub_hex);
-    if (seed_hex.size() != 64 || pub_hex.size() != 64) { why = "the key file needs 64 hex characters on each of two lines"; return false; }
+    if (seed_hex.size() != 64 || pub_hex.size() != 64 || !is_hex(seed_hex) || !is_hex(pub_hex)) {
+        why = "the key file needs 64 hex characters on each of two lines";
+        return false;
+    }
     const std::vector<std::uint8_t> raw_seed = from_hex(seed_hex);
     const std::vector<std::uint8_t> raw_pub = from_hex(pub_hex);
     if (raw_seed.size() != sk.size() || raw_pub.size() != pk.size()) { why = "the key file is not hex"; return false; }
     for (std::size_t i = 0; i < sk.size(); ++i) sk[i] = raw_seed[i];
     for (std::size_t i = 0; i < pk.size(); ++i) pk[i] = raw_pub[i];
+    // The hex text held the seed too; do not leave a second copy lying in memory.
+    std::vector<std::uint8_t> wipe = raw_seed;
+    taz::secure_wipe(wipe);
+    std::fill(seed_hex.begin(), seed_hex.end(), '\0');
     return true;
 }
 
@@ -114,14 +124,28 @@ int main(int argc, char** argv) {
     std::vector<std::string> init_specs;
     std::string key_file;
     std::string transfer_spec;
+    bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--help" || a == "-h") { std::cout << kUsage; return 0; }
-        if (a == "--chain" && i + 1 < argc) { chain_file = argv[++i]; continue; }
-        if (a == "--expect-genesis" && i + 1 < argc) { expect_hex = argv[++i]; continue; }
+        // A flag given twice is an operator mistake; silently taking the last one hides it.
+        if (a == "--chain" && i + 1 < argc) {
+            if (seen_chain) return usage_error("--chain was given twice");
+            seen_chain = true; chain_file = argv[++i]; continue;
+        }
+        if (a == "--expect-genesis" && i + 1 < argc) {
+            if (seen_pin) return usage_error("--expect-genesis was given twice");
+            seen_pin = true; expect_hex = argv[++i]; continue;
+        }
         if (a == "--init-genesis" && i + 1 < argc) { init_specs.push_back(argv[++i]); continue; }
-        if (a == "--key-file" && i + 1 < argc) { key_file = argv[++i]; continue; }
-        if (a == "--transfer" && i + 1 < argc) { transfer_spec = argv[++i]; continue; }
+        if (a == "--key-file" && i + 1 < argc) {
+            if (seen_key) return usage_error("--key-file was given twice");
+            seen_key = true; key_file = argv[++i]; continue;
+        }
+        if (a == "--transfer" && i + 1 < argc) {
+            if (seen_transfer) return usage_error("--transfer was given twice");
+            seen_transfer = true; transfer_spec = argv[++i]; continue;
+        }
         return usage_error("unknown argument \"" + a + "\"");
     }
     if (chain_file.empty()) return usage_error("--chain is required");
@@ -166,6 +190,7 @@ int main(int argc, char** argv) {
 
     const std::vector<std::uint8_t> raw = from_hex(expect_hex);
     taz::Hash32 pin{};
+    if (raw.size() != pin.size()) return usage_error("--expect-genesis must be 64 hex characters");
     for (std::size_t i = 0; i < pin.size(); ++i) pin[i] = raw[i];
 
     taz::StartupConfig cfg;
@@ -179,6 +204,16 @@ int main(int argc, char** argv) {
         std::cerr << "taznode: " << (err.empty() ? r.error : err) << "\n";
         return 3;                                   // refused: wrong chain, unreadable file, or no pin
     }
+
+    // One block an operator can compare with the release notes without opening a file.
+    std::cout << "taznode: loaded"
+              << " chain_id=" << taz::CHAIN_ID
+              << " protocol=" << taz::PROTOCOL_VERSION
+              << " core=" << taz::CORE_VERSION
+              << " height=" << chain.height()
+              << " genesis=" << taz::to_hex(chain.genesis_commitment())
+              << " state_root=" << taz::to_hex(chain.state().state_root())
+              << "\n";
 
     // ---- block production: one transfer, one block, then save ----
     if (!transfer_spec.empty()) {
@@ -205,15 +240,25 @@ int main(int argc, char** argv) {
         tx.pubkey = pk;
         const std::vector<std::uint8_t> signable = tx.signable_bytes();
         if (!taz::sign(sk, signable, tx.signature)) return usage_error("the key cannot sign (is the key file right?)");
+        // The file carries the seed and the public key side by side, so they can disagree. Signing with one and
+        // claiming the other would produce a transaction that fails much later with a confusing message; catch
+        // it here instead.
+        if (!taz::verify(pk, signable, tx.signature))
+            return usage_error("the key file is inconsistent: that public key does not belong to that seed");
 
         const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
                                      std::chrono::system_clock::now().time_since_epoch()).count();
+        // The chain requires a timestamp strictly greater than the previous block. Two blocks produced inside the
+        // same second would otherwise be refused, which looks like a chain bug and is only a clock resolution
+        // problem, so step past the tip when needed.
+        const std::int64_t tip_time = chain.blocks().back().timestamp;
+        const std::int64_t stamp = now > tip_time ? now : tip_time + 1;
         const std::int64_t max_timestamp = now + 120;      // a little clock slack, no more
         const std::vector<taz::Transaction> txs{tx};
 
         taz::ChainResult produced = chain.producers().empty()
-            ? chain.append_block(txs, now, max_timestamp)
-            : chain.append_block_signed(txs, now, sk, pk, max_timestamp);
+            ? chain.append_block(txs, stamp, max_timestamp)
+            : chain.append_block_signed(txs, stamp, sk, pk, max_timestamp);
         if (!produced.ok) {
             std::cerr << "taznode: the block was refused: " << produced.error << "\n";
             return 5;
@@ -230,14 +275,5 @@ int main(int argc, char** argv) {
                   << "\n";
     }
 
-    // One block an operator can compare with the release notes without opening a file.
-    std::cout << "taznode: loaded"
-              << " chain_id=" << taz::CHAIN_ID
-              << " protocol=" << taz::PROTOCOL_VERSION
-              << " core=" << taz::CORE_VERSION
-              << " height=" << chain.height()
-              << " genesis=" << taz::to_hex(chain.genesis_commitment())
-              << " state_root=" << taz::to_hex(chain.state().state_root())
-              << "\n";
     return 0;
 }

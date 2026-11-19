@@ -140,14 +140,37 @@ int main() {
         CHECK(after.state().balance(taz::address_from_pubkey(pk)) == 100000 - 10 - taz::FEE_TRANSFER_V1);
     }
 
+    // two blocks in quick succession: the same second must not be refused for a clock reason
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --key-file " + q(key_file) + " --transfer " + to_hex_addr + ":5") == 0);
+    taz::Chain twice; std::string terr;
+    const bool twice_ok = taz::load_chain_json(prod_chain, twice, &terr);
+    CHECK(twice_ok);
+    if (twice_ok) {
+        CHECK(twice.height() == 2);
+        CHECK(twice.state().nonce(taz::address_from_pubkey(pk)) == 2);
+        CHECK(twice.state().balance(taz::address_from_pubkey(pk2)) == 15);
+    }
+
+    // a key file whose public key does not belong to its seed is refused, and nothing is written
+    const std::string bad_key = tmpdir() + "/bad.key";
+    write_text(bad_key, taz::to_hex(sk) + "\n" + taz::to_hex(pk2) + "\n");
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --key-file " + q(bad_key) + " --transfer " + to_hex_addr + ":1") == 2);
+
+    // a non-hex address is a usage error, not a garbage address
+    CHECK(run(exe + " --chain " + q(tmpdir() + "/hex.json") + " --init-genesis " + std::string(40, 'z') + ":1 --init-genesis " + a1 + ":0") == 2);
+    CHECK(!fs::exists(tmpdir() + "/hex.json"));
+
+    // the same flag twice is an operator mistake, not "last one wins"
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 2);
+
     // restart: the same chain, the same height, the same state root — the block was really written
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 0);
     taz::Chain restarted; std::string rerr;
     CHECK(taz::load_chain_json(prod_chain, restarted, &rerr));
-    CHECK(restarted.height() == 1);
-    if (reloaded) CHECK(restarted.state().state_root() == after.state().state_root());
+    CHECK(restarted.height() == 2);
+    if (twice_ok) CHECK(restarted.state().state_root() == twice.state().state_root());
 
-    fs::remove(prod_chain, ec); fs::remove(key_file, ec);
+    fs::remove(prod_chain, ec); fs::remove(key_file, ec); fs::remove(bad_key, ec);
     fs::remove(chain, ec);
     if (failures == 0) { std::cout << "node binary tests: all passed\n"; return 0; }
     std::cerr << "node binary tests: " << failures << " failure(s)\n";
