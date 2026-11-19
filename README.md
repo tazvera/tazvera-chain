@@ -300,11 +300,13 @@ title and read by CMake. `t15_version_consistency` fails the build if those ever
 
 Two things that are easy to misread:
 
-- **The genesis pin has an enforcement point, but no node calls it yet.** `load_chain_at_startup()`
-  (`include/taz/startup.hpp`) refuses to load a chain without a commitment that came from outside the file, and
-  `taz_startup_tests` proves the five cases. What is still missing is the node that would use it: nothing here
-  sets a pin in a real deployment, so genesis authentication today still means tamper detection.
-  `load_chain_json()` remains the *import* path, documented as unauthenticated.
+- **The genesis pin is enforced by the node.** `taznode` will not start without `--expect-genesis`, and it loads
+  through `load_chain_at_startup()`, which compares the pin against the commitment recomputed from the genesis
+  balances rather than the value stored in the file. `taz_startup_tests` and `taz_node_binary_tests` cover the
+  right pin, a wrong one, a malformed one and a missing one. What is still missing is everything around it: there
+  is one node, no network, no peers, no consensus — so a pin protects a single operator from the wrong file, not
+  a chain from a determined attacker with a majority. `load_chain_json()` remains the *import* path, documented
+  as unauthenticated.
 - **Documentation fixes do not change the version.** A later change that touches only comments or documents
   keeps the version it was written against. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
   deliberate, documented decision — neither has changed since v8.2.
