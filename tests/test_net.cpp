@@ -26,6 +26,24 @@ static Chain make_chain(Amount first_balance) {
     return c;
 }
 
+// A single-threaded exchange, spelled out in the order it must happen: the sender sends first, the receiver
+// reads, then the reply comes back. exchange_hello() is written for two live processes, where one side blocks
+// in recv while the other sends; calling it on both ends of one process would simply time out.
+static bool pump(Socket& first, const Hello& first_hello, Hello& first_got,
+                 Socket& second, const Hello& second_hello, Hello& second_got, std::string& err) {
+    if (!send_message(first, kMsgHello, encode_hello(first_hello), &err)) return false;
+    std::uint8_t type = 0;
+    std::string payload;
+    if (!recv_message(second, type, payload, &err)) return false;
+    if (type != kMsgHello) { err = "the peer did not send a hello"; return false; }
+    if (!decode_hello(payload, second_got, &err)) return false;
+
+    if (!send_message(second, kMsgHello, encode_hello(second_hello), &err)) return false;
+    if (!recv_message(first, type, payload, &err)) return false;
+    if (type != kMsgHello) { err = "the peer did not send a hello"; return false; }
+    return decode_hello(payload, first_got, &err);
+}
+
 // a connected pair of sockets on loopback
 static bool connected_pair(Listener& listener, Socket& server, Socket& client, std::string& err) {
     if (!listen_loopback(0, listener, &err)) return false;
@@ -38,14 +56,16 @@ static void n01_handshake_ok() {
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
 
-    const Hello server_hello = hello_for(make_chain(1000));
-    const Hello client_hello = hello_for(make_chain(1000));
+    const Chain chain = make_chain(1000);          // one chain, so both sides really are on the same one
+    const Hello server_hello = hello_for(chain);
+    const Hello client_hello = hello_for(chain);
     Hello got_server_side, got_client_side;
-    CHECK(exchange_hello(server, server_hello, got_server_side, false, &err));
-    CHECK(exchange_hello(client, client_hello, got_client_side, true, &err));
+    CHECK(pump(client, client_hello, got_client_side, server, server_hello, got_server_side, err));
+    if (!err.empty()) std::cerr << "  " << err << "\n";
     CHECK(got_server_side.chain_id == client_hello.chain_id);
     CHECK(got_client_side.genesis_commitment == server_hello.genesis_commitment);
     CHECK(check_peer(server_hello, got_server_side).ok);   // same chain: accepted
+    CHECK(check_peer(server_hello, got_client_side).ok);
 }
 
 static void n02_wrong_chain_refused() {
@@ -55,10 +75,9 @@ static void n02_wrong_chain_refused() {
 
     const Hello mine = hello_for(make_chain(1000));
     const Hello theirs = hello_for(make_chain(9999));       // same chain ID, different genesis
-    Hello got;
-    CHECK(exchange_hello(server, mine, got, false, &err));
-    CHECK(exchange_hello(client, theirs, got, true, &err));
-    const HandshakeDecision decision = check_peer(mine, got);
+    Hello got_server_side, got_client_side;
+    CHECK(pump(client, theirs, got_client_side, server, mine, got_server_side, err));
+    const HandshakeDecision decision = check_peer(mine, got_server_side);
     CHECK(!decision.ok);
     CHECK(decision.reason.find("genesis") != std::string::npos);
 }
