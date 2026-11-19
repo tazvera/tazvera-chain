@@ -309,6 +309,21 @@ Two things that are easy to misread:
   keeps the version it was written against. The version moves when the code moves, and `PROTOCOL_VERSION` (2) and `CHAIN_ID` move only with a
   deliberate, documented decision — neither has changed since v8.2.
 
+## The node, today
+
+`taznode` is the first node binary, and it is deliberately small:
+
+```
+taznode --chain <file> --expect-genesis <64 hex>
+```
+
+It loads the chain through `load_chain_at_startup()`, so it refuses to start without a genesis commitment taken
+from outside the file, then prints one line an operator can compare with the release notes — chain ID, protocol
+version, core version, height, genesis commitment and state root. That is all.
+
+It does not create a genesis, produce blocks, listen on a socket or talk to another node. `--help` explains the
+flags; a run without `--expect-genesis` exits non-zero, and CI tests exactly that.
+
 ## v9.0: a block says who made it
 
 The producer signature is in: each block can carry `producer`, `producer_pubkey` and `producer_signature`, and

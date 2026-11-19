@@ -33,6 +33,14 @@ target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
 target_compile_options(tazcore PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 
+# v9.0: the first node binary. It loads a chain through the pinned startup path and prints what it loaded;
+# it does not produce blocks or talk to anyone yet.
+add_executable(taznode tools/taznode/main.cpp)
+target_link_libraries(taznode PRIVATE tazcore)
+add_test(NAME taznode_help COMMAND taznode --help)
+add_test(NAME taznode_refuses_without_pin COMMAND taznode --chain /nonexistent.json)
+set_tests_properties(taznode_refuses_without_pin PROPERTIES WILL_FAIL TRUE)
+
 add_executable(taz_demo src/main.cpp)
 target_link_libraries(taz_demo PRIVATE tazcore)
 
