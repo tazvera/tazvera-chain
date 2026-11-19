@@ -32,7 +32,9 @@ constexpr const char* kUsage =
     "  --init-genesis <a>:<n>    create a new chain with these two genesis accounts (use exactly twice)\n"
     "  --key-file <path>         prototype key file: line 1 = 64 hex private seed, line 2 = 64 hex public key\n"
     "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
-    "  --listen <port>           wait for one peer on 127.0.0.1:<port> and exchange hellos\n"
+    "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
+    "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
+    "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
     "  --peer <port>             connect to 127.0.0.1:<port> and exchange hellos\n"
     "  --help                    this text\n"
     "\n"
@@ -129,6 +131,8 @@ int main(int argc, char** argv) {
     std::string key_file;
     std::string transfer_spec;
     std::string listen_port;
+    std::string serve_port;
+    std::string max_peers_text;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
@@ -149,6 +153,8 @@ int main(int argc, char** argv) {
             seen_key = true; key_file = argv[++i]; continue;
         }
         if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
+        if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
+        if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -223,68 +229,37 @@ int main(int argc, char** argv) {
               << " state_root=" << taz::to_hex(chain.state().state_root())
               << "\n";
 
-    // ---- one handshake with one peer, then stop ----
-    // Deliberately single-shot: this proves the wiring, not a network loop. A node that stays connected and
-    // gossips blocks is the next step, and it will reuse exactly this decision.
-    if (!listen_port.empty() || !peer_port.empty()) {
-        if (!listen_port.empty() && !peer_port.empty())
-            return usage_error("--listen and --peer cannot be used together");
-        const std::string& port_text = listen_port.empty() ? peer_port : listen_port;
-        taz::Amount parsed_port = 0;
-        if (!parse_amount(port_text, parsed_port) || parsed_port == 0 || parsed_port > 65535)
-            return usage_error("the port must be a number between 1 and 65535");
-        const std::uint16_t port = static_cast<std::uint16_t>(parsed_port);
+    // ---- talk to peers ----
+    // Deliberately small: one peer at a time, no threads, no peer list, no discovery. --listen serves exactly one
+    // peer and stops; --serve keeps accepting, one after another, up to --max-peers. Both use the same per-peer
+    // routine, so the rules cannot drift between the two modes.
+    if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
+        const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
+        if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
+        if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
+
+        auto parse_port = [](const std::string& text, std::uint16_t& out) -> bool {
+            taz::Amount value = 0;
+            if (!parse_amount(text, value) || value == 0 || value > 65535) return false;
+            out = static_cast<std::uint16_t>(value);
+            return true;
+        };
+        std::uint16_t port = 0;
+        const std::string& port_text = !listen_port.empty() ? listen_port : (!serve_port.empty() ? serve_port : peer_port);
+        if (!parse_port(port_text, port)) return usage_error("the port must be a number between 1 and 65535");
+
+        std::uint64_t max_peers = 5;
+        if (!max_peers_text.empty()) {
+            taz::Amount value = 0;
+            if (!parse_amount(max_peers_text, value) || value == 0 || value > 1000)
+                return usage_error("--max-peers must be between 1 and 1000");
+            max_peers = value;
+        }
 
         std::string net_err;
-        taz::Socket socket;        // client side
-        taz::Socket peer_socket;   // server side
         if (!taz::net_startup(&net_err)) return usage_error("network start failed: " + net_err);
+
         const taz::Hello ours = taz::hello_for(chain);
-        taz::Hello theirs;
-        bool exchanged = false;
-
-        if (!listen_port.empty()) {
-            taz::Listener listener;
-            if (!taz::listen_loopback(port, listener, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
-                return 3;
-            }
-            std::cout << "taznode: listening on 127.0.0.1:" << listener.port << " - waiting for one peer\n";
-            if (!taz::accept_one(listener.socket, peer_socket, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
-                return 3;
-            }
-            exchanged = taz::exchange_hello(peer_socket, ours, theirs, false, &net_err);   // the peer speaks first
-        } else {
-            if (!taz::connect_loopback(port, socket, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
-                return 3;
-            }
-            exchanged = taz::exchange_hello(socket, ours, theirs, true, &net_err);
-        }
-        if (!exchanged) {
-            std::cerr << "taznode: the handshake failed: " << net_err << "\n";
-            taz::net_cleanup();
-            return 3;
-        }
-        const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
-        if (!decision.ok) {
-            std::cerr << "taznode: peer refused: " << decision.reason << "\n";
-            taz::net_cleanup();
-            return 3;
-        }
-        std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
-                  << " protocol=" << theirs.protocol_version
-                  << " height=" << theirs.best_height
-                  << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
-
-        // ---- chain sync, in both directions ----
-        // Catch-up, not gossip: each side offers its whole chain, the receiver validates it exactly as it
-        // validates a file, and only a strictly longer chain with the same genesis is adopted. The chain is
-        // serialized only when it is about to be sent, so a node holding a large chain can still receive.
         auto offer_chain = [&](taz::Socket& sock) -> bool {
             const std::string text = taz::to_json(chain);
             if (text.size() > taz::kMaxPayloadBytes) {
@@ -315,16 +290,12 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: the peer's chain is not valid: " << load_err << "\n";
                 return false;
             }
-            // A chain far ahead of ours is not catch-up, it is a claim we cannot verify in reasonable time:
-            // loading replays every block, so a peer could hand us work that takes minutes to check.
             constexpr std::uint64_t kMaxSyncAhead = 1000;
             if (incoming.height() > chain.height() + kMaxSyncAhead) {
                 std::cerr << "taznode: the peer's chain is " << (incoming.height() - chain.height())
                           << " blocks ahead; more than " << kMaxSyncAhead << " is refused\n";
                 return false;
             }
-            // One rule, in one place: the same function both nodes call, so they cannot disagree about which
-            // chain survives. It is a tie-break, not consensus.
             const taz::ForkDecision fork = taz::choose_chain(chain, incoming);
             if (fork.choice == taz::ForkChoice::DifferentChain) {
                 std::cerr << "taznode: the peer's chain has a different genesis; refused\n";
@@ -351,13 +322,61 @@ int main(int argc, char** argv) {
             chain = std::move(incoming);
             return true;
         };
+        // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
+        // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
+        auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
+            taz::Hello theirs;
+            if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err)) {
+                std::cerr << "taznode: the handshake failed: " << net_err << "\n";
+                return false;
+            }
+            const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
+            if (!decision.ok) {
+                std::cerr << "taznode: peer refused: " << decision.reason << "\n";
+                return false;
+            }
+            std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
+                      << " protocol=" << theirs.protocol_version
+                      << " height=" << theirs.best_height
+                      << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+            return we_speak_first ? (offer_chain(sock) && receive_chain(sock))
+                                  : (receive_chain(sock) && offer_chain(sock));
+        };
 
-        // Read first, answer second on the listening side, so the two orders cannot deadlock.
-        const bool sync_ok = listen_port.empty()
-            ? (offer_chain(socket) && receive_chain(socket))
-            : (receive_chain(peer_socket) && offer_chain(peer_socket));
+        bool all_ok = true;
+        if (!peer_port.empty()) {
+            taz::Socket socket;
+            if (!taz::connect_loopback(port, socket, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
+                return 3;
+            }
+            all_ok = handle_peer(socket, true);
+        } else {
+            taz::Listener listener;
+            if (!taz::listen_loopback(port, listener, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
+                return 3;
+            }
+            const std::uint64_t wanted = listen_port.empty() ? max_peers : 1;
+            std::cout << "taznode: listening on 127.0.0.1:" << listener.port
+                      << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << "\n";
+            for (std::uint64_t served = 0; served < wanted; ++served) {
+                taz::Socket peer;
+                if (!taz::accept_one(listener.socket, peer, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    all_ok = false;
+                    break;
+                }
+                // A peer that is not on our chain ends its own conversation, not the node.
+                if (!handle_peer(peer, false)) all_ok = false;
+                std::cout << "taznode: served " << (served + 1) << " of " << wanted
+                          << ", our height is now " << chain.height() << "\n";
+            }
+        }
         taz::net_cleanup();
-        return sync_ok ? 0 : 3;
+        return all_ok ? 0 : 3;
     }
 
     // ---- block production: one transfer, one block, then save ----
