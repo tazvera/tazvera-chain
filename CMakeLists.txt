@@ -28,6 +28,7 @@ add_library(tazcore
     src/mempool.cpp
     src/persist.cpp
     src/startup.cpp
+    src/hello.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
@@ -81,6 +82,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(taz_persist_tests PRIVATE tazcore Threads::Threads)
 target_compile_definitions(taz_persist_tests PRIVATE TAZ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME taz_persist_tests COMMAND taz_persist_tests)
+
+add_executable(taz_hello_tests tests/test_hello.cpp)
+target_link_libraries(taz_hello_tests PRIVATE tazcore)
+add_test(NAME taz_hello_tests COMMAND taz_hello_tests)
 
 add_executable(taz_startup_tests tests/test_startup.cpp)
 target_link_libraries(taz_startup_tests PRIVATE tazcore)
