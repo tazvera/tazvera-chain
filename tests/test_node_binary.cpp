@@ -2,11 +2,13 @@
 //
 // The library tests prove load_chain_at_startup() behaves; this proves the *binary* does — that it exits with the
 // right code, that it can create a chain, that it refuses a wrong pin, a malformed pin, and a missing pin even
-// when the chain file is real and valid.
+// when the chain file is real and valid, and that creating a genesis never overwrites an existing chain file.
+// Exit codes: 0 ok, 2 usage, 3 refused to load, 4 refused to overwrite.
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include "taz/crypto.hpp"
 #include "taz/persist.hpp"
@@ -27,6 +29,12 @@ static std::string tmpdir() {
     const std::string dir = (fs::temp_directory_path() / "taz-node-tests").string();
     std::error_code ec; fs::create_directories(dir, ec);
     return dir;
+}
+
+static std::string slurp(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream ss; ss << in.rdbuf();
+    return ss.str();
 }
 
 static std::string q(const std::string& s) { return "\"" + s + "\""; }
@@ -66,6 +74,12 @@ int main() {
     const std::string pin = taz::to_hex(made.genesis_commitment());
     CHECK(pin.size() == 64);
     CHECK(made.height() == 0);
+
+    // 1b. creating again over that file is refused, and the file it would have replaced is untouched
+    const std::string before = slurp(chain);
+    CHECK(!before.empty());
+    CHECK(run(exe + " --chain " + q(chain) + " --init-genesis " + a0 + ":500 --init-genesis " + a1 + ":500") == 4);
+    CHECK(slurp(chain) == before);                       // byte for byte, not "roughly the same"
 
     // 2. the right pin opens it
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + pin) == 0);

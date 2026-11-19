@@ -11,6 +11,7 @@
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -27,7 +28,8 @@ constexpr const char* kUsage =
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
-    "Creating a chain needs no pin, because there is nothing yet to trust; it prints the commitment it made.\n";
+    "Creating a chain needs no pin, because there is nothing yet to trust; it prints the commitment it made.\n"
+    "Creation never overwrites: if the chain file already exists, it exits non-zero and leaves it alone.\n";
 
 int usage_error(const std::string& why) {
     std::cerr << "taznode: " << why << "\n\n" << kUsage;
@@ -104,6 +106,16 @@ int main(int argc, char** argv) {
             return usage_error("a genesis address must be 40 hex characters");
         if (!parse_amount(init_specs[0].substr(c0 + 1), n0) || !parse_amount(init_specs[1].substr(c1 + 1), n1))
             return usage_error("a genesis amount must be a decimal number");
+        // Never replace an existing chain. A bootstrap command that quietly overwrites is a way to destroy the
+        // only copy of a chain, and the operator would find out afterwards. Check first, say why, exit non-zero.
+        // (This is a check-then-write, so it is not atomic against another process writing the same path at the
+        // same instant; that is acceptable for a one-off bootstrap command, and it is not a security boundary.)
+        std::error_code exists_ec;
+        if (std::filesystem::exists(chain_file, exists_ec)) {
+            std::cerr << "taznode: refusing to create " << chain_file
+                      << ": the file already exists and will not be replaced\n";
+            return 4;
+        }
         taz::Chain fresh;
         if (!fresh.init_genesis(a0, n0, a1, n1)) return usage_error("genesis could not be created (same address twice?)");
         std::string save_err;
