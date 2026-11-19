@@ -21,6 +21,10 @@ namespace taz {
 //    explanation) or by Core v7 before the label "-v4" existed (accepted as the same thing as "-v4").
 //    Older layouts (Core v5 and earlier) are refused.
 
+// v9.0: load_chain_json() is the *import* path. It is fine for tools that inspect or convert a file, and it is
+// not authentication: with no pin set it will load any internally consistent chain, including one an attacker
+// built. A program that starts up and joins a chain must go through load_chain_at_startup() (taz/startup.hpp),
+// which refuses to load without a commitment that came from outside the file.
 struct LoadOptions {
     std::uint64_t max_file_bytes = 64ull * 1024 * 1024; // refuse bigger files before reading them
     std::uint64_t max_nodes = 2'000'000;               // bound on JSON values held in memory at once
