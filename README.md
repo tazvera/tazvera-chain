@@ -321,10 +321,15 @@ taznode --chain <file> --expect-genesis <64 hex>
 
 It loads the chain through `load_chain_at_startup()`, so it refuses to start without a genesis commitment taken
 from outside the file, then prints one line an operator can compare with the release notes — chain ID, protocol
-version, core version, height, genesis commitment and state root. That is all.
+version, core version, height, genesis commitment and state root.
 
-It does not create a genesis, produce blocks, listen on a socket or talk to another node. `--help` explains the
-flags; a run without `--expect-genesis` exits non-zero, and CI tests exactly that.
+It can also create a chain once (`--init-genesis`, which refuses to overwrite an existing file) and produce a
+block with one transfer (`--transfer`, signed by the key in `--key-file`). The key file holds a 64-hex private
+seed on line 1 and its 64-hex public key on line 2 — that is a prototype convenience, not key management: a real
+node must keep its keys where it controls them, and `mlock`/secure storage is still on the list.
+
+It does not listen on a socket, talk to another node, or run any consensus. Exit codes: 0 ok, 2 usage, 3 refused
+to load, 4 refused to overwrite, 5 block refused.
 
 ## v9.0: a block says who made it
 

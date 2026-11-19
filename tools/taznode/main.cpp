@@ -10,8 +10,10 @@
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -25,6 +27,8 @@ constexpr const char* kUsage =
     "  --chain <file>            the chain file to load or create\n"
     "  --expect-genesis <hex>    the genesis commitment you trust, taken from outside the file\n"
     "  --init-genesis <a>:<n>    create a new chain with these two genesis accounts (use exactly twice)\n"
+    "  --key-file <path>         prototype key file: line 1 = 64 hex private seed, line 2 = 64 hex public key\n"
+    "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -66,6 +70,31 @@ bool parse_address(const std::string& s, taz::Address& out) {
     return true;
 }
 
+// Reads "seed hex" on line 1 and "public key hex" on line 2. Prototype only: a real node must keep keys in
+// memory it controls, not in a file next to the chain. Reading both means the node never has to derive the
+// public key from the seed, which the crypto layer does not expose today.
+bool read_key_file(const std::string& path, taz::PrivKey& sk, taz::PubKey& pk, std::string& why) {
+    std::ifstream in(path);
+    if (!in) { why = "cannot open the key file"; return false; }
+    std::string seed_hex, pub_hex;
+    std::getline(in, seed_hex);
+    std::getline(in, pub_hex);
+    auto trim = [](std::string& v) {
+        while (!v.empty() && (v.back() == '\r' || v.back() == ' ' || v.back() == '\t')) v.pop_back();
+        std::size_t i = 0;
+        while (i < v.size() && (v[i] == ' ' || v[i] == '\t')) ++i;
+        v.erase(0, i);
+    };
+    trim(seed_hex); trim(pub_hex);
+    if (seed_hex.size() != 64 || pub_hex.size() != 64) { why = "the key file needs 64 hex characters on each of two lines"; return false; }
+    const std::vector<std::uint8_t> raw_seed = from_hex(seed_hex);
+    const std::vector<std::uint8_t> raw_pub = from_hex(pub_hex);
+    if (raw_seed.size() != sk.size() || raw_pub.size() != pk.size()) { why = "the key file is not hex"; return false; }
+    for (std::size_t i = 0; i < sk.size(); ++i) sk[i] = raw_seed[i];
+    for (std::size_t i = 0; i < pk.size(); ++i) pk[i] = raw_pub[i];
+    return true;
+}
+
 bool parse_amount(const std::string& s, taz::Amount& out) {
     if (s.empty() || s.size() > 19) return false;
     taz::Amount v = 0;
@@ -83,12 +112,16 @@ int main(int argc, char** argv) {
     std::string chain_file;
     std::string expect_hex;
     std::vector<std::string> init_specs;
+    std::string key_file;
+    std::string transfer_spec;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--help" || a == "-h") { std::cout << kUsage; return 0; }
         if (a == "--chain" && i + 1 < argc) { chain_file = argv[++i]; continue; }
         if (a == "--expect-genesis" && i + 1 < argc) { expect_hex = argv[++i]; continue; }
         if (a == "--init-genesis" && i + 1 < argc) { init_specs.push_back(argv[++i]); continue; }
+        if (a == "--key-file" && i + 1 < argc) { key_file = argv[++i]; continue; }
+        if (a == "--transfer" && i + 1 < argc) { transfer_spec = argv[++i]; continue; }
         return usage_error("unknown argument \"" + a + "\"");
     }
     if (chain_file.empty()) return usage_error("--chain is required");
@@ -145,6 +178,56 @@ int main(int argc, char** argv) {
     if (!r.ok) {
         std::cerr << "taznode: " << (err.empty() ? r.error : err) << "\n";
         return 3;                                   // refused: wrong chain, unreadable file, or no pin
+    }
+
+    // ---- block production: one transfer, one block, then save ----
+    if (!transfer_spec.empty()) {
+        if (key_file.empty()) return usage_error("--transfer needs --key-file: a transaction must be signed by its sender");
+        const std::size_t colon = transfer_spec.find(':');
+        if (colon == std::string::npos) return usage_error("--transfer wants <address>:<amount>");
+        taz::Address to{};
+        taz::Amount amount = 0;
+        if (!parse_address(transfer_spec.substr(0, colon), to)) return usage_error("the transfer address must be 40 hex characters");
+        if (!parse_amount(transfer_spec.substr(colon + 1), amount)) return usage_error("the transfer amount must be a decimal number");
+
+        taz::PrivKey sk{};
+        taz::PubKey pk{};
+        std::string why;
+        if (!read_key_file(key_file, sk, pk, why)) return usage_error(why);
+        const taz::Address from = taz::address_from_pubkey(pk);
+
+        taz::Transaction tx;
+        tx.from = from;
+        tx.to = to;
+        tx.amount = amount;
+        tx.fee = taz::FEE_TRANSFER_V1;
+        tx.nonce = chain.state().nonce(from);
+        tx.pubkey = pk;
+        const std::vector<std::uint8_t> signable = tx.signable_bytes();
+        if (!taz::sign(sk, signable, tx.signature)) return usage_error("the key cannot sign (is the key file right?)");
+
+        const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch()).count();
+        const std::int64_t max_timestamp = now + 120;      // a little clock slack, no more
+        const std::vector<taz::Transaction> txs{tx};
+
+        taz::ChainResult produced = chain.producers().empty()
+            ? chain.append_block(txs, now, max_timestamp)
+            : chain.append_block_signed(txs, now, sk, pk, max_timestamp);
+        if (!produced.ok) {
+            std::cerr << "taznode: the block was refused: " << produced.error << "\n";
+            return 5;
+        }
+        std::string save_err;
+        if (!taz::save_chain_json(chain, chain_file, &save_err)) {
+            std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
+            return 3;
+        }
+        std::cout << "taznode: produced block height=" << chain.height()
+                  << " hash=" << taz::to_hex(chain.blocks().back().hash())
+                  << " state_root=" << taz::to_hex(chain.state().state_root())
+                  << (chain.producers().empty() ? " (unsigned: this chain declares no producers)" : " (signed by the producer)")
+                  << "\n";
     }
 
     // One block an operator can compare with the release notes without opening a file.
