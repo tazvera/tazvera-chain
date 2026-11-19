@@ -10,6 +10,7 @@
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
+#include "taz/net.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -30,6 +31,8 @@ constexpr const char* kUsage =
     "  --init-genesis <a>:<n>    create a new chain with these two genesis accounts (use exactly twice)\n"
     "  --key-file <path>         prototype key file: line 1 = 64 hex private seed, line 2 = 64 hex public key\n"
     "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
+    "  --listen <port>           wait for one peer on 127.0.0.1:<port> and exchange hellos\n"
+    "  --peer <port>             connect to 127.0.0.1:<port> and exchange hellos\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -124,6 +127,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> init_specs;
     std::string key_file;
     std::string transfer_spec;
+    std::string listen_port;
+    std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -142,6 +147,8 @@ int main(int argc, char** argv) {
             if (seen_key) return usage_error("--key-file was given twice");
             seen_key = true; key_file = argv[++i]; continue;
         }
+        if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
+        if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
             seen_transfer = true; transfer_spec = argv[++i]; continue;
@@ -214,6 +221,65 @@ int main(int argc, char** argv) {
               << " genesis=" << taz::to_hex(chain.genesis_commitment())
               << " state_root=" << taz::to_hex(chain.state().state_root())
               << "\n";
+
+    // ---- one handshake with one peer, then stop ----
+    // Deliberately single-shot: this proves the wiring, not a network loop. A node that stays connected and
+    // gossips blocks is the next step, and it will reuse exactly this decision.
+    if (!listen_port.empty() || !peer_port.empty()) {
+        if (!listen_port.empty() && !peer_port.empty())
+            return usage_error("--listen and --peer cannot be used together");
+        const std::string& port_text = listen_port.empty() ? peer_port : listen_port;
+        taz::Amount parsed_port = 0;
+        if (!parse_amount(port_text, parsed_port) || parsed_port == 0 || parsed_port > 65535)
+            return usage_error("the port must be a number between 1 and 65535");
+        const std::uint16_t port = static_cast<std::uint16_t>(parsed_port);
+
+        std::string net_err;
+        if (!taz::net_startup(&net_err)) return usage_error("network start failed: " + net_err);
+        const taz::Hello ours = taz::hello_for(chain);
+        taz::Hello theirs;
+        bool exchanged = false;
+
+        if (!listen_port.empty()) {
+            taz::Listener listener;
+            if (!taz::listen_loopback(port, listener, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
+                return 3;
+            }
+            std::cout << "taznode: listening on 127.0.0.1:" << listener.port << " — waiting for one peer\n";
+            taz::Socket peer;
+            if (!taz::accept_one(listener.socket, peer, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
+                return 3;
+            }
+            exchanged = taz::exchange_hello(peer, ours, theirs, false, &net_err);   // the peer speaks first
+        } else {
+            taz::Socket socket;
+            if (!taz::connect_loopback(port, socket, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
+                return 3;
+            }
+            exchanged = taz::exchange_hello(socket, ours, theirs, true, &net_err);
+        }
+        taz::net_cleanup();
+        if (!exchanged) {
+            std::cerr << "taznode: the handshake failed: " << net_err << "\n";
+            return 3;
+        }
+        const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
+        if (!decision.ok) {
+            std::cerr << "taznode: peer refused: " << decision.reason << "\n";
+            return 3;
+        }
+        std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
+                  << " protocol=" << theirs.protocol_version
+                  << " height=" << theirs.best_height
+                  << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+        return 0;
+    }
 
     // ---- block production: one transfer, one block, then save ----
     if (!transfer_spec.empty()) {

@@ -5,7 +5,7 @@
 // when the chain file is real and valid, and that creating a genesis never overwrites an existing chain file.
 // It also produces a real block: a key signs a transfer, the node saves it, and a restart finds it at the same
 // height with the same state root.
-// Exit codes: 0 ok, 2 usage, 3 refused to load, 4 refused to overwrite, 5 block refused.
+// Exit codes: 0 ok, 2 usage, 3 refused to load / refused peer, 4 refused to overwrite, 5 block refused.
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -162,6 +162,12 @@ int main() {
 
     // the same flag twice is an operator mistake, not "last one wins"
     CHECK(run(exe + " --chain " + q(prod_chain) + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 2);
+
+    // the handshake wiring: the arguments are checked, and a peer that is not there is an error, not a hang
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --peer 2") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 3);   // nothing listening
 
     // restart: the same chain, the same height, the same state root — the block was really written
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 0);
