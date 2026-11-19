@@ -38,6 +38,14 @@ target_compile_options(tazcore PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Ws
 add_executable(taznode tools/taznode/main.cpp)
 target_link_libraries(taznode PRIVATE tazcore)
 add_test(NAME taznode_help COMMAND taznode --help)
+
+# v9.0: drive the real binary as a process — create a chain, load it with the right pin, refuse a wrong,
+# malformed or missing pin. The library test proves the function; this proves the program.
+add_executable(taz_node_binary_tests tests/test_node_binary.cpp)
+target_link_libraries(taz_node_binary_tests PRIVATE tazcore)
+target_compile_definitions(taz_node_binary_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
+add_dependencies(taz_node_binary_tests taznode)
+add_test(NAME taz_node_binary_tests COMMAND taz_node_binary_tests)
 add_test(NAME taznode_refuses_without_pin COMMAND taznode --chain /nonexistent.json)
 set_tests_properties(taznode_refuses_without_pin PROPERTIES WILL_FAIL TRUE)
 
