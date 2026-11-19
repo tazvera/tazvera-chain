@@ -252,23 +252,27 @@ int main(int argc, char** argv) {
             std::cout << "taznode: listening on 127.0.0.1:" << listener.port << " - waiting for one peer\n";
             if (!taz::accept_one(listener.socket, peer_socket, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
                 return 3;
             }
             exchanged = taz::exchange_hello(peer_socket, ours, theirs, false, &net_err);   // the peer speaks first
         } else {
             if (!taz::connect_loopback(port, socket, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
+                taz::net_cleanup();
                 return 3;
             }
             exchanged = taz::exchange_hello(socket, ours, theirs, true, &net_err);
         }
         if (!exchanged) {
             std::cerr << "taznode: the handshake failed: " << net_err << "\n";
+            taz::net_cleanup();
             return 3;
         }
         const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
         if (!decision.ok) {
             std::cerr << "taznode: peer refused: " << decision.reason << "\n";
+            taz::net_cleanup();
             return 3;
         }
         std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
@@ -276,57 +280,65 @@ int main(int argc, char** argv) {
                   << " height=" << theirs.best_height
                   << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
 
-        // ---- chain sync: the node that is behind asks for nothing, the one that is ahead offers ----
-        // This is catch-up, not gossip: the whole chain travels, the receiver validates it exactly as it would
-        // validate a file, and only a strictly longer chain with the same genesis is adopted.
-        const std::string our_chain = taz::to_json(chain);
-        if (our_chain.size() > taz::kMaxPayloadBytes) {
-            std::cerr << "taznode: our chain is larger than one message; sync over several messages is not built yet\n";
-            return 3;
-        }
-        if (!listen_port.empty()) {
-            // server side: we already sent nothing, so read the peer's chain if it has one to offer
+        // ---- chain sync, in both directions ----
+        // Catch-up, not gossip: each side offers its whole chain, the receiver validates it exactly as it
+        // validates a file, and only a strictly longer chain with the same genesis is adopted. The chain is
+        // serialized only when it is about to be sent, so a node holding a large chain can still receive.
+        auto offer_chain = [&](taz::Socket& sock) -> bool {
+            const std::string text = taz::to_json(chain);
+            if (text.size() > taz::kMaxPayloadBytes) {
+                std::cerr << "taznode: our chain is larger than one message; multi-message sync is not built yet\n";
+                return false;
+            }
+            if (!taz::send_message(sock, taz::kMsgChain, text, &net_err)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                return false;
+            }
+            std::cout << "taznode: offered our chain height=" << chain.height() << " bytes=" << text.size() << "\n";
+            return true;
+        };
+        auto receive_chain = [&](taz::Socket& sock) -> bool {
             std::uint8_t type = 0;
             std::string payload;
-            if (!taz::recv_message(peer_socket, type, payload, &net_err)) {
+            if (!taz::recv_message(sock, type, payload, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
-                return 3;
+                return false;
             }
             if (type != taz::kMsgChain) {
                 std::cerr << "taznode: the peer did not offer a chain\n";
-                return 3;
+                return false;
             }
             taz::Chain incoming;
             std::string load_err;
             if (!taz::load_chain_json_text(payload, incoming, &load_err)) {
                 std::cerr << "taznode: the peer's chain is not valid: " << load_err << "\n";
-                return 3;
+                return false;
             }
             if (incoming.genesis_commitment() != chain.genesis_commitment()) {
                 std::cerr << "taznode: the peer's chain has a different genesis; refused\n";
-                return 3;
+                return false;
             }
             if (incoming.height() <= chain.height()) {
                 std::cout << "taznode: kept our chain (height " << chain.height()
                           << ", peer offered " << incoming.height() << ")\n";
-                return 0;
+                return true;
             }
             std::string save_err;
             if (!taz::save_chain_json(incoming, chain_file, &save_err)) {
                 std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
-                return 3;
+                return false;
             }
             std::cout << "taznode: adopted the peer's chain height=" << incoming.height() << "\n";
-            return 0;
-        }
+            chain = std::move(incoming);
+            return true;
+        };
 
-        // client side: offer our chain
-        if (!taz::send_message(socket, taz::kMsgChain, our_chain, &net_err)) {
-            std::cerr << "taznode: " << net_err << "\n";
-            return 3;
-        }
-        std::cout << "taznode: offered our chain height=" << chain.height() << " bytes=" << our_chain.size() << "\n";
-        return 0;
+        // Read first, answer second on the listening side, so the two orders cannot deadlock.
+        const bool sync_ok = listen_port.empty()
+            ? (offer_chain(socket) && receive_chain(socket))
+            : (receive_chain(peer_socket) && offer_chain(peer_socket));
+        taz::net_cleanup();
+        return sync_ok ? 0 : 3;
     }
 
     // ---- block production: one transfer, one block, then save ----
