@@ -168,6 +168,9 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 3);   // nothing listening
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --serve 2") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --max-peers 3") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --serve 1 --max-peers 0") == 2);
 
     // restart: the same chain, the same height, the same state root — the block was really written
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 0);

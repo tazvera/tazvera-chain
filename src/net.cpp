@@ -37,18 +37,22 @@ std::uint32_t get_u32(const std::string& in) {
 }
 
 bool set_timeout(const Socket& s, std::string* error) {
+    // Both directions: a receive that never completes and a send that never drains are the same problem, and
+    // a peer that stops reading would otherwise hold this process for as long as it likes.
 #ifdef _WIN32
     DWORD ms = kTimeoutMs;
-    if (setsockopt(static_cast<SOCKET>(s.raw()), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms)) != 0) {
-        if (error) *error = "could not set the receive timeout";
+    if (setsockopt(static_cast<SOCKET>(s.raw()), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms)) != 0 ||
+        setsockopt(static_cast<SOCKET>(s.raw()), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms)) != 0) {
+        if (error) *error = "could not set the socket timeouts";
         return false;
     }
 #else
     timeval tv{};
     tv.tv_sec = kTimeoutMs / 1000;
     tv.tv_usec = (kTimeoutMs % 1000) * 1000;
-    if (setsockopt(s.raw(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
-        if (error) *error = "could not set the receive timeout";
+    if (setsockopt(s.raw(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0 ||
+        setsockopt(s.raw(), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+        if (error) *error = "could not set the socket timeouts";
         return false;
     }
 #endif
