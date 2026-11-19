@@ -233,10 +233,12 @@ int main(int argc, char** argv) {
     // Deliberately small: one peer at a time, no threads, no peer list, no discovery. --listen serves exactly one
     // peer and stops; --serve keeps accepting, one after another, up to --max-peers. Both use the same per-peer
     // routine, so the rules cannot drift between the two modes.
+    // Checked before the mode block: "--max-peers 3" on its own is a mistake whether or not a mode was given,
+    // and skipping the block would have let it through as a plain load.
+    if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
-        if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
 
         auto parse_port = [](const std::string& text, std::uint16_t& out) -> bool {
             taz::Amount value = 0;
