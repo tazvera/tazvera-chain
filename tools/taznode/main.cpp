@@ -38,6 +38,7 @@ constexpr const char* kUsage =
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
     "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
+    "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -136,6 +137,7 @@ int main(int argc, char** argv) {
     std::string serve_port;
     std::string max_peers_text;
     std::string every_text;
+    std::string retries_text;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
@@ -159,6 +161,7 @@ int main(int argc, char** argv) {
         if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
+        if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -241,6 +244,7 @@ int main(int argc, char** argv) {
     // and skipping the block would have let it through as a plain load.
     if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
     if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
+    if (!retries_text.empty() && every_text.empty()) return usage_error("--retries only means something with --every");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
@@ -368,29 +372,49 @@ int main(int argc, char** argv) {
                 return usage_error("--every must be a number of seconds between 1 and 3600");
             every = value;
         }
+        std::uint64_t retries = 3;      // 0 means "keep trying"
+        if (!retries_text.empty()) {
+            taz::Amount value = 0;
+            if (!parse_amount(retries_text, value) || value > 1000)
+                return usage_error("--retries must be a number between 0 and 1000");
+            retries = value;
+        }
 
         bool all_ok = true;
         if (!peer_port.empty()) {
             // Poll gossip: without threads this node cannot be pushed to, so it pulls. Connect, sync, close,
             // wait, repeat. It is not gossip in the academic sense and it does not scale, but it means a new
             // block reaches the other node without anyone typing a command — which is the point.
-            std::uint64_t round = 0;
-            do {
+            std::uint64_t round = 0, failures = 0;
+            for (;;) {
                 ++round;
                 taz::Socket socket;
-                if (!taz::connect_loopback(port, socket, &net_err)) {
+                bool round_ok = taz::connect_loopback(port, socket, &net_err);
+                if (!round_ok) {
                     std::cerr << "taznode: " << net_err << "\n";
+                } else {
+                    round_ok = handle_peer(socket, true);
+                    socket.close();
+                }
+                if (round_ok) {
+                    failures = 0;
+                    all_ok = true;
+                } else {
+                    ++failures;
                     all_ok = false;
-                    break;
+                    // A peer that is down is not a reason to exit: a node that quits when the network blinks
+                    // never comes back. Give up only after the retry budget, which is finite by default so a
+                    // test cannot hang.
+                    if (retries != 0 && failures >= retries) {
+                        std::cerr << "taznode: giving up after " << failures << " failed round(s)\n";
+                        break;
+                    }
                 }
-                all_ok = handle_peer(socket, true);
-                socket.close();
-                if (every != 0 && all_ok) {
-                    std::cout << "taznode: round " << round << " done, our height is " << chain.height()
-                              << "; waiting " << every << "s\n";
-                    std::this_thread::sleep_for(std::chrono::seconds(every));
-                }
-            } while (every != 0 && all_ok);
+                if (every == 0) break;
+                if (round_ok) std::cout << "taznode: round " << round << " done, our height is "
+                                        << chain.height() << "; waiting " << every << "s\n";
+                std::this_thread::sleep_for(std::chrono::seconds(every));
+            }
         } else {
             taz::Listener listener;
             if (!taz::listen_loopback(port, listener, &net_err)) {
