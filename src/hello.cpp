@@ -51,6 +51,7 @@ std::string encode_hello(const Hello& hello) {
     out += "genesis=" + to_hex(hello.genesis_commitment) + "\n";
     out += "height=" + std::to_string(hello.best_height) + "\n";
     out += "root=" + to_hex(hello.state_root) + "\n";
+    out += "tip=" + to_hex(hello.tip_hash) + "\n";
     return out;
 }
 
@@ -74,7 +75,8 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
     if (lines.empty() || lines[0] != "TAZHELLO/1") return fail("not a TAZVERA hello message");
 
     Hello parsed;
-    bool have_proto = false, have_chain = false, have_genesis = false, have_height = false, have_root = false;
+    bool have_proto = false, have_chain = false, have_genesis = false, have_height = false;
+    bool have_root = false, have_tip = false;
     for (std::size_t i = 1; i < lines.size(); ++i) {
         const std::string& line = lines[i];
         if (line.empty()) continue;
@@ -105,11 +107,15 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
             if (have_root) return fail("duplicate root");
             if (!parse_hex32(value, parsed.state_root)) return fail("root must be 64 hex characters");
             have_root = true;
+        } else if (key == "tip") {
+            if (have_tip) return fail("duplicate tip");
+            if (!parse_hex32(value, parsed.tip_hash)) return fail("tip must be 64 hex characters");
+            have_tip = true;
         } else {
             return fail("unknown field \"" + key + "\"");
         }
     }
-    if (!have_proto || !have_chain || !have_genesis || !have_height || !have_root)
+    if (!have_proto || !have_chain || !have_genesis || !have_height || !have_root || !have_tip)
         return fail("a required field is missing");
     out = parsed;
     return true;
@@ -129,6 +135,7 @@ Hello hello_for(const Chain& chain) {
     h.genesis_commitment = chain.genesis_commitment();
     h.best_height = chain.height();
     h.state_root = chain.state().state_root();
+    h.tip_hash = chain.blocks().empty() ? Hash32{} : chain.blocks().back().hash();
     return h;
 }
 

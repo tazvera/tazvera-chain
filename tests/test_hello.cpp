@@ -34,6 +34,7 @@ static void h01_round_trip() {
     CHECK(back.genesis_commitment == ours.genesis_commitment);
     CHECK(back.best_height == ours.best_height);
     CHECK(back.state_root == ours.state_root);
+    CHECK(back.tip_hash == ours.tip_hash);
 }
 
 // the same chain is accepted, and nothing else is
@@ -66,6 +67,13 @@ static void h03_malformed() {
     CHECK(!decode_hello("", out, &why));
     CHECK(!decode_hello("HTTP/1.1 200 OK\r\n\r\n", out, &why));
     CHECK(!decode_hello("TAZHELLO/2\nproto=2\nchain=x\ngenesis=" + std::string(64, 'a') + "\nheight=0\n", out, &why));
+
+    // the tip hash is required as well: it is what actually identifies the history
+    std::string no_tip = good;
+    const std::size_t tp = no_tip.find("tip=");
+    CHECK(tp != std::string::npos);
+    no_tip.erase(tp, no_tip.find('\n', tp) - tp + 1);
+    CHECK(!decode_hello(no_tip, out, &why));
 
     // the state root is required too: a peer that cannot say where its state is cannot be skipped
     std::string no_root = good;

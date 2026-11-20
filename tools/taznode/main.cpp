@@ -356,7 +356,10 @@ int main(int argc, char** argv) {
             // Both sides can see the same two hellos, so this decision is symmetric: when the height and the
             // state root agree there is nothing to send in either direction, and re-sending the whole chain
             // every few seconds would be pure waste.
-            if (theirs.best_height == chain.height() && theirs.state_root == chain.state().state_root()) {
+            // Height plus the tip hash, not the state root: two different block histories can end at the same
+            // state, and skipping the exchange would leave them silently on different chains.
+            const taz::Hash32 our_tip = chain.blocks().empty() ? taz::Hash32{} : chain.blocks().back().hash();
+            if (theirs.best_height == chain.height() && theirs.tip_hash == our_tip) {
                 std::cout << "taznode: already in sync at height " << chain.height() << "; nothing to send\n";
                 return true;
             }
