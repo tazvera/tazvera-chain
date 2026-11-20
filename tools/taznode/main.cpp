@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -35,7 +36,8 @@ constexpr const char* kUsage =
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
-    "  --peer <port>             connect to 127.0.0.1:<port> and exchange hellos\n"
+    "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
+    "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -133,6 +135,7 @@ int main(int argc, char** argv) {
     std::string listen_port;
     std::string serve_port;
     std::string max_peers_text;
+    std::string every_text;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
@@ -155,6 +158,7 @@ int main(int argc, char** argv) {
         if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
         if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
+        if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -236,6 +240,7 @@ int main(int argc, char** argv) {
     // Checked before the mode block: "--max-peers 3" on its own is a mistake whether or not a mode was given,
     // and skipping the block would have let it through as a plain load.
     if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
+    if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
@@ -345,15 +350,36 @@ int main(int argc, char** argv) {
                                   : (receive_chain(sock) && offer_chain(sock));
         };
 
+        std::uint64_t every = 0;
+        if (!every_text.empty()) {
+            taz::Amount value = 0;
+            if (!parse_amount(every_text, value) || value == 0 || value > 3600)
+                return usage_error("--every must be a number of seconds between 1 and 3600");
+            every = value;
+        }
+
         bool all_ok = true;
         if (!peer_port.empty()) {
-            taz::Socket socket;
-            if (!taz::connect_loopback(port, socket, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                taz::net_cleanup();
-                return 3;
-            }
-            all_ok = handle_peer(socket, true);
+            // Poll gossip: without threads this node cannot be pushed to, so it pulls. Connect, sync, close,
+            // wait, repeat. It is not gossip in the academic sense and it does not scale, but it means a new
+            // block reaches the other node without anyone typing a command — which is the point.
+            std::uint64_t round = 0;
+            do {
+                ++round;
+                taz::Socket socket;
+                if (!taz::connect_loopback(port, socket, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    all_ok = false;
+                    break;
+                }
+                all_ok = handle_peer(socket, true);
+                socket.close();
+                if (every != 0 && all_ok) {
+                    std::cout << "taznode: round " << round << " done, our height is " << chain.height()
+                              << "; waiting " << every << "s\n";
+                    std::this_thread::sleep_for(std::chrono::seconds(every));
+                }
+            } while (every != 0 && all_ok);
         } else {
             taz::Listener listener;
             if (!taz::listen_loopback(port, listener, &net_err)) {
