@@ -101,14 +101,14 @@ bool read_key_file(const std::string& path, taz::PrivKey& sk, taz::PubKey& pk, s
         why = "the key file needs 64 hex characters on each of two lines";
         return false;
     }
-    const std::vector<std::uint8_t> raw_seed = from_hex(seed_hex);
+    std::vector<std::uint8_t> raw_seed = from_hex(seed_hex);   // not const: it is wiped below
     const std::vector<std::uint8_t> raw_pub = from_hex(pub_hex);
     if (raw_seed.size() != sk.size() || raw_pub.size() != pk.size()) { why = "the key file is not hex"; return false; }
     for (std::size_t i = 0; i < sk.size(); ++i) sk[i] = raw_seed[i];
     for (std::size_t i = 0; i < pk.size(); ++i) pk[i] = raw_pub[i];
-    // The hex text held the seed too; do not leave a second copy lying in memory.
-    std::vector<std::uint8_t> wipe = raw_seed;
-    taz::secure_wipe(wipe);
+    // Wipe the originals. The earlier version copied raw_seed into a local, wiped the copy, and left the real
+    // bytes in memory — a wipe that looks right and does nothing.
+    taz::secure_wipe(raw_seed);
     std::fill(seed_hex.begin(), seed_hex.end(), '\0');
     return true;
 }
@@ -266,7 +266,9 @@ int main(int argc, char** argv) {
         std::string net_err;
         if (!taz::net_startup(&net_err)) return usage_error("network start failed: " + net_err);
 
-        const taz::Hello ours = taz::hello_for(chain);
+        // Built per peer, not once: after adopting a peer's chain our height changes, and telling the next peer
+        // the old height would be a lie it acts on.
+
         auto offer_chain = [&](taz::Socket& sock) -> bool {
             const std::string text = taz::to_json(chain);
             if (text.size() > taz::kMaxPayloadBytes) {
@@ -332,6 +334,7 @@ int main(int argc, char** argv) {
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
+            const taz::Hello ours = taz::hello_for(chain);   // current height, every time
             taz::Hello theirs;
             if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err)) {
                 std::cerr << "taznode: the handshake failed: " << net_err << "\n";
@@ -346,6 +349,14 @@ int main(int argc, char** argv) {
                       << " protocol=" << theirs.protocol_version
                       << " height=" << theirs.best_height
                       << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+            // Refuse before receiving: the hello already states the peer's height, and loading a chain replays
+            // every block. Checking after the load spends the CPU the limit exists to save.
+            constexpr std::uint64_t kMaxSyncAhead = 1000;
+            if (theirs.best_height > chain.height() + kMaxSyncAhead) {
+                std::cerr << "taznode: the peer claims to be " << (theirs.best_height - chain.height())
+                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused before syncing\n";
+                return false;
+            }
             return we_speak_first ? (offer_chain(sock) && receive_chain(sock))
                                   : (receive_chain(sock) && offer_chain(sock));
         };
