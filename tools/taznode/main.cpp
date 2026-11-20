@@ -266,7 +266,9 @@ int main(int argc, char** argv) {
         std::string net_err;
         if (!taz::net_startup(&net_err)) return usage_error("network start failed: " + net_err);
 
-        const taz::Hello ours = taz::hello_for(chain);
+        // Built per peer, not once: after adopting a peer's chain our height changes, and telling the next peer
+        // the old height would be a lie it acts on.
+
         auto offer_chain = [&](taz::Socket& sock) -> bool {
             const std::string text = taz::to_json(chain);
             if (text.size() > taz::kMaxPayloadBytes) {
@@ -297,10 +299,10 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: the peer's chain is not valid: " << load_err << "\n";
                 return false;
             }
-            constexpr std::uint64_t kMaxSyncAhead = 1000;
-            if (incoming.height() > chain.height() + kMaxSyncAhead) {
+            constexpr std::uint64_t kMaxSyncAheadAfterLoad = 1000;
+            if (incoming.height() > chain.height() + kMaxSyncAheadAfterLoad) {
                 std::cerr << "taznode: the peer's chain is " << (incoming.height() - chain.height())
-                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused\n";
+                          << " blocks ahead; more than " << kMaxSyncAheadAfterLoad << " is refused\n";
                 return false;
             }
             const taz::ForkDecision fork = taz::choose_chain(chain, incoming);
@@ -332,6 +334,7 @@ int main(int argc, char** argv) {
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
+            const taz::Hello ours = taz::hello_for(chain);   // current height, every time
             taz::Hello theirs;
             if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err)) {
                 std::cerr << "taznode: the handshake failed: " << net_err << "\n";
@@ -346,6 +349,14 @@ int main(int argc, char** argv) {
                       << " protocol=" << theirs.protocol_version
                       << " height=" << theirs.best_height
                       << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+            // Refuse before receiving: the hello already says how far ahead the peer claims to be, and loading a
+            // chain replays every block. Checking after the load spends the CPU the limit exists to save.
+            constexpr std::uint64_t kMaxSyncAhead = 1000;
+            if (theirs.best_height > chain.height() + kMaxSyncAhead) {
+                std::cerr << "taznode: the peer claims to be " << (theirs.best_height - chain.height())
+                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused before syncing\n";
+                return false;
+            }
             return we_speak_first ? (offer_chain(sock) && receive_chain(sock))
                                   : (receive_chain(sock) && offer_chain(sock));
         };
