@@ -28,6 +28,7 @@ inline constexpr socket_t kInvalidSocket = -1;
 inline constexpr std::uint32_t kMaxPayloadBytes = 64 * 1024;   // one message, not a stream
 inline constexpr std::uint8_t kMsgHello = 1;
 inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export format writes it
+inline constexpr std::uint8_t kMsgBlocks = 3;  // the blocks a peer is missing, as a JSON array
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.

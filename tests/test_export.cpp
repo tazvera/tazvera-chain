@@ -1,4 +1,5 @@
 #include "taz/export.hpp"
+#include "taz/persist.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
 #include <iostream>
@@ -22,6 +23,28 @@ int main() {
     CHECK(chain.append_block({tx_of(a, b.addr, 1000000, 0), tx_of(a, c.addr, 20, 1)}, 1).ok);
     CHECK(chain.append_block({}, 2).ok);
     CHECK(chain.append_block({tx_of(b, c.addr, 300, 0), tx_of(a, b.addr, 5, 2)}, 3).ok);
+
+    // v9: a block written on its own must read back as the same block, because block-by-block sync sends
+    // blocks one at a time and the receiver parses them with the same strict parser the file loader uses.
+    for (const Block& original : chain.blocks()) {
+        Block back;
+        std::string why;
+        CHECK(parse_block_text(block_to_json(original), back, &why));
+        CHECK(back.height == original.height);
+        CHECK(back.hash() == original.hash());
+        CHECK(back.state_root == original.state_root);
+        CHECK(back.transactions.size() == original.transactions.size());
+        CHECK(back.previous_hash == original.previous_hash);
+    }
+    // and a block that arrives damaged is refused rather than half-accepted
+    {
+        Block back;
+        std::string why;
+        const std::string good = block_to_json(chain.blocks().back());
+        CHECK(!parse_block_text("", back, &why));
+        CHECK(!parse_block_text("{\"height\": 1}", back, &why));
+        CHECK(!parse_block_text(good.substr(0, good.size() / 2), back, &why));
+    }
 
     // the statement must agree with the real state for every address, including an unknown one
     for (const Address& who : {a.addr, b.addr, c.addr, Address{9}}) {

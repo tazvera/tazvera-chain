@@ -579,3 +579,24 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
 }
 
 }  // namespace taz
+
+bool parse_block_text(std::string_view text, Block& out, std::string* error) {
+    try {
+        if (text.empty()) fail("the block message is empty");
+        if (text.size() > 256 * 1024) fail("the block message is larger than a block can be");
+        Parser parser(text, 100000);
+        const JVal jv = parser.parse_document();
+        // The file format allows a block with and without the veto key depending on the chain level. Both are
+        // legitimate shapes, so both are tried — but nothing else is relaxed: parse_block is the same function
+        // the loader uses.
+        try {
+            out = parse_block(jv, true, "block message");
+        } catch (const LoadError&) {
+            out = parse_block(jv, false, "block message");
+        }
+        return true;
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        return false;
+    }
+}

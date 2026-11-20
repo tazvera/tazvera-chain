@@ -50,6 +50,9 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
 bool load_chain_json(const std::string& path, Chain& out, std::string* error = nullptr, const LoadOptions& options = {});
 // Same, from text already in memory (used by tests and tools).
 bool load_chain_json_text(std::string_view text, Chain& out, std::string* error = nullptr, const LoadOptions& options = {});
+// v9.0: parse one block written by block_to_json(), with the same strictness the file loader applies. Used by
+// block-by-block sync, so a block that arrives over the network is checked exactly like one read from disk.
+bool parse_block_text(std::string_view text, Block& out, std::string* error = nullptr);
 
 namespace testing {
 // TEST ONLY: when true, save_chain_json stops after writing and flushing the temporary file and before the

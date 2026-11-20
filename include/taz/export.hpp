@@ -8,6 +8,9 @@ namespace taz {
 // safety rules is written as "v2"; one that uses guardian recovery as "v4" (older explorers refuse
 // a newer format instead of mis-verifying it).
 std::string to_json(const Chain& chain);
+// v9.0: one block, in the same shape the file format uses for a block. Needed by block-by-block sync,
+// which sends the blocks a peer is missing instead of the whole chain.
+std::string block_to_json(const Block& block);
 
 enum class EntryKind {
     Sent,        // transfer that arrived at once
