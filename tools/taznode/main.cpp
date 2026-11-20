@@ -353,6 +353,13 @@ int main(int argc, char** argv) {
                       << " protocol=" << theirs.protocol_version
                       << " height=" << theirs.best_height
                       << " genesis=" << taz::to_hex(theirs.genesis_commitment) << "\n";
+            // Both sides can see the same two hellos, so this decision is symmetric: when the height and the
+            // state root agree there is nothing to send in either direction, and re-sending the whole chain
+            // every few seconds would be pure waste.
+            if (theirs.best_height == chain.height() && theirs.state_root == chain.state().state_root()) {
+                std::cout << "taznode: already in sync at height " << chain.height() << "; nothing to send\n";
+                return true;
+            }
             // Refuse before receiving: the hello already states the peer's height, and loading a chain replays
             // every block. Checking after the load spends the CPU the limit exists to save.
             constexpr std::uint64_t kMaxSyncAhead = 1000;
