@@ -20,6 +20,7 @@ struct Hello {
     std::string chain_id{CHAIN_ID};
     Hash32 genesis_commitment{};
     std::uint64_t best_height{0};   // the peer's claim about itself; nothing is trusted until blocks arrive
+    Hash32 state_root{};            // ditto: a hint, so two nodes that already agree do not exchange a chain
 };
 
 // Canonical, line based, strict:
@@ -29,6 +30,7 @@ struct Hello {
 //   chain=tazvera-local-prototype-v1
 //   genesis=<64 hex>
 //   height=<decimal>
+//   root=<64 hex>
 //
 // decode_hello() rejects: a wrong header, an unknown or duplicated key, a missing key, a value that is not the
 // expected shape, more than kMaxHelloBytes, or any line longer than kMaxHelloLine. A peer cannot make the node
