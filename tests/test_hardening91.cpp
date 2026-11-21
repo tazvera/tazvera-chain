@@ -185,6 +185,7 @@ static void n4_transfer_with_peer_is_an_error() {
 #endif
 
 int main() {
+    { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }   // Windows needs WSAStartup first
     h3_worst_case_block_fits();
 #ifndef _WIN32
     n1_future_block_cannot_jam_the_chain();
