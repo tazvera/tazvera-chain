@@ -7,6 +7,7 @@
 // announcing a huge message is refused before anything is allocated, garbage is refused, and a closed port is an
 // error rather than a crash.
 #include "taz/net.hpp"
+#include <chrono>
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
@@ -137,6 +138,28 @@ static void n06_send_to_closed_peer_is_an_error() {
     CHECK(!err.empty());
 }
 
+// v9.0: the deadline must cut off a peer that trickles bytes, not wait three seconds after each one.
+// The client announces a body and then goes quiet; the receive has to give up at the deadline, not at the
+// per-call socket timeout.
+static void n07_deadline_cuts_off_a_slow_peer() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
+
+    const std::string header = std::string(3, '\0') + std::string(1, '\x64');   // length = 100, big-endian
+    CHECK(send_all(client, header, &err));                                       // and a type byte
+    CHECK(send_all(client, std::string(1, '\x02'), &err));                      // ... then silence
+
+    const auto started = std::chrono::steady_clock::now();
+    std::uint8_t type = 0;
+    std::string payload;
+    const bool got = recv_message(server, type, payload, &err, started + std::chrono::milliseconds(400));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+    CHECK(!got);
+    CHECK(!err.empty());
+    CHECK(took.count() < 2000);                 // 400 ms deadline, not the 3 s socket timeout
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -146,6 +169,7 @@ int main() {
     n04_garbage_refused();
     n05_closed_port_is_an_error();
     n06_send_to_closed_peer_is_an_error();
+    n07_deadline_cuts_off_a_slow_peer();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";

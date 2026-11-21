@@ -36,6 +36,27 @@ std::uint32_t get_u32(const std::string& in) {
            static_cast<std::uint32_t>(static_cast<unsigned char>(in[3]));
 }
 
+bool set_timeout_ms(const Socket& s, int ms, std::string* error) {
+#ifdef _WIN32
+    DWORD value = static_cast<DWORD>(ms);
+    if (setsockopt(static_cast<SOCKET>(s.raw()), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0 ||
+        setsockopt(static_cast<SOCKET>(s.raw()), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
+        if (error) *error = "could not set the socket timeouts";
+        return false;
+    }
+#else
+    timeval tv{};
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    if (setsockopt(s.raw(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0 ||
+        setsockopt(s.raw(), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+        if (error) *error = "could not set the socket timeouts";
+        return false;
+    }
+#endif
+    return true;
+}
+
 bool set_timeout(const Socket& s, std::string* error) {
     // Both directions: a receive that never completes and a send that never drains are the same problem, and
     // a peer that stops reading would otherwise hold this process for as long as it likes.
@@ -193,11 +214,27 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error) 
     return true;
 }
 
-bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error) {
+bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error, Deadline deadline) {
     out.clear();
     out.reserve(count);
     std::vector<char> buffer(1024);
     while (out.size() < count) {
+        // The per-call socket timeout alone lets a peer that trickles one byte every few seconds hold this
+        // process for as long as it likes. With a deadline, the remaining time also becomes the socket timeout,
+        // so the cut-off is the deadline and not three seconds after the last byte.
+        if (deadline != no_deadline()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                if (error) *error = "the peer took longer than the time allowed for this exchange";
+                return false;
+            }
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+            if (!set_timeout_ms(socket, ms, nullptr)) {
+                if (error) *error = "could not set the socket timeouts";
+                return false;
+            }
+        }
         const std::size_t want = std::min(buffer.size(), count - out.size());
         const int got = ::recv(socket.raw(), buffer.data(), static_cast<int>(want), 0);
         if (got == 0) {
@@ -226,19 +263,20 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
     return send_all(socket, frame, error);
 }
 
-bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error) {
+bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
+                  Deadline deadline) {
     std::string header;
-    if (!recv_exact(socket, 4, header, error)) return false;
+    if (!recv_exact(socket, 4, header, error, deadline)) return false;
     const std::uint32_t length = get_u32(header);
     if (length > kMaxPayloadBytes) {                 // refuse before allocating anything
         if (error) *error = "the peer announced a message larger than this transport allows";
         return false;
     }
     std::string type_byte;
-    if (!recv_exact(socket, 1, type_byte, error)) return false;
+    if (!recv_exact(socket, 1, type_byte, error, deadline)) return false;
     type = static_cast<std::uint8_t>(type_byte[0]);
     if (length == 0) { payload.clear(); return true; }
-    return recv_exact(socket, length, payload, error);
+    return recv_exact(socket, length, payload, error, deadline);
 }
 
 bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error) {
