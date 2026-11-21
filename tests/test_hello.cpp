@@ -119,11 +119,45 @@ static void h04_size_limits() {
     CHECK(!decode_hello(long_line, out, &why));
 }
 
+// v9.0: a peer can say which key is speaking. The signature proves that key produced this hello; it proves
+// nothing about honesty, which is why this checks the proof and the refusals and nothing more.
+static void h06_identity_is_signed_and_checked() {
+    PrivKey sk{}; PubKey pk{};
+    CHECK(generate_keypair(sk, pk));
+    Hello mine = hello_for(make_chain(1000));
+    CHECK(!hello_has_identity(mine));
+    CHECK(!hello_signature_ok(mine));                 // anonymous is not a pass
+
+    CHECK(sign_hello(mine, sk));
+    CHECK(hello_has_identity(mine));
+    CHECK(mine.pubkey == pk);
+    CHECK(hello_signature_ok(mine));
+    CHECK(hello_address(mine) == address_from_pubkey(pk));
+
+    // it survives the wire, signature and all
+    Hello back;
+    std::string why;
+    CHECK(decode_hello(encode_hello(mine), back, &why));
+    CHECK(back.pubkey == mine.pubkey);
+    CHECK(hello_signature_ok(back));
+
+    // change one field and the signature must stop verifying
+    Hello tampered = mine;
+    tampered.best_height += 1;
+    CHECK(!hello_signature_ok(tampered));
+
+    // a key with no signature proves nothing, so the decoder refuses half an identity
+    Hello half = mine;
+    half.signature = Signature{};
+    CHECK(!decode_hello(encode_hello(half), back, &why));
+}
+
 int main() {
     h01_round_trip();
     h02_decision();
     h03_malformed();
     h04_size_limits();
+    h06_identity_is_signed_and_checked();
     if (failures == 0) { std::cout << "hello tests: all passed\n"; return 0; }
     std::cerr << "hello tests: " << failures << " failure(s)\n";
     return 1;

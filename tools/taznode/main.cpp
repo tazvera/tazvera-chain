@@ -39,6 +39,7 @@ constexpr const char* kUsage =
     "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
+    "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -138,6 +139,7 @@ int main(int argc, char** argv) {
     std::string max_peers_text;
     std::string every_text;
     std::string retries_text;
+    std::string identity_file;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
@@ -162,6 +164,7 @@ int main(int argc, char** argv) {
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
+        if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -267,6 +270,16 @@ int main(int argc, char** argv) {
             if (!parse_amount(max_peers_text, value) || value == 0 || value > 1000)
                 return usage_error("--max-peers must be between 1 and 1000");
             max_peers = value;
+        }
+
+        taz::PrivKey identity_sk{};
+        bool have_identity = false;
+        if (!identity_file.empty()) {
+            std::string why;
+            taz::PubKey identity_pk{};
+            if (!read_key_file(identity_file, identity_sk, identity_pk, why))
+                return usage_error("identity key: " + why);
+            have_identity = true;
         }
 
         std::string net_err;
@@ -386,7 +399,11 @@ int main(int argc, char** argv) {
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
-            const taz::Hello ours = taz::hello_for(chain);   // current height, every time
+            taz::Hello ours = taz::hello_for(chain);   // current height, every time
+            if (have_identity && !taz::sign_hello(ours, identity_sk)) {
+                std::cerr << "taznode: could not sign the handshake with the identity key\n";
+                return false;
+            }
             taz::Hello theirs;
             if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err)) {
                 std::cerr << "taznode: the handshake failed: " << net_err << "\n";
@@ -396,6 +413,18 @@ int main(int argc, char** argv) {
             if (!decision.ok) {
                 std::cerr << "taznode: peer refused: " << decision.reason << "\n";
                 return false;
+            }
+            // Who is speaking, and nothing more. A verified signature says this key produced this hello; it does
+            // not say the peer is honest, trusted, or allowed to do anything.
+            if (taz::hello_has_identity(theirs)) {
+                if (!taz::hello_signature_ok(theirs)) {
+                    std::cerr << "taznode: the peer sent an identity signature that does not verify; refused\n";
+                    return false;
+                }
+                std::cout << "taznode: peer identity=" << taz::to_hex(taz::hello_address(theirs))
+                          << " (signature verified)\n";
+            } else {
+                std::cout << "taznode: peer is anonymous (no identity signature)\n";
             }
             std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
                       << " protocol=" << theirs.protocol_version
