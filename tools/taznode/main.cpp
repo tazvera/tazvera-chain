@@ -307,37 +307,47 @@ int main(int argc, char** argv) {
         auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
             const std::uint64_t wanted = std::min(expected, kMaxBlocksPerSync);
             std::uint64_t added = 0;
-            for (std::uint64_t n = 0; n < wanted; ++n) {
+            bool ok = true;
+            for (std::uint64_t n = 0; n < wanted && ok; ++n) {
                 std::uint8_t type = 0;
                 std::string payload;
                 if (!taz::recv_message(sock, type, payload, &net_err)) {
                     std::cerr << "taznode: " << net_err << "\n";
-                    return false;
+                    ok = false;
+                    break;
                 }
                 if (type != taz::kMsgBlocks) {
                     std::cerr << "taznode: the peer sent a message we did not ask for\n";
-                    return false;
+                    ok = false;
+                    break;
                 }
                 taz::Block block;
                 std::string why;
                 if (!taz::parse_block_text(payload, block, &why)) {
                     std::cerr << "taznode: the peer sent a block we cannot read: " << why << "\n";
-                    return false;
+                    ok = false;
+                    break;
                 }
                 const taz::ChainResult result = chain.accept_block(block);
                 if (!result.ok) {
                     std::cerr << "taznode: the peer sent a block we cannot accept: " << result.error << "\n";
-                    return false;
+                    ok = false;
+                    break;
                 }
                 ++added;
             }
-            std::string save_err;
-            if (!taz::save_chain_json(chain, chain_file, &save_err)) {
-                std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
-                return false;
+            // Save whatever was accepted, even when the batch broke in the middle: a block that is in memory but
+            // not on disk is a chain that disagrees with its own file after a crash.
+            if (added > 0) {
+                std::string save_err;
+                if (!taz::save_chain_json(chain, chain_file, &save_err)) {
+                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
+                    return false;
+                }
             }
-            std::cout << "taznode: accepted " << added << " block(s), height is now " << chain.height() << "\n";
-            return true;
+            if (added > 0)
+                std::cout << "taznode: accepted " << added << " block(s), height is now " << chain.height() << "\n";
+            return ok;
         };
 
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not

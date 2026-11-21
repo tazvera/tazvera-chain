@@ -49,26 +49,16 @@ std::string block_to_json(const Block& b) {
         j += "\"txid\": " + hex(tx.txid()) + ", ";
         j += "\"protocol_version\": " + num(tx.protocol_version) + ", ";
         j += "\"chain_id\": " + q(tx.chain_id) + ", ";
-        j += "\"kind\": " + num(static_cast<std::uint64_t>(tx.kind)) + ", ";
-        j += "\"from\": " + hex(tx.from) + ", ";
-        j += "\"to\": " + hex(tx.to) + ", ";
-        j += "\"amount\": " + num(tx.amount) + ", ";
-        j += "\"fee\": " + num(tx.fee) + ", ";
-        j += "\"nonce\": " + num(tx.nonce) + ", ";
-        j += "\"expiry_height\": " + num(tx.expiry_height) + ", ";
-        j += "\"daily_limit\": " + num(tx.daily_limit) + ", ";
-        j += "\"hold_threshold\": " + num(tx.hold_threshold) + ", ";
-        j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", ";
-        j += "\"ref\": " + hex(tx.ref) + ", ";
-        j += "\"new_owner\": " + hex(tx.new_owner) + ", ";
-        j += "\"guardian_threshold\": " + num(tx.guardian_threshold) + ", ";
-        j += "\"guardians\": [";
-        for (std::size_t g = 0; g < tx.guardians.size(); ++g)
-            j += std::string(g ? "," : "") + hex(tx.guardians[g]);
+        j += "\"kind\": " + num(static_cast<std::uint8_t>(tx.kind)) + ", ";
+        j += "\"from\": " + hex(tx.from) + ", \"to\": " + hex(tx.to) + ", ";
+        j += "\"amount\": " + num(tx.amount) + ", \"fee\": " + num(tx.fee) + ", ";
+        j += "\"nonce\": " + num(tx.nonce) + ", \"expiry_height\": " + num(tx.expiry_height) + ", ";
+        j += "\"daily_limit\": " + num(tx.daily_limit) + ", \"hold_threshold\": " + num(tx.hold_threshold) + ", ";
+        j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", \"ref\": " + hex(tx.ref) + ", ";
+        j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
+        for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
         j += "], ";
-        j += "\"veto\": " + hex(tx.veto) + ", ";
-        j += "\"pubkey\": " + hex(tx.pubkey) + ", ";
-        j += "\"signature\": " + hex(tx.signature) + "}";
+        j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
     }
     // Same bytes as before this was lifted out of to_json: a block with no transactions closes the array on
     // the same line. The export test compares files byte for byte, which is how this was caught.
