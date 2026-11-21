@@ -2,7 +2,13 @@
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
-This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. It deliberately does **not** implement networking, validators, consensus, staking, smart contracts or a wallet. It does include a local transaction pool, an offline JSON explorer and local chain-file persistence (see the sections below).
+This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. Since v9.0 it also contains a node, `taznode`, which creates and loads a chain, produces signed blocks, and talks to other nodes **on 127.0.0.1 only**. It still does **not** implement consensus, finality, peer authentication, staking, smart contracts or a wallet.
+
+## What the node can and cannot do (v9.0)
+
+**Can:** create a chain with `--init-genesis`, load it with a genesis pin, produce a signed block with `--transfer` and a key file, serve several peers one at a time with `--serve`, sync both ways with `--peer`, poll on an interval with `--every`, survive a missing peer with `--retries`, and exchange only the blocks a peer is missing.
+
+**Cannot:** prove who a peer is (no authentication), decide between two chains of the same height beyond a fixed tie-break (no consensus), finalise anything, listen on anything except 127.0.0.1, or carry a block with thousands of transactions (one 64 KiB message per block).
 
 ## What this package includes
 
@@ -46,7 +52,7 @@ The test suite checks valid signatures, modified-signature rejection, wrong-chai
 ## Important limitations and next work
 
 1. This is a repaired local core only. A successful local build is not proof of blockchain security.
-2. No P2P networking, consensus, validator registration, staking, slashing, RPC, network protocol, wallet, or smart contracts are included. Local file persistence exists (v8 / v8.1 / v8.2 below), but it is not a database and not a network.
+2. Networking exists in the narrowest form that can be tested: a loopback TCP transport, a hello that proves two nodes are on the same chain, and block-by-block sync between two processes on one machine. There is no peer authentication, no consensus, no finality, no RPC, no validator registration, no staking, no slashing, no wallet and no smart contracts. Local file persistence exists (v8 / v8.1 / v8.2 below) and is still not a database.
 3. The prototype uses one fixed transfer fee. Congestion policy, fee governance, validator economics, and the long-term sustainability of a finite staking reserve still need formal design.
 4. The 100% fee-burn choice means transaction fees do not pay validators. Resolve validator rewards before public testnet/mainnet.
 5. The address derivation here is a prototype convention, not a finalized public address standard.
@@ -158,7 +164,7 @@ If the key is lost, trusted people ("guardians") can bring the account's funds t
 - **Formats and the v6/v7 difference.** `v1` = plain transfers, `v2` = safety rules, `v4` = guardian recovery with the veto key (what v8 writes). The label must match what the chain really contains, so history cannot be passed off as simpler. Core v7 wrote guardian chains as `v3`; those carry the veto field and load as `v4`. Core v6 also wrote `v3`, **without** the veto field, with different signature bytes and state roots: such a file is refused with a clear message ("Core v6 file"). Plain and safety files from v6 (no veto field) still load, because their rules did not change. Files written by Core v7 or older list **one** genesis account; v8 requires both, so they must be re-exported.
 - Restart: save, load, save again gives a byte-identical file, and the loaded chain accepts the same next block as the original (tested at many points, including a held transfer, a recovery waiting and a completed recovery).
 - The repository's own `explorer/*.json` demo files are loaded and re-exported byte for byte by a test (the v8 demo files did not load, and are regenerated).
-- **Known limits (updated in v8.2).** (1) Genesis addresses, including zero-balance ones, are covered by `genesis_commitment` and verified on load. (2) Local file persistence only: no network, no database, no multi-process locking. (3) The file must come from a build with the same protocol constants. (4) Not a security audit.
+- **Known limits (updated in v8.2).** (1) Genesis addresses, including zero-balance ones, are covered by `genesis_commitment` and verified on load. (2) File persistence plus loopback networking only: no database, no multi-process locking, and two nodes sharing one chain file will overwrite each other. (3) The file must come from a build with the same protocol constants. (4) Not a security audit.
 - Tests: `taz_persist_tests`, 11 sections: save, load, strict JSON, replay, integrity, incomplete files (cut at every possible length), atomic save and crash simulation, restart, versions, random damage (about 7,000 damaged files; any that load must have an identical ledger), repository demo files.
 - Also restored in v8.1: the height-overflow guards of Core v6.2 (`chain.cpp`, `mempool.cpp`) that the v7 upload had dropped, and `.gitattributes`.
 
@@ -244,7 +250,7 @@ This supersedes the v8.2 list above.
 
 - **Windows load** — `load_chain_json` converted to a native path once (`status`, `file_size`, `ifstream`). Saving a file under a non-ASCII directory already worked since v8.3; loading it did not.
 - **Tests** — `t13_non_ascii_path` saves and loads a chain inside a directory named `taz-टेस्ट-ü`, on every platform, so the Windows fix cannot regress silently.
-- **Pin preparation — not yet enforced.** `LoadOptions::expected_genesis_commitment` and `require_genesis_pin` exist and **neither is set by any caller**, because there is no node and no CLI. Genesis authentication today means tamper detection only. See `PIN_ENFORCEMENT_PLAN.md`; do not describe this as production security.
+- **Pin enforcement (v9.0) — now enforced, by the node.** `taznode --expect-genesis <64 hex>` loads a chain through `load_chain_at_startup()`, which refuses a file whose genesis commitment does not match the pin, and the node cannot start without one. This is still tamper detection and authorship, not production security: it says "this is the chain I meant", not "this chain is safe". See `PIN_ENFORCEMENT_PLAN.md`.
 - **Repository hygiene** — the files that an upload had left in the repository root (`persist.cpp`, `chain.cpp`, `ci.yml`, `fuzz.yml`, `windows.yml`, `test_persist.cpp` and the rest) are removed. The build reads `src/`, `include/taz/`, `tests/`, `explorer/` and `.github/workflows/` only, so the duplicates were never compiled — but a reader could not tell which `persist.cpp` was real, and that is a security problem of its own.
 
 ## Guardian and veto — known limits, in one place
