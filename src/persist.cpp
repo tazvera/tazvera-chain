@@ -578,8 +578,6 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
     }
 }
 
-}  // namespace taz
-
 bool parse_block_text(std::string_view text, Block& out, std::string* error) {
     try {
         if (text.empty()) fail("the block message is empty");
@@ -600,3 +598,5 @@ bool parse_block_text(std::string_view text, Block& out, std::string* error) {
         return false;
     }
 }
+
+}  // namespace taz
