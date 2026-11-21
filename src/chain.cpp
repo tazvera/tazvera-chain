@@ -106,6 +106,24 @@ ChainResult Chain::validate_block(const Block& block, std::int64_t max_timestamp
     State candidate;
     return verify(block, max_timestamp, candidate);
 }
+ChainResult Chain::truncate_to(std::uint64_t height) {
+    if (blocks_.empty()) return {false, "the chain is empty"};
+    if (height > this->height()) return {false, "truncate_to cannot grow a chain"};
+    if (height == this->height()) return {true, {}};
+    if (genesis_balances_.size() != 2) return {false, "cannot rebuild: the genesis accounts were not recorded"};
+
+    Chain fresh;
+    if (!fresh.init_genesis(genesis_balances_[0].first, genesis_balances_[0].second,
+                            genesis_balances_[1].first, genesis_balances_[1].second, producers_))
+        return {false, "cannot rebuild: the genesis block was refused"};
+    for (std::uint64_t h = 1; h <= height; ++h) {
+        const ChainResult r = fresh.accept_block(blocks_[h], NO_TIMESTAMP_LIMIT);
+        if (!r.ok) return {false, "cannot rebuild: " + r.error};
+    }
+    *this = std::move(fresh);
+    return {true, {}};
+}
+
 ChainResult Chain::accept_block(const Block& block, std::int64_t max_timestamp) {
     State candidate;
     auto r = verify(block, max_timestamp, candidate);

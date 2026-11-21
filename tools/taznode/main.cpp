@@ -86,6 +86,12 @@ bool parse_address(const std::string& s, taz::Address& out) {
 // Reads "seed hex" on line 1 and "public key hex" on line 2. Prototype only: a real node must keep keys in
 // memory it controls, not in a file next to the chain. Reading both means the node never has to derive the
 // public key from the seed, which the crypto layer does not expose today.
+// One clock, one place: the fork path and the production path must agree about "now".
+std::int64_t now_seconds() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 bool read_key_file(const std::string& path, taz::PrivKey& sk, taz::PubKey& pk, std::string& why) {
     std::ifstream in(path);
     if (!in) { why = "cannot open the key file"; return false; }
@@ -371,9 +377,7 @@ int main(int argc, char** argv) {
                 // A block with timestamp INT64_MAX is valid on its own and freezes the chain forever, because
                 // every honest block after it must be "strictly greater". A peer's block is therefore only
                 // accepted within the same clock slack this node allows itself when producing.
-                const std::int64_t now_peer = std::chrono::duration_cast<std::chrono::seconds>(
-                                                  std::chrono::system_clock::now().time_since_epoch()).count();
-                const taz::ChainResult result = chain.accept_block(block, now_peer + 120);
+                const taz::ChainResult result = chain.accept_block(block, now_seconds() + 120);
                 if (!result.ok) {
                     std::cerr << "taznode: the peer sent a block we cannot accept: " << result.error << "\n";
                     ok = false;
@@ -456,11 +460,87 @@ int main(int argc, char** argv) {
                 return send_blocks(sock, theirs.best_height, ours.best_height);
             if (theirs.best_height > chain.height())
                 return receive_blocks(sock, theirs.best_height - chain.height());
-            // Same height, same genesis, different tip: two chains of the same age that disagree. Keeping ours
-            // and saying so is all this build can honestly do — choosing needs a rule that does not exist yet.
-            std::cerr << "taznode: warning: same height (" << chain.height()
-                      << ") but a different tip block - possible fork, keeping our chain\n";
-            return true;
+            // Same height, same genesis, different tip: a real fork. Both sides run the same four steps in the
+            // same order, so neither can be left waiting: ask, read the peer's ask, answer with our tip, read
+            // their tip. Then the rule in fork.cpp decides, and truncate_to() makes the decision real.
+            if (chain.height() == 0) {
+                // Two chains at height 0 with the same genesis commitment are the same chain; anything else here
+                // would be a bug, and stepping back from 0 would underflow.
+                std::cerr << "taznode: the peer disagrees at genesis; refusing to continue\n";
+                return false;
+            }
+            {
+                const std::string want = std::to_string(chain.height());
+                if (!taz::send_message(sock, taz::kMsgWant, want, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                std::uint8_t type = 0;
+                std::string payload;
+                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                if (type != taz::kMsgWant) {
+                    std::cerr << "taznode: expected the peer to ask for our tip, got message type "
+                              << static_cast<int>(type) << "\n";
+                    return false;
+                }
+                if (!taz::send_message(sock, taz::kMsgBlocks, taz::block_to_json(chain.blocks().back()), &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                if (type == taz::kMsgNoBlock) {
+                    std::cerr << "taznode: the peer has no block at height " << chain.height()
+                              << "; keeping our chain\n";
+                    return true;
+                }
+                if (type != taz::kMsgBlocks) {
+                    std::cerr << "taznode: expected the peer's tip block, got message type "
+                              << static_cast<int>(type) << "\n";
+                    return false;
+                }
+                taz::Block theirs_tip;
+                std::string why;
+                if (!taz::parse_block_text(payload, theirs_tip, &why)) {
+                    std::cerr << "taznode: the peer's tip block cannot be read: " << why << "\n";
+                    return false;
+                }
+                // Build their chain from the block before the fork, using our own history: at equal height the
+                // only honest candidate we can construct is "our chain minus its tip, plus their tip".
+                taz::Chain candidate = chain;
+                const taz::ChainResult cut = candidate.truncate_to(chain.height() - 1);
+                if (!cut.ok) {
+                    std::cerr << "taznode: cannot step back to compare chains: " << cut.error << "\n";
+                    return false;
+                }
+                const taz::ChainResult took = candidate.accept_block(theirs_tip, now_seconds() + 120);
+                if (!took.ok) {
+                    std::cerr << "taznode: the peer's tip block is not valid on our history: " << took.error
+                              << "; keeping our chain\n";
+                    return true;
+                }
+                const taz::ForkDecision fork = taz::choose_chain(chain, candidate);
+                if (fork.choice != taz::ForkChoice::TakeTheirs) {
+                    std::cout << "taznode: fork at height " << chain.height() << " resolved: " << fork.reason
+                              << ", keeping our chain\n";
+                    return true;
+                }
+                std::string save_err;
+                if (!taz::save_chain_json(candidate, chain_file, &save_err)) {
+                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err
+                              << " - stopping rather than running ahead of the file\n";
+                    std::exit(3);
+                }
+                chain = std::move(candidate);
+                std::cout << "taznode: fork at height " << chain.height() << " resolved: " << fork.reason
+                          << ", took the peer's chain (tip " << taz::to_hex(chain.blocks().back().hash()) << ")\n";
+                return true;
+            }
         };
 
         std::uint64_t every = 0;
@@ -571,8 +651,7 @@ int main(int argc, char** argv) {
         if (!taz::verify(pk, signable, tx.signature))
             return usage_error("the key file is inconsistent: that public key does not belong to that seed");
 
-        const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-                                     std::chrono::system_clock::now().time_since_epoch()).count();
+        const std::int64_t now = now_seconds();
         // The chain requires a timestamp strictly greater than the previous block. Two blocks produced inside the
         // same second would otherwise be refused, which looks like a chain bug and is only a clock resolution
         // problem, so step past the tip when needed.
