@@ -71,7 +71,9 @@ struct Listener {
 // port 0 asks the OS for a free port; the chosen one comes back in Listener::port.
 bool listen_loopback(std::uint16_t port, Listener& out, std::string* error = nullptr);
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error = nullptr);
-bool accept_one(const Socket& listener, Socket& out, std::string* error = nullptr);
+// With a deadline, accept_one() waits only until then and reports a timeout instead of blocking for ever.
+bool accept_one(const Socket& listener, Socket& out, std::string* error = nullptr,
+                Deadline deadline = no_deadline());
 
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
