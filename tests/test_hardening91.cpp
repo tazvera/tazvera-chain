@@ -86,7 +86,6 @@ static void h3_worst_case_block_fits() {
     CHECK(payload == big && type == kMsgBlocks);
 }
 
-#ifndef _WIN32
 // ---- node-process helpers ------------------------------------------------------------------------------------------
 static std::uint16_t free_port() {
     Listener l; std::string e;
@@ -94,6 +93,24 @@ static std::uint16_t free_port() {
     return l.port;                                                // the listener closes here; the node binds it a moment later
 }
 static std::string node() { return std::string("\"") + TAZ_NODE_BINARY + "\""; }
+
+// Start a command in the background with its output in a file. POSIX shells use "&"; Windows has no such thing,
+// so cmd's own "start /b" does the same job. Returns whether the launcher itself succeeded — the node is still
+// starting at that point, which is why every caller waits for a line in the output file afterwards.
+static bool run_in_background(const std::string& command, const std::string& out) {
+#ifdef _WIN32
+    const std::string full = "start /b \"\" cmd /c \"" + command + " > \"" + out + "\" 2>&1\"";
+#else
+    const std::string full = command + " > \"" + out + "\" 2>&1 &";
+#endif
+    return std::system(full.c_str()) == 0;
+}
+
+// Start a command in the foreground with its output in a file.
+static int run_waiting(const std::string& command, const std::string& out) {
+    const std::string full = command + " > \"" + out + "\" 2>&1";
+    return std::system(full.c_str());
+}
 static std::string pin(const Chain& c) { return to_hex(c.genesis_commitment()); }
 static bool wait_for(const fs::path& file, const std::string& text, int seconds) {
     for (int i = 0; i < seconds * 20; ++i) {
@@ -103,19 +120,26 @@ static bool wait_for(const fs::path& file, const std::string& text, int seconds)
     return false;
 }
 // Runs: A listens (from a genesis-only file), B (the longer chain) connects. Returns A's output; A's file is read back after.
-static std::string sync_run(const fs::path& dir, const Chain& a, const Chain& b) {
+// expect_served=false is for the tests where the peer must be refused: since v9.1 a refused peer is not a served
+// peer, so the node keeps waiting instead of counting it.
+static std::string sync_run(const fs::path& dir, const Chain& a, const Chain& b, bool expect_served = true) {
     std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
     std::string err;
     CHECK(save_chain_json(a, (dir / "A.json").string(), &err));
     CHECK(save_chain_json(b, (dir / "B.json").string(), &err));
     const std::uint16_t port = free_port();
     const std::string out = (dir / "a.out").string();
-    const std::string a_cmd = node() + " --chain \"" + (dir / "A.json").string() + "\" --expect-genesis " + pin(a) + " --listen " + std::to_string(port) + " > \"" + out + "\" 2>&1 &";
-    CHECK(std::system(a_cmd.c_str()) == 0);
+    const std::string a_cmd = node() + " --chain \"" + (dir / "A.json").string() + "\" --expect-genesis " + pin(a) + " --listen " + std::to_string(port);
+    CHECK(run_in_background(a_cmd, out));
     CHECK(wait_for(out, "listening", 10));
-    const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port) + " > \"" + (dir / "b.out").string() + "\" 2>&1";
-    if (std::system(b_cmd.c_str()) != 0) std::cerr << "  (the connecting node exited non-zero)\n";
-    CHECK(wait_for(out, "served 1 of 1", 20));
+    const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port);
+    if (run_waiting(b_cmd, (dir / "b.out").string()) != 0) std::cerr << "  (the connecting node exited non-zero)\n";
+    const std::string wanted_line = expect_served ? "served 1 of 1" : "still waiting for 1 peer(s)";
+    if (!wait_for(out, wanted_line, 20)) {
+        std::cerr << "  the serving node never reported \"" << wanted_line << "\". Its output:\n" << slurp(out) << "\n";
+        std::cerr << "  the connecting node said:\n" << slurp(dir / "b.out") << "\n";
+    }
+    CHECK(wait_for(out, wanted_line, 20));
     return slurp(out);
 }
 static std::uint64_t height_of(const fs::path& file, const Chain& like) {
@@ -142,7 +166,7 @@ static void n1_future_block_cannot_jam_the_chain() {
     blk.timestamp = std::numeric_limits<std::int64_t>::max(); blk.state_root = poisoned.state().state_root();
     CHECK(poisoned.accept_block(blk).ok);                         // the library itself has no opinion about the clock
     const fs::path dir = fs::temp_directory_path() / "taz91-n1";
-    const std::string a_out = sync_run(dir, good, poisoned);
+    const std::string a_out = sync_run(dir, good, poisoned, false);   // refused, so not counted as served
     CHECK(a_out.find("cannot accept") != std::string::npos);
     CHECK(a_out.find("too far in the future") != std::string::npos);
     CHECK(height_of(dir / "A.json", good) == 0);                  // v9.0: height 1, and no honest block can ever follow
@@ -177,26 +201,58 @@ static void n4_transfer_with_peer_is_an_error() {
     std::string err; CHECK(save_chain_json(c, (dir / "c.json").string(), &err));
     std::ofstream(dir / "key.txt") << to_hex(a.sk) << "\n" << to_hex(a.pk) << "\n";
     const std::string cmd = node() + " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c) + " --key-file \"" + (dir / "key.txt").string()
-                          + "\" --transfer " + to_hex(b.addr) + ":5 --peer 1 > \"" + (dir / "o.txt").string() + "\" 2>&1";
-    const int rc = std::system(cmd.c_str());
+                          + "\" --transfer " + to_hex(b.addr) + ":5 --peer 1";
+    const int rc = run_waiting(cmd, (dir / "o.txt").string());
     CHECK(rc != 0);                                               // v9.0: exit 0, nothing produced
     CHECK(slurp(dir / "o.txt").find("cannot be combined") != std::string::npos);
 }
-#endif
+// v9.1: --require-identity against a real node process. An anonymous peer must be refused, the node must keep
+// waiting, and a peer that proves its key must then be accepted — that is the whole point of the flag.
+static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
+    Key a = new_key(), b = new_key(), id = new_key();
+    Chain c = two_account_chain(a, b, 1000000);
+    const fs::path dir = fs::temp_directory_path() / "taz91-n5";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    std::string err;
+    CHECK(save_chain_json(c, (dir / "c.json").string(), &err));
+    std::ofstream(dir / "id.txt") << to_hex(id.sk) << "\n" << to_hex(id.pk) << "\n";
+
+    const std::uint16_t port = free_port();
+    const std::string out = (dir / "a.out").string();
+    const std::string chain_arg = " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c);
+    const std::string server = node() + chain_arg + " --listen " + std::to_string(port) +
+                               " --require-identity --identity \"" + (dir / "id.txt").string() + "\"";
+    CHECK(run_in_background(server, out));
+    CHECK(wait_for(out, "listening", 10));
+
+    // an anonymous peer is refused, and the node does not exit
+    const std::string anon = node() + chain_arg + " --peer " + std::to_string(port);
+    // Now that the accepter confirms before syncing, a refused peer must notice and fail.
+    CHECK(run_waiting(anon, (dir / "anon.out").string()) != 0);
+    if (!wait_for(out, "did not prove an identity", 10)) std::cerr << "  server output:\n" << slurp(out) << "\n";
+    CHECK(wait_for(out, "did not prove an identity", 10));
+    CHECK(wait_for(out, "still waiting for", 10));
+
+    // a peer that proves its key is accepted
+    const std::string signed_peer = node() + chain_arg + " --peer " + std::to_string(port) +
+                                    " --identity \"" + (dir / "id.txt").string() + "\"";
+    if (run_waiting(signed_peer, (dir / "ok.out").string()) != 0) std::cerr << "  (the proving node exited non-zero)\n";
+    CHECK(wait_for(out, "served 1 of 1", 20));
+    CHECK(slurp(out).find("proof verified on this connection") != std::string::npos);
+}
 
 int main() {
     { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }   // Windows needs WSAStartup first
     h3_worst_case_block_fits();
-#ifndef _WIN32
+    // These run on Windows too: run_in_background() uses cmd's "start /b" there. Linux passing is not proof that
+    // the identity handshake works on the platform the operator actually uses.
     n1_future_block_cannot_jam_the_chain();
     n2_a_150_transfer_block_syncs();
     n3_block_over_the_byte_budget_still_syncs();
     n4_transfer_with_peer_is_an_error();
-#else
-    std::cout << "N1-N4 (node processes) are skipped on Windows\n";
-#endif
+    n5_require_identity_refuses_anonymous_and_keeps_serving();
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4"}) fs::remove_all(fs::temp_directory_path() / d, ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Hardening v9.1 tests passed. This is not a security audit.\n";
     return EXIT_SUCCESS;

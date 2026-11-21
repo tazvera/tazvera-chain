@@ -12,6 +12,7 @@
 #include "taz/persist.hpp"
 #include "taz/net.hpp"
 #include "taz/fork.hpp"
+#include "taz/auth.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -40,6 +41,7 @@ constexpr const char* kUsage =
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
+    "  --require-identity        refuse any peer that does not prove an identity (needs --identity)\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -146,6 +148,7 @@ int main(int argc, char** argv) {
     std::string every_text;
     std::string retries_text;
     std::string identity_file;
+    bool require_identity = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     for (int i = 1; i < argc; ++i) {
@@ -171,6 +174,7 @@ int main(int argc, char** argv) {
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
+        if (a == "--require-identity") { require_identity = true; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -254,6 +258,9 @@ int main(int argc, char** argv) {
     if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
     if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
     if (!retries_text.empty() && every_text.empty()) return usage_error("--retries only means something with --every");
+    // A node that demands an identity while offering none would be asking for what it does not give.
+    if (require_identity && identity_file.empty())
+        return usage_error("--require-identity needs --identity: this node would demand what it does not offer");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
@@ -410,15 +417,34 @@ int main(int argc, char** argv) {
 
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
-        auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
-            taz::Hello ours = taz::hello_for(chain);   // current height, every time
+        // Returns true only when the peer proved an identity (or none was required) and the exchange finished.
+        // The serve loop counts that, not the bare fact that a socket opened.
+        auto handle_peer = [&](taz::Socket& sock, bool we_speak_first, taz::Deadline deadline) -> bool {
+            taz::Hello ours = taz::hello_for(chain);   // current height and a fresh nonce, every time
+            if (!taz::hello_has_nonce(ours)) {
+                std::cerr << "taznode: this node could not generate a nonce; refusing to start a handshake\n";
+                return false;
+            }
+            // The hello's own signature is kept exactly as it was before this change: removing a check that
+            // already existed is not a refactor, it is a regression with a nicer name. The auth message below is
+            // the stronger, connection-bound proof; this one stays because it was already here.
             if (have_identity && !taz::sign_hello(ours, identity_sk)) {
                 std::cerr << "taznode: could not sign the handshake with the identity key\n";
                 return false;
             }
             taz::Hello theirs;
-            if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err)) {
+            std::string their_hello_bytes;
+            if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err, deadline, &their_hello_bytes)) {
                 std::cerr << "taznode: the handshake failed: " << net_err << "\n";
+                return false;
+            }
+            if (!taz::hello_has_nonce(theirs)) {
+                std::cerr << "taznode: the peer's hello has no nonce; refusing\n";
+                return false;
+            }
+            // The pre-existing hello signature check, unchanged: present and invalid is still a refusal.
+            if (taz::hello_has_identity(theirs) && !taz::hello_signature_ok(theirs)) {
+                std::cerr << "taznode: the peer sent an identity signature that does not verify; refused\n";
                 return false;
             }
             const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
@@ -426,17 +452,84 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: peer refused: " << decision.reason << "\n";
                 return false;
             }
-            // Who is speaking, and nothing more. A verified signature says this key produced this hello; it does
-            // not say the peer is honest, trusted, or allowed to do anything.
-            if (taz::hello_has_identity(theirs)) {
-                if (!taz::hello_signature_ok(theirs)) {
-                    std::cerr << "taznode: the peer sent an identity signature that does not verify; refused\n";
+
+            // The identity proof is bound to this connection: both hellos, both nonces, the chain identity. The
+            // connector is A and the accepter is B, so both sides build the same bytes.
+            // The exact bytes on the wire: what we sent, and what arrived. Re-encoding was a shortcut that only
+            // works while the peer spells the hello exactly as we do — and the decoder accepts the fields in any
+            // order, so it would have failed closed against an honest node that ordered them differently.
+            const std::string my_hello_bytes = taz::encode_hello(ours);
+            // No role argument: the transcript orders the two hellos by nonce, so both sides build the same bytes
+            // whatever order they happen to pass, and reflection still differs because the nonces differ.
+            const std::string transcript =
+                taz::auth_transcript(ours, my_hello_bytes, theirs, their_hello_bytes);
+            if (transcript.empty()) {
+                std::cerr << "taznode: could not build the authentication transcript; refusing\n";
+                return false;
+            }
+            taz::AuthMessage mine;
+            if (have_identity && !taz::sign_auth(mine, identity_sk, transcript)) {
+                std::cerr << "taznode: could not sign the authentication transcript\n";
+                return false;
+            }
+            // Both sides send first and then read, so neither can be left waiting for a message the other will
+            // only send after reading.
+            if (!taz::send_message(sock, taz::kMsgAuth, taz::encode_auth(mine), &net_err, deadline)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                return false;
+            }
+            std::uint8_t type = 0;
+            std::string payload;
+            if (!taz::recv_message(sock, type, payload, &net_err, deadline)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                return false;
+            }
+            if (type != taz::kMsgAuth) {
+                std::cerr << "taznode: the peer did not send an identity proof\n";
+                return false;
+            }
+            taz::AuthMessage theirs_auth;
+            std::string why;
+            if (!taz::decode_auth(payload, theirs_auth, &why)) {
+                std::cerr << "taznode: the peer's identity proof cannot be read: " << why << "\n";
+                return false;
+            }
+            bool anonymous = true;
+            for (std::uint8_t b : theirs_auth.pubkey)
+                if (b != 0) anonymous = false;
+            if (anonymous) {
+                if (require_identity) {
+                    std::cerr << "taznode: the peer did not prove an identity and this node requires one" << std::endl;
                     return false;
                 }
-                std::cout << "taznode: peer identity=" << taz::to_hex(taz::hello_address(theirs))
-                          << " (signature verified)\n";
+                std::cout << "taznode: peer is anonymous (no identity proof)\n";
             } else {
-                std::cout << "taznode: peer is anonymous (no identity signature)\n";
+                if (!taz::auth_ok(theirs_auth, transcript)) {
+                    std::cerr << "taznode: the peer's identity proof does not verify; refused\n";
+                    return false;
+                }
+                std::cout << "taznode: peer identity=" << taz::to_hex(taz::address_from_pubkey(theirs_auth.pubkey))
+                          << " (proof verified on this connection)\n";
+            }
+
+            // A refusal must be visible to the other side. Without this the connecting node had already read its
+            // peer's auth message, saw nothing wrong, and exited 0 while the server had refused it.
+            if (!we_speak_first) {
+                if (!taz::send_message(sock, taz::kMsgAccept, {}, &net_err, deadline)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+            } else {
+                std::uint8_t accept_type = 0;
+                std::string accept_payload;
+                if (!taz::recv_message(sock, accept_type, accept_payload, &net_err, deadline)) {
+                    std::cerr << "taznode: the peer did not confirm the connection: " << net_err << "\n";
+                    return false;
+                }
+                if (accept_type != taz::kMsgAccept) {
+                    std::cerr << "taznode: the peer did not confirm the connection\n";
+                    return false;
+                }
             }
             std::cout << "taznode: peer accepted chain_id=" << theirs.chain_id
                       << " protocol=" << theirs.protocol_version
@@ -576,7 +669,8 @@ int main(int argc, char** argv) {
                 if (!round_ok) {
                     std::cerr << "taznode: " << net_err << "\n";
                 } else {
-                    round_ok = handle_peer(socket, true);
+                    const auto auth_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                    round_ok = handle_peer(socket, true, auth_deadline);
                     socket.close();
                 }
                 if (round_ok) {
@@ -608,17 +702,29 @@ int main(int argc, char** argv) {
             const std::uint64_t wanted = listen_port.empty() ? max_peers : 1;
             std::cout << "taznode: listening on 127.0.0.1:" << listener.port
                       << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << std::endl;   // v9.1: flushed, so a script that waits for this line (the tests do) is not left waiting in a stdio buffer
-            for (std::uint64_t served = 0; served < wanted; ++served) {
+            // Only a peer that proved what it had to prove and finished its exchange counts towards --max-peers.
+            // A refused or timed-out connection is not a served peer: otherwise a handful of anonymous connections
+            // would use up the quota and stop the node.
+            std::uint64_t served = 0;
+            while (served < wanted) {
                 taz::Socket peer;
                 if (!taz::accept_one(listener.socket, peer, &net_err)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     all_ok = false;
                     break;
                 }
-                // A peer that is not on our chain ends its own conversation, not the node.
-                if (!handle_peer(peer, false)) all_ok = false;
-                std::cout << "taznode: served " << (served + 1) << " of " << wanted
-                          << ", our height is now " << chain.height() << "\n";
+                // The ten seconds start when the connection is accepted, not at each read.
+                const auto auth_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                if (handle_peer(peer, false, auth_deadline)) {
+                    ++served;
+                    std::cout << "taznode: served " << served << " of " << wanted
+                              << ", our height is now " << chain.height() << std::endl;
+                } else {
+                    all_ok = false;
+                    // Flushed: a node that writes its progress into a buffer looks dead to anything watching it.
+                    std::cout << "taznode: refused one connection; still waiting for "
+                              << (wanted - served) << " peer(s)" << std::endl;
+                }
             }
         }
         taz::net_cleanup();

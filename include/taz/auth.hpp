@@ -19,7 +19,9 @@ static_assert(kAuthDomain.size() == 15, "the domain length is part of the signed
 
 // Canonical encoding: no separators, every variable-length field carries a u32 big-endian length, every integer
 // is fixed width big-endian. Length prefixes are what stop "ab"+"c" and "a"+"bc" from producing the same bytes.
-// The hello arguments are the exact bytes that travelled on the wire, not a re-encoding of them.
+// The hello arguments are the exact bytes that travelled: what this side sent, and what it received. Nothing is
+// re-encoded, so two honest nodes cannot disagree about the bytes they sign even if one orders the fields
+// differently from the other.
 std::string auth_transcript(const Hello& first, std::string_view first_hello_bytes,
                             const Hello& second, std::string_view second_hello_bytes);
 
