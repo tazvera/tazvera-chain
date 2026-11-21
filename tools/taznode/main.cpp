@@ -412,6 +412,10 @@ int main(int argc, char** argv) {
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
             taz::Hello ours = taz::hello_for(chain);   // current height, every time
+            if (!taz::hello_has_nonce(ours)) {         // v9.2: hello_for() promises this check (a failed random read leaves zero)
+                std::cerr << "taznode: could not get random bytes for the handshake nonce; refusing to talk to a peer\n";
+                return false;
+            }
             if (have_identity && !taz::sign_hello(ours, identity_sk)) {
                 std::cerr << "taznode: could not sign the handshake with the identity key\n";
                 return false;
