@@ -14,17 +14,20 @@ ForkDecision choose_chain(const Chain& mine, const Chain& theirs) {
     if (theirs.height() < mine.height())
         return {ForkChoice::KeepMine, "our chain is longer"};
 
-    const Hash32 mine_root = mine.state().state_root();
-    const Hash32 theirs_root = theirs.state().state_root();
-    if (mine_root == theirs_root) return {ForkChoice::SameChain, "same height and same state root"};
+    // The tip hash, not the state root: two different block histories can end at the same state (two unrelated
+    // transfers in a different order, for instance), and calling those "the same chain" would leave both nodes
+    // on different histories while each believed they agreed.
+    const Hash32 mine_tip = mine.blocks().back().hash();
+    const Hash32 theirs_tip = theirs.blocks().back().hash();
+    if (mine_tip == theirs_tip) return {ForkChoice::SameChain, "same height and same tip block"};
 
-    // Same height, same genesis, different state: two chains of the same age that disagree. Pick one by a rule
-    // both sides can compute, so they do not drift apart. Smaller root wins; the choice itself carries no
+    // Same height, same genesis, different history: two chains of the same age that disagree. Pick one by a rule
+    // both sides can compute, so they do not drift apart. The smaller tip hash wins; the choice carries no
     // security meaning, only agreement.
-    const bool theirs_wins = std::lexicographical_compare(theirs_root.begin(), theirs_root.end(),
-                                                         mine_root.begin(), mine_root.end());
+    const bool theirs_wins = std::lexicographical_compare(theirs_tip.begin(), theirs_tip.end(),
+                                                          mine_tip.begin(), mine_tip.end());
     return {theirs_wins ? ForkChoice::TakeTheirs : ForkChoice::KeepMine,
-            theirs_wins ? "same height, the peer's state root sorts first" : "same height, our state root sorts first"};
+            theirs_wins ? "same height, the peer's tip sorts first" : "same height, our tip sorts first"};
 }
 
 }  // namespace taz

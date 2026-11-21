@@ -83,12 +83,14 @@ static void f05_truncate_rebuilds_the_state() {
     CHECK(cut.state().nonce(o.addr) == 1);
     CHECK(cut.blocks().back().hash() == full.blocks()[1].hash());
 
-    // a rebuilt chain must accept exactly what the original accepted next
+    // a rebuilt chain must accept exactly what the original accepted next, and end up in the same place
     CHECK(cut.append_block({transfer(o, g.addr, 20, 1)}, ts + 100).ok);
+    CHECK(cut.append_block({transfer(o, g.addr, 30, 2)}, ts + 200).ok);
+    CHECK(cut.height() == full.height());
     CHECK(cut.state().balance(g.addr) == full.state().balance(g.addr));
-
-    // and it must be byte-identical to the original in what matters
-    CHECK(cut.blocks()[1].hash() == full.blocks()[1].hash());
+    CHECK(cut.state().nonce(o.addr) == full.state().nonce(o.addr));
+    CHECK(cut.state().state_root() == full.state().state_root());
+    CHECK(cut.blocks().back().hash() == full.blocks().back().hash());
 
     // edges: truncating to the current height changes nothing, growing is refused, 0 leaves genesis
     CHECK(full.truncate_to(3).ok);
@@ -115,6 +117,26 @@ static void f06_truncate_keeps_the_producers() {
     CHECK(cut.state().balance(g.addr) == 5);
 }
 
+// v9.0: the same state can come from two different histories. Comparing state roots would call those two
+// chains "the same" and leave both nodes on different histories while each believed they agreed.
+static void f07_same_state_different_history_is_not_the_same_chain() {
+    Key o = new_key(), g = new_key();
+    Chain a; CHECK(a.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain b; CHECK(b.init_genesis(o.addr, 100000, g.addr, 0));
+
+    // the same transfer, produced at two different times: identical state, different block hash
+    CHECK(a.append_block({transfer(o, g.addr, 7, 0)}, 5000).ok);
+    CHECK(b.append_block({transfer(o, g.addr, 7, 0)}, 6000).ok);
+
+    CHECK(a.state().state_root() == b.state().state_root());
+    CHECK(a.blocks().back().hash() != b.blocks().back().hash());
+
+    const ForkDecision ab = choose_chain(a, b);
+    CHECK(ab.choice != ForkChoice::SameChain);          // the old rule said SameChain here
+    const ForkDecision ba = choose_chain(b, a);
+    CHECK((ab.choice == ForkChoice::KeepMine) == (ba.choice == ForkChoice::TakeTheirs));
+}
+
 int main() {
     f01_unrelated_chains();
     f02_longer_wins_both_ways();
@@ -122,6 +144,7 @@ int main() {
     f04_equal_height_disagreement_is_decided_the_same_way();
     f05_truncate_rebuilds_the_state();
     f06_truncate_keeps_the_producers();
+    f07_same_state_different_history_is_not_the_same_chain();
     if (failures == 0) { std::cout << "fork tests: all passed\n"; return 0; }
     std::cerr << "fork tests: " << failures << " failure(s)\n";
     return 1;

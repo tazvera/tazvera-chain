@@ -13,7 +13,7 @@ namespace taz {
 // The rule, in order:
 //   1. a different genesis commitment is never a choice — the two chains are unrelated (refused);
 //   2. the longer chain wins;
-//   3. at equal height, the smaller state root wins (an arbitrary but fixed and verifiable tie-break);
+//   3. at equal height, the smaller tip hash wins (an arbitrary but fixed and verifiable tie-break);
 //   4. identical chains are the same chain.
 enum class ForkChoice { SameChain, KeepMine, TakeTheirs, DifferentChain };
 
