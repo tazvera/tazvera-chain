@@ -20,7 +20,7 @@ void put_bytes(std::string& out, std::span<const std::uint8_t> bytes) {
 
 // A field that is too long is a protocol error, not something to truncate.
 constexpr std::size_t kMaxChainIdBytes = 256;
-constexpr std::size_t kMaxHelloBytes = 4096;
+constexpr std::size_t kMaxTranscriptHelloBytes = 4096;   // not kMaxHelloBytes: hello.hpp already has one
 
 bool put_length_prefixed(std::string& out, std::string_view bytes, std::size_t limit) {
     if (bytes.size() > limit || bytes.size() > 0xffffffffull) return false;
@@ -62,8 +62,8 @@ std::string auth_transcript(const Hello& first, std::string_view first_hello_byt
     put_bytes(out, first.genesis_commitment);
     put_bytes(out, first.nonce);
     put_bytes(out, second.nonce);
-    if (!put_length_prefixed(out, first_hello_bytes, kMaxHelloBytes)) return {};
-    if (!put_length_prefixed(out, second_hello_bytes, kMaxHelloBytes)) return {};
+    if (!put_length_prefixed(out, first_hello_bytes, kMaxTranscriptHelloBytes)) return {};
+    if (!put_length_prefixed(out, second_hello_bytes, kMaxTranscriptHelloBytes)) return {};
     return out;
 }
 
