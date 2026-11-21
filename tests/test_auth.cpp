@@ -95,10 +95,22 @@ static void a04_any_change_breaks_it() {
     // note: the transcript covers the hello BYTES, not the object, so a changed height only matters through
     // those bytes — which the check above already exercises.
 
-    // a different chain commitment
-    Hello other_chain = a.hello;
-    other_chain.genesis_commitment[0] ^= 0xff;
-    CHECK(!auth_ok(message, auth_transcript(other_chain, a.bytes, b.hello, b.bytes)));
+    // a different chain commitment, on either side (which side is "first" depends on the random nonces)
+    Hello other_a = a.hello;
+    other_a.genesis_commitment[0] ^= 0xff;
+    CHECK(!auth_ok(message, auth_transcript(other_a, a.bytes, b.hello, b.bytes)));
+    Hello other_b = b.hello;
+    other_b.genesis_commitment[0] ^= 0xff;
+    CHECK(!auth_ok(message, auth_transcript(a.hello, a.bytes, other_b, b.bytes)));
+    // a different protocol version or chain ID, on either side
+    Hello proto_a = a.hello; proto_a.protocol_version += 1;
+    CHECK(!auth_ok(message, auth_transcript(proto_a, a.bytes, b.hello, b.bytes)));
+    Hello proto_b = b.hello; proto_b.protocol_version += 1;
+    CHECK(!auth_ok(message, auth_transcript(a.hello, a.bytes, proto_b, b.bytes)));
+    Hello id_a = a.hello; id_a.chain_id += "x";
+    CHECK(!auth_ok(message, auth_transcript(id_a, a.bytes, b.hello, b.bytes)));
+    Hello id_b = b.hello; id_b.chain_id += "x";
+    CHECK(!auth_ok(message, auth_transcript(a.hello, a.bytes, id_b, b.bytes)));
 }
 
 // Replay: the same hellos, but one nonce is fresh. The transcript differs, so the recorded proof is useless.

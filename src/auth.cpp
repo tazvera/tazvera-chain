@@ -65,13 +65,17 @@ std::string auth_transcript(const Hello& one, std::string_view one_hello_bytes,
     const std::string_view second_hello_bytes = one_first ? two_hello_bytes : one_hello_bytes;
 
     std::string out;
-    out.reserve(kAuthDomain.size() + 4 + 4 + first.chain_id.size() + 32 + 32 + 32 +
+    out.reserve(kAuthDomain.size() + 2 * (4 + 4 + 32) + first.chain_id.size() + second.chain_id.size() + 32 + 32 +
                 first_hello_bytes.size() + second_hello_bytes.size() + 8);
     out.append(kAuthDomain.data(), kAuthDomain.size());
-    put_u32be(out, first.protocol_version);
-    // The chain identity is checked separately; it is included here so a signature cannot be moved to another chain.
-    if (!put_length_prefixed(out, first.chain_id, kMaxChainIdBytes)) return {};
-    put_bytes(out, first.genesis_commitment);
+    // The chain identity of BOTH sides, so a signature cannot be moved to another chain whichever side differs.
+    // (v9.2: before this only the lower-nonce side was covered by the fields; the other side relied on its raw
+    // hello bytes alone, and a test that changed the other side's fields passed or failed by coin flip.)
+    for (const Hello* h : {&first, &second}) {
+        put_u32be(out, h->protocol_version);
+        if (!put_length_prefixed(out, h->chain_id, kMaxChainIdBytes)) return {};
+        put_bytes(out, h->genesis_commitment);
+    }
     put_bytes(out, first.nonce);
     put_bytes(out, second.nonce);
     if (!put_length_prefixed(out, first_hello_bytes, kMaxHelloBytes)) return {};
