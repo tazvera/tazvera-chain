@@ -342,13 +342,16 @@ int main(int argc, char** argv) {
             constexpr auto kSyncTimeBudget = std::chrono::seconds(60);
             constexpr std::size_t kSyncByteBudget = 4u * 1024u * 1024u;
             const auto started = std::chrono::steady_clock::now();
+            // Passed into every read, so a peer that trickles bytes is cut off at the deadline itself rather
+            // than three seconds after each of its bytes.
+            const taz::Deadline deadline = started + kSyncTimeBudget;
             std::size_t bytes = 0;
             std::uint64_t added = 0;
             bool ok = true;
             for (std::uint64_t n = 0; n < wanted && ok; ++n) {
                 std::uint8_t type = 0;
                 std::string payload;
-                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                if (!taz::recv_message(sock, type, payload, &net_err, deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     ok = false;
                     break;
@@ -359,7 +362,7 @@ int main(int argc, char** argv) {
                     break;
                 }
                 bytes += payload.size();
-                if (bytes > kSyncByteBudget || std::chrono::steady_clock::now() - started > kSyncTimeBudget) {
+                if (bytes > kSyncByteBudget) {
                     std::cout << "taznode: sync budget reached after " << added
                               << " block(s); the rest waits for the next round\n";
                     break;

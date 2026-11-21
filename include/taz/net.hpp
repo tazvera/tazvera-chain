@@ -1,5 +1,6 @@
 #pragma once
 #include "taz/hello.hpp"
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -67,10 +68,16 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error = nullpt
 
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
-bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr);
+// A deadline of TimePoint::max() means "no deadline beyond the per-call socket timeout". Anything else is an
+// absolute point in time: a peer that keeps trickling bytes is cut off there, not three seconds after each one.
+using Deadline = std::chrono::steady_clock::time_point;
+inline Deadline no_deadline() { return Deadline::max(); }
+bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr,
+                Deadline deadline = no_deadline());
 
 bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error = nullptr);
-bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr);
+bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
+                  Deadline deadline = no_deadline());
 
 // One side of the handshake. `send_first` must be true on exactly one of the two ends.
 bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error = nullptr);
