@@ -159,6 +159,18 @@ static void a07_auth_message_is_strict() {
     CHECK(!auth_ok(message, ""));                                                 // empty transcript
 }
 
+static void a08_zero_nonce_is_refused() {
+    const Chain chain = make_chain(1000);
+    const Hello ours = hello_for(chain);
+    Hello theirs = hello_for(chain);
+    CHECK(hello_has_nonce(ours));
+    CHECK(check_peer(ours, theirs).ok);          // a normal peer is fine
+    theirs.nonce = Hash32{};
+    const HandshakeDecision d = check_peer(ours, theirs);
+    CHECK(!d.ok);
+    CHECK(d.reason.find("nonce") != std::string::npos);
+}
+
 int main() {
     CHECK(kAuthDomain.size() == 15);   // the domain length is part of what is signed
     a01_transcript_is_deterministic();
@@ -168,6 +180,7 @@ int main() {
     a05_replay_and_reflection();
     a06_nonces_are_fresh_and_32_bytes();
     a07_auth_message_is_strict();
+    a08_zero_nonce_is_refused();
     if (failures == 0) { std::cout << "auth tests: all passed\n"; return 0; }
     std::cerr << "auth tests: " << failures << " failure(s)\n";
     return 1;

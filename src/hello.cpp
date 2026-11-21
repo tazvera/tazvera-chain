@@ -189,6 +189,9 @@ HandshakeDecision check_peer(const Hello& ours, const Hello& theirs) {
     if (theirs.chain_id != ours.chain_id) return {false, "different chain ID"};
     if (theirs.protocol_version != ours.protocol_version) return {false, "different protocol version"};
     if (theirs.genesis_commitment != ours.genesis_commitment) return {false, "different genesis commitment"};
+    // v9.2: an all-zero nonce is what a failed random read leaves behind (or what a lazy peer sends). It would make
+    // any identity proof on this connection replayable, so it is not accepted from the peer either.
+    if (!hello_has_nonce(theirs)) return {false, "peer sent an all-zero nonce"};
     return {true, {}};
 }
 
