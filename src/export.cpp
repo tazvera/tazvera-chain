@@ -27,6 +27,45 @@ std::string num(std::uint64_t v) { return q(std::to_string(v)); }
 std::string snum(std::int64_t v) { return q(std::to_string(v)); }
 }
 
+std::string block_to_json(const Block& b) {
+    std::string j;
+    j += "    {\n";
+    j += "      \"height\": " + num(b.height) + ",\n";
+    j += "      \"protocol_version\": " + num(b.protocol_version) + ",\n";
+    j += "      \"chain_id\": " + q(b.chain_id) + ",\n";
+    j += "      \"previous_hash\": " + hex(b.previous_hash) + ",\n";
+    if (b.producer != Address{}) {
+        j += "      \"producer\": " + hex(b.producer) + ",\n";
+        j += "      \"producer_pubkey\": " + hex(b.producer_pubkey) + ",\n";
+        j += "      \"producer_signature\": " + hex(b.producer_signature) + ",\n";
+    }
+    j += "      \"timestamp\": " + snum(b.timestamp) + ",\n";
+    j += "      \"state_root\": " + hex(b.state_root) + ",\n";
+    j += "      \"hash\": " + hex(b.hash()) + ",\n";
+    j += "      \"transactions\": [";
+    for (std::size_t t = 0; t < b.transactions.size(); ++t) {
+        const Transaction& tx = b.transactions[t];
+        j += std::string(t ? "," : "") + "\n        {";
+        j += "\"txid\": " + hex(tx.txid()) + ", ";
+        j += "\"protocol_version\": " + num(tx.protocol_version) + ", ";
+        j += "\"chain_id\": " + q(tx.chain_id) + ", ";
+        j += "\"kind\": " + num(static_cast<std::uint8_t>(tx.kind)) + ", ";
+        j += "\"from\": " + hex(tx.from) + ", \"to\": " + hex(tx.to) + ", ";
+        j += "\"amount\": " + num(tx.amount) + ", \"fee\": " + num(tx.fee) + ", ";
+        j += "\"nonce\": " + num(tx.nonce) + ", \"expiry_height\": " + num(tx.expiry_height) + ", ";
+        j += "\"daily_limit\": " + num(tx.daily_limit) + ", \"hold_threshold\": " + num(tx.hold_threshold) + ", ";
+        j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", \"ref\": " + hex(tx.ref) + ", ";
+        j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
+        for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
+        j += "], ";
+        j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
+    }
+    // Same bytes as before this was lifted out of to_json: a block with no transactions closes the array on
+    // the same line. The export test compares files byte for byte, which is how this was caught.
+    j += b.transactions.empty() ? "]\n    }" : "\n      ]\n    }";
+    return j;
+}
+
 std::string to_json(const Chain& chain) {
     // Format label: v1 = plain transfers only, v2 = safety rules, v4 = guardian recovery with the veto key (Core v7 rules).
     // "v3" is deliberately never written: Core v6 used it for guardian chains WITHOUT the veto key, whose signatures
@@ -69,40 +108,9 @@ std::string to_json(const Chain& chain) {
     }
     j += "  \"blocks\": [";
     for (std::size_t i = 0; i < chain.blocks().size(); ++i) {
-        const Block& b = chain.blocks()[i];
-        j += std::string(i ? "," : "") + "\n    {\n";
-        j += "      \"height\": " + num(b.height) + ",\n";
-        j += "      \"protocol_version\": " + num(b.protocol_version) + ",\n";
-        j += "      \"chain_id\": " + q(b.chain_id) + ",\n";
-        j += "      \"previous_hash\": " + hex(b.previous_hash) + ",\n";
-        // v9: only a block that claims a producer carries these, so a v8 chain exports byte for byte as before.
-        if (b.producer != Address{}) {
-            j += "      \"producer\": " + hex(b.producer) + ",\n";
-            j += "      \"producer_pubkey\": " + hex(b.producer_pubkey) + ",\n";
-            j += "      \"producer_signature\": " + hex(b.producer_signature) + ",\n";
-        }
-        j += "      \"timestamp\": " + snum(b.timestamp) + ",\n";
-        j += "      \"state_root\": " + hex(b.state_root) + ",\n";
-        j += "      \"hash\": " + hex(b.hash()) + ",\n";
-        j += "      \"transactions\": [";
-        for (std::size_t t = 0; t < b.transactions.size(); ++t) {
-            const Transaction& tx = b.transactions[t];
-            j += std::string(t ? "," : "") + "\n        {";
-            j += "\"txid\": " + hex(tx.txid()) + ", ";
-            j += "\"protocol_version\": " + num(tx.protocol_version) + ", ";
-            j += "\"chain_id\": " + q(tx.chain_id) + ", ";
-            j += "\"kind\": " + num(static_cast<std::uint8_t>(tx.kind)) + ", ";
-            j += "\"from\": " + hex(tx.from) + ", \"to\": " + hex(tx.to) + ", ";
-            j += "\"amount\": " + num(tx.amount) + ", \"fee\": " + num(tx.fee) + ", ";
-            j += "\"nonce\": " + num(tx.nonce) + ", \"expiry_height\": " + num(tx.expiry_height) + ", ";
-            j += "\"daily_limit\": " + num(tx.daily_limit) + ", \"hold_threshold\": " + num(tx.hold_threshold) + ", ";
-            j += "\"hold_blocks\": " + num(tx.hold_blocks) + ", \"ref\": " + hex(tx.ref) + ", ";
-            j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
-            for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
-            j += "], ";
-            j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
-        }
-        j += b.transactions.empty() ? "]\n    }" : "\n      ]\n    }";
+        // One writer for a block, shared with block-by-block sync: two copies of this would drift, and the
+        // loader is strict enough that a drift shows up as "the file cannot be read".
+        j += std::string(i ? "," : "") + "\n" + block_to_json(chain.blocks()[i]);
     }
     j += "\n  ]\n}\n";
     return j;

@@ -273,68 +273,83 @@ int main(int argc, char** argv) {
         // Built per peer, not once: after adopting a peer's chain our height changes, and telling the next peer
         // the old height would be a lie it acts on.
 
-        auto offer_chain = [&](taz::Socket& sock) -> bool {
-            const std::string text = taz::to_json(chain);
-            if (text.size() > taz::kMaxPayloadBytes) {
-                std::cerr << "taznode: our chain is larger than one message; multi-message sync is not built yet\n";
-                return false;
+        // Block-by-block sync: the node that is ahead sends only the blocks the other one is missing, one
+        // message each. The receiver knows how many to expect from the hello heights, so no end marker is
+        // needed, and every block goes through accept_block() — the same validation a block from disk gets.
+        constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next poll continues
+        auto send_blocks = [&](taz::Socket& sock, std::uint64_t from_height) -> bool {
+            const std::uint64_t missing = chain.height() - from_height;
+            const std::uint64_t send = std::min(missing, kMaxBlocksPerSync);
+            for (std::uint64_t n = 0; n < send; ++n) {
+                const std::uint64_t wanted = from_height + 1 + n;
+                const taz::Block* found = nullptr;
+                for (const taz::Block& b : chain.blocks())
+                    if (b.height == wanted) { found = &b; break; }
+                if (found == nullptr) {
+                    std::cerr << "taznode: our own chain is missing block " << wanted << "\n";
+                    return false;
+                }
+                const std::string text = taz::block_to_json(*found);
+                if (text.size() > taz::kMaxPayloadBytes) {
+                    std::cerr << "taznode: block " << wanted << " is larger than one message\n";
+                    return false;
+                }
+                if (!taz::send_message(sock, taz::kMsgBlocks, text, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
             }
-            if (!taz::send_message(sock, taz::kMsgChain, text, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                return false;
-            }
-            std::cout << "taznode: offered our chain height=" << chain.height() << " bytes=" << text.size() << "\n";
+            std::cout << "taznode: sent " << send << " block(s) from height " << (from_height + 1) << "\n";
+            if (missing > send)
+                std::cout << "taznode: " << (missing - send) << " block(s) left for the next sync\n";
             return true;
         };
-        auto receive_chain = [&](taz::Socket& sock) -> bool {
-            std::uint8_t type = 0;
-            std::string payload;
-            if (!taz::recv_message(sock, type, payload, &net_err)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                return false;
+        auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
+            const std::uint64_t wanted = std::min(expected, kMaxBlocksPerSync);
+            std::uint64_t added = 0;
+            bool ok = true;
+            for (std::uint64_t n = 0; n < wanted && ok; ++n) {
+                std::uint8_t type = 0;
+                std::string payload;
+                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    ok = false;
+                    break;
+                }
+                if (type != taz::kMsgBlocks) {
+                    std::cerr << "taznode: the peer sent a message we did not ask for\n";
+                    ok = false;
+                    break;
+                }
+                taz::Block block;
+                std::string why;
+                if (!taz::parse_block_text(payload, block, &why)) {
+                    std::cerr << "taznode: the peer sent a block we cannot read: " << why << "\n";
+                    ok = false;
+                    break;
+                }
+                const taz::ChainResult result = chain.accept_block(block);
+                if (!result.ok) {
+                    std::cerr << "taznode: the peer sent a block we cannot accept: " << result.error << "\n";
+                    ok = false;
+                    break;
+                }
+                ++added;
             }
-            if (type != taz::kMsgChain) {
-                std::cerr << "taznode: the peer did not offer a chain\n";
-                return false;
+            // Save whatever was accepted, even when the batch broke in the middle: a block that is in memory but
+            // not on disk is a chain that disagrees with its own file after a crash.
+            if (added > 0) {
+                std::string save_err;
+                if (!taz::save_chain_json(chain, chain_file, &save_err)) {
+                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
+                    return false;
+                }
             }
-            taz::Chain incoming;
-            std::string load_err;
-            if (!taz::load_chain_json_text(payload, incoming, &load_err)) {
-                std::cerr << "taznode: the peer's chain is not valid: " << load_err << "\n";
-                return false;
-            }
-            constexpr std::uint64_t kMaxSyncAhead = 1000;
-            if (incoming.height() > chain.height() + kMaxSyncAhead) {
-                std::cerr << "taznode: the peer's chain is " << (incoming.height() - chain.height())
-                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused\n";
-                return false;
-            }
-            const taz::ForkDecision fork = taz::choose_chain(chain, incoming);
-            if (fork.choice == taz::ForkChoice::DifferentChain) {
-                std::cerr << "taznode: the peer's chain has a different genesis; refused\n";
-                return false;
-            }
-            if (fork.choice == taz::ForkChoice::SameChain) {
-                std::cout << "taznode: the peer has the same chain (height " << chain.height() << ")\n";
-                return true;
-            }
-            if (fork.choice == taz::ForkChoice::KeepMine) {
-                std::cout << "taznode: kept our chain (" << fork.reason << ", height " << chain.height()
-                          << ", peer offered " << incoming.height() << ")\n";
-                if (incoming.height() == chain.height())
-                    std::cerr << "taznode: warning: the peer disagrees at the same height - possible fork\n";
-                return true;
-            }
-            std::string save_err;
-            if (!taz::save_chain_json(incoming, chain_file, &save_err)) {
-                std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
-                return false;
-            }
-            std::cout << "taznode: adopted the peer's chain height=" << incoming.height()
-                      << " (" << fork.reason << ")\n";
-            chain = std::move(incoming);
-            return true;
+            if (added > 0)
+                std::cout << "taznode: accepted " << added << " block(s), height is now " << chain.height() << "\n";
+            return ok;
         };
+
         // One conversation with one peer: handshake, decide, sync both ways. Returns false when the peer is not
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first) -> bool {
@@ -363,16 +378,24 @@ int main(int argc, char** argv) {
                 std::cout << "taznode: already in sync at height " << chain.height() << "; nothing to send\n";
                 return true;
             }
-            // Refuse before receiving: the hello already states the peer's height, and loading a chain replays
-            // every block. Checking after the load spends the CPU the limit exists to save.
+            // Refuse before receiving: the hello already states the peer's height, and every block is replayed.
             constexpr std::uint64_t kMaxSyncAhead = 1000;
             if (theirs.best_height > chain.height() + kMaxSyncAhead) {
                 std::cerr << "taznode: the peer claims to be " << (theirs.best_height - chain.height())
                           << " blocks ahead; more than " << kMaxSyncAhead << " is refused before syncing\n";
                 return false;
             }
-            return we_speak_first ? (offer_chain(sock) && receive_chain(sock))
-                                  : (receive_chain(sock) && offer_chain(sock));
+            // Both sides see the same two hellos, so both compute the same direction: the one that is ahead
+            // sends, the one that is behind receives. Nobody waits for data the other decided not to send.
+            if (chain.height() > theirs.best_height)
+                return send_blocks(sock, theirs.best_height);
+            if (theirs.best_height > chain.height())
+                return receive_blocks(sock, theirs.best_height - chain.height());
+            // Same height, same genesis, different tip: two chains of the same age that disagree. Keeping ours
+            // and saying so is all this build can honestly do — choosing needs a rule that does not exist yet.
+            std::cerr << "taznode: warning: same height (" << chain.height()
+                      << ") but a different tip block - possible fork, keeping our chain\n";
+            return true;
         };
 
         std::uint64_t every = 0;
