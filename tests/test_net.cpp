@@ -66,7 +66,7 @@ static void n01_handshake_ok() {
     CHECK(got_server_side.chain_id == client_hello.chain_id);
     CHECK(got_client_side.genesis_commitment == server_hello.genesis_commitment);
     CHECK(check_peer(server_hello, got_server_side).ok);   // same chain: accepted
-    CHECK(check_peer(server_hello, got_client_side).ok);
+    CHECK(check_peer(client_hello, got_client_side).ok);   // the client judges what it received (v9.2: checking the server's own hello against itself is a reflection, and is refused)
 }
 
 static void n02_wrong_chain_refused() {
