@@ -107,8 +107,16 @@ static bool run_in_background(const std::string& command, const std::string& out
 }
 
 // Start a command in the foreground with its output in a file.
+//
+// On Windows the command must go through cmd /c explicitly, with the same quoting as run_in_background. Handing
+// std::system a command that already starts with a quoted program path lets cmd strip the wrong quotes, and the
+// call then waits for something that never finishes — which is exactly how the first Windows run hung.
 static int run_waiting(const std::string& command, const std::string& out) {
+#ifdef _WIN32
+    const std::string full = "cmd /c \"" + command + " > \"" + out + "\" 2>&1\"";
+#else
     const std::string full = command + " > \"" + out + "\" 2>&1";
+#endif
     return std::system(full.c_str());
 }
 static std::string pin(const Chain& c) { return to_hex(c.genesis_commitment()); }
@@ -136,7 +144,8 @@ static std::string sync_run(const fs::path& dir, const Chain& a, const Chain& b,
     CHECK(run_in_background(a_cmd, out));
     CHECK(wait_for(out, "listening", 10));
     const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port);
-    if (run_waiting(b_cmd, (dir / "b.out").string()) != 0) std::cerr << "  (the connecting node exited non-zero)\n";
+    const int b_rc = run_waiting(b_cmd, (dir / "b.out").string());
+    if (b_rc != 0) std::cerr << "  (the connecting node exited with " << b_rc << ")\n";
     const std::string wanted_line = expect_served ? "served 1 of 1" : "still waiting for 1 peer(s)";
     if (!wait_for(out, wanted_line, 20)) {
         std::cerr << "  the serving node never reported \"" << wanted_line << "\". Its output:\n" << slurp(out) << "\n";
