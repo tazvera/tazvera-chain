@@ -12,6 +12,7 @@
 #include "taz/persist.hpp"
 #include "taz/net.hpp"
 #include "taz/fork.hpp"
+#include "taz/auth.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
