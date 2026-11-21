@@ -70,7 +70,9 @@ std::string block_to_json(const Block& b) {
         j += "\"pubkey\": " + hex(tx.pubkey) + ", ";
         j += "\"signature\": " + hex(tx.signature) + "}";
     }
-    j += "\n      ]\n    }";
+    // Same bytes as before this was lifted out of to_json: a block with no transactions closes the array on
+    // the same line. The export test compares files byte for byte, which is how this was caught.
+    j += b.transactions.empty() ? "]\n    }" : "\n      ]\n    }";
     return j;
 }
 
