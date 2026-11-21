@@ -7,6 +7,13 @@
 namespace taz {
 namespace {
 
+template <std::size_t N>
+bool all_zero(const std::array<std::uint8_t, N>& a) {
+    for (std::uint8_t b : a)
+        if (b != 0) return false;
+    return true;
+}
+
 bool is_hex(const std::string& s) {
     if (s.empty()) return false;
     for (char c : s) {
@@ -20,6 +27,14 @@ int nib(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return c - 'A' + 10;
+}
+
+template <std::size_t N>
+bool parse_hex_n(const std::string& s, std::array<std::uint8_t, N>& out) {
+    if (s.size() != N * 2 || !is_hex(s)) return false;
+    for (std::size_t i = 0; i < N; ++i)
+        out[i] = static_cast<std::uint8_t>((nib(s[2 * i]) << 4) | nib(s[2 * i + 1]));
+    return true;
 }
 
 bool parse_hex32(const std::string& s, Hash32& out) {
@@ -52,8 +67,39 @@ std::string encode_hello(const Hello& hello) {
     out += "height=" + std::to_string(hello.best_height) + "\n";
     out += "root=" + to_hex(hello.state_root) + "\n";
     out += "tip=" + to_hex(hello.tip_hash) + "\n";
+    if (hello_has_identity(hello)) {
+        out += "pubkey=" + to_hex(hello.pubkey) + "\n";
+        if (!all_zero(hello.signature)) out += "signature=" + to_hex(hello.signature) + "\n";
+    }
     return out;
 }
+
+std::string hello_signable_bytes(const Hello& hello) {
+    // The same text the peer will receive, minus the signature line: what is signed is exactly what is read.
+    Hello copy = hello;
+    copy.signature = Signature{};
+    return encode_hello(copy);
+}
+
+bool sign_hello(Hello& hello, const PrivKey& private_seed) {
+    if (!public_from_private(private_seed, hello.pubkey)) return false;
+    const std::string bytes = hello_signable_bytes(hello);
+    return sign(private_seed, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                                           bytes.size()),
+                hello.signature);
+}
+
+bool hello_has_identity(const Hello& hello) { return !all_zero(hello.pubkey); }
+
+bool hello_signature_ok(const Hello& hello) {
+    if (!hello_has_identity(hello) || all_zero(hello.signature)) return false;
+    const std::string bytes = hello_signable_bytes(hello);
+    return verify(hello.pubkey,
+                  std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()),
+                  hello.signature);
+}
+
+Address hello_address(const Hello& hello) { return address_from_pubkey(hello.pubkey); }
 
 bool decode_hello(std::string_view text, Hello& out, std::string* why) {
     auto fail = [&](std::string message) {
@@ -76,7 +122,7 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
 
     Hello parsed;
     bool have_proto = false, have_chain = false, have_genesis = false, have_height = false;
-    bool have_root = false, have_tip = false;
+    bool have_root = false, have_tip = false, have_pubkey = false, have_signature = false;
     for (std::size_t i = 1; i < lines.size(); ++i) {
         const std::string& line = lines[i];
         if (line.empty()) continue;
@@ -111,12 +157,23 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
             if (have_tip) return fail("duplicate tip");
             if (!parse_hex32(value, parsed.tip_hash)) return fail("tip must be 64 hex characters");
             have_tip = true;
+        } else if (key == "pubkey") {
+            if (have_pubkey) return fail("duplicate pubkey");
+            if (!parse_hex32(value, parsed.pubkey)) return fail("pubkey must be 64 hex characters");
+            have_pubkey = true;
+        } else if (key == "signature") {
+            if (have_signature) return fail("duplicate signature");
+            if (!parse_hex_n(value, parsed.signature)) return fail("signature must be 128 hex characters");
+            have_signature = true;
         } else {
             return fail("unknown field \"" + key + "\"");
         }
     }
     if (!have_proto || !have_chain || !have_genesis || !have_height || !have_root || !have_tip)
         return fail("a required field is missing");
+    // Identity is optional, but half of it is a mistake: a key with no signature proves nothing, and a signature
+    // with no key cannot be checked.
+    if (have_pubkey != have_signature) return fail("pubkey and signature must be sent together");
     out = parsed;
     return true;
 }
