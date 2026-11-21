@@ -101,23 +101,61 @@ static void a04_any_change_breaks_it() {
     CHECK(!auth_ok(message, auth_transcript(other_chain, a.bytes, b.hello, b.bytes)));
 }
 
-static void a05_replay_and_reflection() {
+// Replay: the same hellos, but one nonce is fresh. The transcript differs, so the recorded proof is useless.
+static void a05_replay_fails() {
     const Chain chain = make_chain(1000);
     Side a = side_for(chain), b = side_for(chain);
     Key k = new_key();
-
     AuthMessage message;
     CHECK(sign_auth(message, k.sk, auth_transcript(a.hello, a.bytes, b.hello, b.bytes)));
 
-    // replay: same hellos, new nonce on our side -> a different transcript, so the old signature is useless
     Side fresh = side_for(chain);
+    CHECK(fresh.hello.nonce != b.hello.nonce);
     CHECK(!auth_ok(message, auth_transcript(a.hello, a.bytes, fresh.hello, fresh.bytes)));
-
-    // reflection: the same two messages in the other order are a different transcript
-    CHECK(!auth_ok(message, auth_transcript(b.hello, b.bytes, a.hello, a.bytes)));
 }
 
-static void a06_nonces_are_fresh_and_32_bytes() {
+// Reflection: a peer bounces OUR OWN hello (and our own proof) back at us. The transcript cannot tell the two sides
+// apart (it is ordered by nonce, so it is the same whichever way round it is built), so the defence is the nonce
+// rule: a peer whose nonce equals ours is refused. See a13. Here: a proof made for the real pair (a, b) is useless
+// for the reflected pair (a, a), because the transcripts differ.
+static void a06_reflection_fails() {
+    const Chain chain = make_chain(1000);
+    Side a = side_for(chain), b = side_for(chain);
+    Key k = new_key();
+    AuthMessage message;
+    const std::string real = auth_transcript(a.hello, a.bytes, b.hello, b.bytes);
+    CHECK(sign_auth(message, k.sk, real));
+    const std::string bounced = auth_transcript(a.hello, a.bytes, a.hello, a.bytes);
+    CHECK(bounced != real);
+    CHECK(!auth_ok(message, bounced));
+}
+
+// Mutual: both sides sign the same transcript with their own key, and each verifies the other's proof. Two
+// different keys, two different messages, one transcript.
+static void a07_mutual_verification() {
+    const Chain chain = make_chain(1000);
+    Side a = side_for(chain), b = side_for(chain);
+    const std::string transcript = auth_transcript(a.hello, a.bytes, b.hello, b.bytes);
+    CHECK(!transcript.empty());
+
+    Key ka = new_key(), kb = new_key();
+    AuthMessage from_a, from_b;
+    CHECK(sign_auth(from_a, ka.sk, transcript));
+    CHECK(sign_auth(from_b, kb.sk, transcript));
+
+    CHECK(from_a.pubkey != from_b.pubkey);
+    CHECK(from_a.signature != from_b.signature);
+    CHECK(auth_ok(from_a, transcript));       // B checks A
+    CHECK(auth_ok(from_b, transcript));       // A checks B
+
+    // a proof is bound to its key: claiming the other side's identity with your own signature fails
+    AuthMessage impostor;
+    CHECK(sign_auth(impostor, kb.sk, transcript));
+    impostor.pubkey = ka.pk;                  // say "I am A", but sign with B's key
+    CHECK(!auth_ok(impostor, transcript));
+}
+
+static void a08_nonces_are_fresh_and_32_bytes() {
     const Chain chain = make_chain(1000);
     Side one = side_for(chain), two = side_for(chain), three = side_for(chain);
 
@@ -141,7 +179,7 @@ static void a06_nonces_are_fresh_and_32_bytes() {
     CHECK(back.nonce == one.hello.nonce);
 }
 
-static void a07_auth_message_is_strict() {
+static void a09_auth_message_is_strict() {
     Key k = new_key();
     AuthMessage message;
     CHECK(sign_auth(message, k.sk, "some transcript"));
@@ -159,7 +197,43 @@ static void a07_auth_message_is_strict() {
     CHECK(!auth_ok(message, ""));                                                 // empty transcript
 }
 
-static void a08_zero_nonce_is_refused() {
+// The order the caller passes must not matter: the transcript sorts by nonce. Without this, a caller that passed
+// the arguments the same way on both sides would open a reflection hole.
+static void a10_argument_order_does_not_matter() {
+    const Chain chain = make_chain(1000);
+    Side a = side_for(chain), b = side_for(chain);
+    const std::string one_way = auth_transcript(a.hello, a.bytes, b.hello, b.bytes);
+    const std::string other_way = auth_transcript(b.hello, b.bytes, a.hello, a.bytes);
+    CHECK(!one_way.empty());
+    CHECK(one_way == other_way);
+
+    Key k = new_key();
+    AuthMessage message;
+    CHECK(sign_auth(message, k.sk, one_way));
+    CHECK(auth_ok(message, other_way));      // a proof made from one ordering verifies against the other
+}
+
+// An all-zero key is not an identity. Ed25519 accepts an all-zero seed as a valid key, so this has to be refused
+// explicitly or an uninitialised PrivKey{} would happily sign.
+static void a11_all_zero_keys_are_refused() {
+    const Chain chain = make_chain(1000);
+    Side a = side_for(chain), b = side_for(chain);
+    const std::string transcript = auth_transcript(a.hello, a.bytes, b.hello, b.bytes);
+
+    const PrivKey zero_seed{};
+    AuthMessage message;
+    CHECK(!sign_auth(message, zero_seed, transcript));
+
+    AuthMessage zero_key;
+    CHECK(!auth_ok(zero_key, transcript));   // all-zero pubkey
+
+    Key k = new_key();
+    AuthMessage good;
+    CHECK(sign_auth(good, k.sk, transcript));
+    CHECK(auth_ok(good, transcript));
+}
+
+static void a12_zero_nonce_is_refused() {
     const Chain chain = make_chain(1000);
     const Hello ours = hello_for(chain);
     Hello theirs = hello_for(chain);
@@ -171,16 +245,34 @@ static void a08_zero_nonce_is_refused() {
     CHECK(d.reason.find("nonce") != std::string::npos);
 }
 
+// The order-independent transcript has one consequence: our own proof, bounced back, would verify against the
+// transcript we build (it is the same bytes). The only thing that stops that is refusing a peer whose nonce is ours.
+static void a13_reflected_hello_is_refused() {
+    const Chain chain = make_chain(1000);
+    const Hello ours = hello_for(chain);
+    Hello bounced = ours;                         // exactly what a reflecting peer would send
+    const HandshakeDecision d = check_peer(ours, bounced);
+    CHECK(!d.ok);
+    CHECK(d.reason.find("nonce") != std::string::npos);
+    const Hello other = hello_for(chain);         // a genuine peer has its own fresh nonce
+    CHECK(check_peer(ours, other).ok);
+}
+
 int main() {
     CHECK(kAuthDomain.size() == 15);   // the domain length is part of what is signed
     a01_transcript_is_deterministic();
     a02_length_prefixes_remove_ambiguity();
     a03_signature_round_trip();
     a04_any_change_breaks_it();
-    a05_replay_and_reflection();
-    a06_nonces_are_fresh_and_32_bytes();
-    a07_auth_message_is_strict();
-    a08_zero_nonce_is_refused();
+    a05_replay_fails();
+    a06_reflection_fails();
+    a07_mutual_verification();
+    a08_nonces_are_fresh_and_32_bytes();
+    a09_auth_message_is_strict();
+    a10_argument_order_does_not_matter();
+    a11_all_zero_keys_are_refused();
+    a12_zero_nonce_is_refused();
+    a13_reflected_hello_is_refused();
     if (failures == 0) { std::cout << "auth tests: all passed\n"; return 0; }
     std::cerr << "auth tests: " << failures << " failure(s)\n";
     return 1;

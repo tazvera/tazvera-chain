@@ -192,6 +192,9 @@ HandshakeDecision check_peer(const Hello& ours, const Hello& theirs) {
     // v9.2: an all-zero nonce is what a failed random read leaves behind (or what a lazy peer sends). It would make
     // any identity proof on this connection replayable, so it is not accepted from the peer either.
     if (!hello_has_nonce(theirs)) return {false, "peer sent an all-zero nonce"};
+    // v9.2: the same nonce as ours means our own hello was bounced back (reflection). The transcript is ordered by nonce,
+    // so it cannot tell the two sides apart; this rule is what stops our own proof from being believed.
+    if (theirs.nonce == ours.nonce) return {false, "peer nonce equals ours (reflected hello)"};
     return {true, {}};
 }
 

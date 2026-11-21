@@ -37,6 +37,8 @@ inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export f
 inline constexpr std::uint8_t kMsgBlocks = 3;  // one block, as the export format writes it
 inline constexpr std::uint8_t kMsgWant = 4;    // "give me your block at this height" (decimal payload)
 inline constexpr std::uint8_t kMsgNoBlock = 5; // "I do not have that block"
+inline constexpr std::uint8_t kMsgAuth = 6;    // an identity proof bound to this connection
+inline constexpr std::uint8_t kMsgAccept = 7;  // the accepter confirming it will talk to this peer
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.
@@ -80,11 +82,14 @@ inline Deadline no_deadline() { return Deadline::max(); }
 bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr,
                 Deadline deadline = no_deadline());
 
-bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error = nullptr);
+bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error = nullptr,
+                  Deadline deadline = no_deadline());
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
                   Deadline deadline = no_deadline());
 
 // One side of the handshake. `send_first` must be true on exactly one of the two ends.
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error = nullptr);
+bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first,
+                    std::string* error = nullptr, Deadline deadline = no_deadline(),
+                    std::string* their_raw_hello = nullptr);
 
 }  // namespace taz

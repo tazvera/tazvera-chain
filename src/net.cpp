@@ -251,7 +251,23 @@ bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::
     return true;
 }
 
-bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error) {
+bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error,
+                  Deadline deadline) {
+    // The send side gets the same treatment as the receive side: if the connection has a deadline, the time left
+    // becomes the socket timeout, so a peer that stops reading cannot hold a send past it.
+    if (deadline != no_deadline()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            if (error) *error = "the peer took longer than the time allowed for this exchange";
+            return false;
+        }
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+        if (!set_timeout_ms(socket, ms, nullptr)) {
+            if (error) *error = "could not set the socket timeouts";
+            return false;
+        }
+    }
     if (payload.size() > kMaxPayloadBytes) {
         if (error) *error = "the message is larger than this transport allows";
         return false;
@@ -280,12 +296,13 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
     return recv_exact(socket, length, payload, error, deadline);
 }
 
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error) {
+bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error,
+                    Deadline deadline, std::string* their_raw_hello) {
     std::uint8_t type = 0;
     std::string payload;
-    auto send_ours = [&]() { return send_message(socket, kMsgHello, encode_hello(ours), error); };
+    auto send_ours = [&]() { return send_message(socket, kMsgHello, encode_hello(ours), error, deadline); };
     auto recv_theirs = [&]() {
-        if (!recv_message(socket, type, payload, error)) return false;
+        if (!recv_message(socket, type, payload, error, deadline)) return false;
         if (type != kMsgHello) {
             if (error) *error = "the peer did not start with a hello";
             return false;
@@ -295,6 +312,8 @@ bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool
             if (error) *error = "the peer sent a hello this node cannot read: " + why;
             return false;
         }
+        // The bytes that actually arrived: the transcript signs these, not a re-encoding of them.
+        if (their_raw_hello) *their_raw_hello = payload;
         return true;
     };
     if (send_first) return send_ours() && recv_theirs();
