@@ -11,6 +11,7 @@
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
+#include <thread>
 #include <iostream>
 #include <string>
 
@@ -112,6 +113,46 @@ static void n04_garbage_refused() {
     CHECK(!err.empty());
 }
 
+// v9.2: a peer that sends a VALID message and then dribbles its payload must still be cut off at the absolute
+// deadline. The valid header matters: with garbage the parser rejects the message as soon as the type byte
+// arrives, which is a different behaviour and proves nothing about the deadline.
+static void n06_slow_peer_is_cut_at_the_deadline() {
+    Listener listener;
+    Socket server, client;
+    std::string err;
+    CHECK(listen_loopback(0, listener, &err));
+    CHECK(connect_loopback(listener.port, client, &err));
+
+    // A real frame: length 100 (big-endian), type 0x02, and then the payload one byte at a time.
+    const std::string header = std::string(3, '\0') + std::string(1, '\x64');
+    CHECK(send_all(client, header, &err));
+    CHECK(send_all(client, std::string(1, '\x02'), &err));
+
+    // One byte a second is comfortably faster than the socket's three-second timeout, so every read succeeds and
+    // the only thing that can stop this is the deadline itself.
+    std::thread dribbler([&] {
+        for (int i = 0; i < 100; ++i) {
+            if (!send_all(client, std::string(1, 'x'), nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+    });
+
+    CHECK(accept_one(listener.socket, server, &err));
+    std::uint8_t type = 0;
+    std::string payload;
+    const auto started = std::chrono::steady_clock::now();
+    const bool got = recv_message(server, type, payload, &err, started + std::chrono::milliseconds(10000));
+    const auto took =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+
+    CHECK(!got);                                 // it must not be allowed to finish
+    // Milliseconds, not seconds: rounding to seconds hides exactly the difference this test is looking for.
+    CHECK(took.count() >= 9000);                 // without a deadline this would run the full hundred seconds
+    CHECK(took.count() <= 25000);                // nor hang past the deadline by much
+    std::cout << "  a dribbling peer was cut off after " << took.count() << " ms\n";
+    dribbler.join();
+}
+
 static void n05_closed_port_is_an_error() {
     Listener listener; std::string err;
     CHECK(listen_loopback(0, listener, &err));
@@ -169,6 +210,7 @@ int main() {
     n03_oversize_refused();
     n04_garbage_refused();
     n05_closed_port_is_an_error();
+    n06_slow_peer_is_cut_at_the_deadline();
     n06_send_to_closed_peer_is_an_error();
     n07_deadline_cuts_off_a_slow_peer();
     net_cleanup();
