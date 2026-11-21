@@ -1,6 +1,5 @@
 #pragma once
 #include "taz/hello.hpp"
-#include <chrono>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -29,7 +28,9 @@ inline constexpr socket_t kInvalidSocket = -1;
 inline constexpr std::uint32_t kMaxPayloadBytes = 64 * 1024;   // one message, not a stream
 inline constexpr std::uint8_t kMsgHello = 1;
 inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export format writes it
-inline constexpr std::uint8_t kMsgBlocks = 3;  // the blocks a peer is missing, as a JSON array
+inline constexpr std::uint8_t kMsgBlocks = 3;  // one block, as the export format writes it
+inline constexpr std::uint8_t kMsgWant = 4;    // "give me your block at this height" (decimal payload)
+inline constexpr std::uint8_t kMsgNoBlock = 5; // "I do not have that block"
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.
@@ -66,16 +67,10 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error = nullpt
 
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
-// A deadline of TimePoint::max() means "no deadline beyond the per-call socket timeout". Anything else is an
-// absolute point in time: a peer that keeps trickling bytes is cut off there, not three seconds after each one.
-using Deadline = std::chrono::steady_clock::time_point;
-inline Deadline no_deadline() { return Deadline::max(); }
-bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr,
-                Deadline deadline = no_deadline());
+bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr);
 
 bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error = nullptr);
-bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
-                  Deadline deadline = no_deadline());
+bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr);
 
 // One side of the handshake. `send_first` must be true on exactly one of the two ends.
 bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error = nullptr);

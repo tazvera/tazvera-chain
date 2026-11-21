@@ -67,11 +67,61 @@ static void f04_equal_height_disagreement_is_decided_the_same_way() {
     CHECK(a_wins ? (ba.choice == ForkChoice::TakeTheirs) : (ba.choice == ForkChoice::KeepMine));
 }
 
+// v9.0: the rollback that makes a fork choice real. Without it, "the other chain wins" cannot be acted on.
+static void f05_truncate_rebuilds_the_state() {
+    Key o = new_key(), g = new_key();
+    Chain full; CHECK(full.init_genesis(o.addr, 100000, g.addr, 0));
+    CHECK(full.append_block({transfer(o, g.addr, 10, 0)}, ts++).ok);
+    CHECK(full.append_block({transfer(o, g.addr, 20, 1)}, ts++).ok);
+    CHECK(full.append_block({transfer(o, g.addr, 30, 2)}, ts++).ok);
+    CHECK(full.height() == 3);
+
+    Chain cut = full;
+    CHECK(cut.truncate_to(1).ok);
+    CHECK(cut.height() == 1);
+    CHECK(cut.state().balance(g.addr) == 10);            // only the first transfer happened
+    CHECK(cut.state().nonce(o.addr) == 1);
+    CHECK(cut.blocks().back().hash() == full.blocks()[1].hash());
+
+    // a rebuilt chain must accept exactly what the original accepted next
+    CHECK(cut.append_block({transfer(o, g.addr, 20, 1)}, ts + 100).ok);
+    CHECK(cut.state().balance(g.addr) == full.state().balance(g.addr));
+
+    // and it must be byte-identical to the original in what matters
+    CHECK(cut.blocks()[1].hash() == full.blocks()[1].hash());
+
+    // edges: truncating to the current height changes nothing, growing is refused, 0 leaves genesis
+    CHECK(full.truncate_to(3).ok);
+    CHECK(!full.truncate_to(4).ok);
+    Chain genesis_only = full;
+    CHECK(genesis_only.truncate_to(0).ok);
+    CHECK(genesis_only.height() == 0);
+    CHECK(genesis_only.state().balance(o.addr) == 100000);
+}
+
+// a producer chain must survive the rebuild too, or a reorg would silently drop the producer set
+static void f06_truncate_keeps_the_producers() {
+    Key o = new_key(), g = new_key();
+    std::vector<Address> producers{o.addr};
+    Chain c; CHECK(c.init_genesis(o.addr, 100000, g.addr, 0, producers));
+    CHECK(!c.producers().empty());
+    CHECK(c.append_block_signed({transfer(o, g.addr, 5, 0)}, ts++, o.sk, o.pk).ok);
+    CHECK(c.append_block_signed({transfer(o, g.addr, 6, 1)}, ts++, o.sk, o.pk).ok);
+
+    Chain cut = c;
+    CHECK(cut.truncate_to(1).ok);
+    CHECK(cut.producers() == producers);
+    CHECK(cut.height() == 1);
+    CHECK(cut.state().balance(g.addr) == 5);
+}
+
 int main() {
     f01_unrelated_chains();
     f02_longer_wins_both_ways();
     f03_equal_chains();
     f04_equal_height_disagreement_is_decided_the_same_way();
+    f05_truncate_rebuilds_the_state();
+    f06_truncate_keeps_the_producers();
     if (failures == 0) { std::cout << "fork tests: all passed\n"; return 0; }
     std::cerr << "fork tests: " << failures << " failure(s)\n";
     return 1;
