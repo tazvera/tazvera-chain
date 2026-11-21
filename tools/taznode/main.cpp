@@ -277,8 +277,17 @@ int main(int argc, char** argv) {
         // message each. The receiver knows how many to expect from the hello heights, so no end marker is
         // needed, and every block goes through accept_block() — the same validation a block from disk gets.
         constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next poll continues
-        auto send_blocks = [&](taz::Socket& sock, std::uint64_t from_height) -> bool {
-            const std::uint64_t missing = chain.height() - from_height;
+        // announced is the height this node put in the hello, and it is what the receiver counted with. Using
+        // chain.height() here instead would send one block too many whenever this node produced a block between
+        // the hello and the send, and that extra block would sit in the socket and be read as the next
+        // message — a protocol desync that looks like corruption.
+        auto send_blocks = [&](taz::Socket& sock, std::uint64_t from_height, std::uint64_t announced) -> bool {
+            if (from_height > announced) {
+                std::cerr << "taznode: the peer's height (" << from_height
+                          << ") is above the height we announced (" << announced << "); nothing to send\n";
+                return true;
+            }
+            const std::uint64_t missing = announced - from_height;
             const std::uint64_t send = std::min(missing, kMaxBlocksPerSync);
             for (std::uint64_t n = 0; n < send; ++n) {
                 const std::uint64_t wanted = from_height + 1 + n;
@@ -306,6 +315,13 @@ int main(int argc, char** argv) {
         };
         auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
             const std::uint64_t wanted = std::min(expected, kMaxBlocksPerSync);
+            // A count is not a budget: 200 messages, each allowed to stall for the receive timeout, is ten
+            // minutes of a node's life handed to one peer. Time and bytes are bounded too, and the next poll
+            // picks up where this one stopped.
+            constexpr auto kSyncTimeBudget = std::chrono::seconds(60);
+            constexpr std::size_t kSyncByteBudget = 4u * 1024u * 1024u;
+            const auto started = std::chrono::steady_clock::now();
+            std::size_t bytes = 0;
             std::uint64_t added = 0;
             bool ok = true;
             for (std::uint64_t n = 0; n < wanted && ok; ++n) {
@@ -319,6 +335,12 @@ int main(int argc, char** argv) {
                 if (type != taz::kMsgBlocks) {
                     std::cerr << "taznode: the peer sent a message we did not ask for\n";
                     ok = false;
+                    break;
+                }
+                bytes += payload.size();
+                if (bytes > kSyncByteBudget || std::chrono::steady_clock::now() - started > kSyncTimeBudget) {
+                    std::cout << "taznode: sync budget reached after " << added
+                              << " block(s); the rest waits for the next round\n";
                     break;
                 }
                 taz::Block block;
@@ -341,8 +363,12 @@ int main(int argc, char** argv) {
             if (added > 0) {
                 std::string save_err;
                 if (!taz::save_chain_json(chain, chain_file, &save_err)) {
-                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
-                    return false;
+                    // Fail fast: this node's memory is now ahead of its own file. Continuing would mean serving
+                    // answers from a chain the file does not contain, and the next restart would silently roll
+                    // back work other nodes already saw.
+                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err
+                              << " - stopping rather than running ahead of the file\n";
+                    std::exit(3);
                 }
             }
             if (added > 0)
@@ -388,7 +414,7 @@ int main(int argc, char** argv) {
             // Both sides see the same two hellos, so both compute the same direction: the one that is ahead
             // sends, the one that is behind receives. Nobody waits for data the other decided not to send.
             if (chain.height() > theirs.best_height)
-                return send_blocks(sock, theirs.best_height);
+                return send_blocks(sock, theirs.best_height, ours.best_height);
             if (theirs.best_height > chain.height())
                 return receive_blocks(sock, theirs.best_height - chain.height());
             // Same height, same genesis, different tip: two chains of the same age that disagree. Keeping ours
