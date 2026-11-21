@@ -175,7 +175,36 @@ bool connect_loopback(std::uint16_t port, Socket& out, std::string* error) {
     return true;
 }
 
-bool accept_one(const Socket& listener, Socket& out, std::string* error) {
+bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadline deadline) {
+    if (deadline != no_deadline()) {
+        // select() is the portable way to wait for a connection with a limit; accept() alone blocks for ever, and
+        // a node that can only be stopped by killing it is a node that leaks processes in CI.
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            if (error) *error = "no peer arrived in time";
+            return false;
+        }
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        timeval tv{};
+        tv.tv_sec = static_cast<long>(left / 1000);
+        tv.tv_usec = static_cast<long>((left % 1000) * 1000);
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(static_cast<socket_t>(listener.raw()), &readable);
+#ifdef _WIN32
+        const int ready = ::select(0, &readable, nullptr, nullptr, &tv);
+#else
+        const int ready = ::select(listener.raw() + 1, &readable, nullptr, nullptr, &tv);
+#endif
+        if (ready == 0) {
+            if (error) *error = "no peer arrived in time";
+            return false;
+        }
+        if (ready < 0) {
+            if (error) *error = "waiting for a peer failed";
+            return false;
+        }
+    }
     sockaddr_in peer{};
 #ifdef _WIN32
     int len = static_cast<int>(sizeof(peer));

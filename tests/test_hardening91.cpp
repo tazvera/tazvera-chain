@@ -8,7 +8,7 @@
 //   N2  a legal block of 150 transfers (about 128 KB) can be synced
 //   N3  a block larger than the sync byte budget is still accepted (once, then the budget stops the round)
 //   N4  --transfer together with a peer mode is an error, not a silent no-op (already fixed on main; kept as a regression test)
-// N1-N4 start the real taznode binary and are skipped on Windows (they need a POSIX shell).
+// N1-N5 start the real taznode binary on every platform: POSIX uses "&", Windows uses cmd's "start /b".
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -107,8 +107,16 @@ static bool run_in_background(const std::string& command, const std::string& out
 }
 
 // Start a command in the foreground with its output in a file.
+//
+// On Windows the command must go through cmd /c explicitly, with the same quoting as run_in_background. Handing
+// std::system a command that already starts with a quoted program path lets cmd strip the wrong quotes, and the
+// call then waits for something that never finishes — which is exactly how the first Windows run hung.
 static int run_waiting(const std::string& command, const std::string& out) {
+#ifdef _WIN32
+    const std::string full = "cmd /c \"" + command + " > \"" + out + "\" 2>&1\"";
+#else
     const std::string full = command + " > \"" + out + "\" 2>&1";
+#endif
     return std::system(full.c_str());
 }
 static std::string pin(const Chain& c) { return to_hex(c.genesis_commitment()); }
@@ -129,11 +137,15 @@ static std::string sync_run(const fs::path& dir, const Chain& a, const Chain& b,
     CHECK(save_chain_json(b, (dir / "B.json").string(), &err));
     const std::uint16_t port = free_port();
     const std::string out = (dir / "a.out").string();
-    const std::string a_cmd = node() + " --chain \"" + (dir / "A.json").string() + "\" --expect-genesis " + pin(a) + " --listen " + std::to_string(port);
+    // --serve-timeout: a node waiting for a peer that never comes would outlive this test on Windows, where
+    // nothing kills a background process for us.
+    const std::string a_cmd = node() + " --chain \"" + (dir / "A.json").string() + "\" --expect-genesis " + pin(a) +
+                              " --listen " + std::to_string(port) + " --serve-timeout 40";
     CHECK(run_in_background(a_cmd, out));
     CHECK(wait_for(out, "listening", 10));
     const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port);
-    if (run_waiting(b_cmd, (dir / "b.out").string()) != 0) std::cerr << "  (the connecting node exited non-zero)\n";
+    const int b_rc = run_waiting(b_cmd, (dir / "b.out").string());
+    if (b_rc != 0) std::cerr << "  (the connecting node exited with " << b_rc << ")\n";
     const std::string wanted_line = expect_served ? "served 1 of 1" : "still waiting for 1 peer(s)";
     if (!wait_for(out, wanted_line, 20)) {
         std::cerr << "  the serving node never reported \"" << wanted_line << "\". Its output:\n" << slurp(out) << "\n";
@@ -221,7 +233,7 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
     const std::string out = (dir / "a.out").string();
     const std::string chain_arg = " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c);
     const std::string server = node() + chain_arg + " --listen " + std::to_string(port) +
-                               " --require-identity --identity \"" + (dir / "id.txt").string() + "\"";
+                               " --require-identity --identity \"" + (dir / "id.txt").string() + "\" --serve-timeout 40";
     CHECK(run_in_background(server, out));
     CHECK(wait_for(out, "listening", 10));
 
@@ -244,23 +256,16 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
 int main() {
     { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }   // Windows needs WSAStartup first
     h3_worst_case_block_fits();
-    // v9.2: the node-process tests (N1-N5) start the real taznode in the background. On Windows that goes through cmd's
-    // "start /b", which has never been verified: the first CI run hung in this step for 30+ minutes (a node waiting for a
-    // peer, a test waiting for the node). Until someone can run it on Windows and see it finish, it is off there.
-    // Linux passing is not proof the handshake works on Windows, which is why this says so out loud.
-#ifdef _WIN32
-    constexpr bool kRunNodeTests = false;
-#else
-    constexpr bool kRunNodeTests = true;
-#endif
-    if (kRunNodeTests) {
+    // N1-N5 start the real taznode. They run on Windows too now. The reason they were off was not a Windows bug:
+    // a node waiting for a peer that never arrived outlived the test, so the run hung. --serve-timeout removes
+    // that, and the launcher is checked by waiting for the node's own "listening" line rather than by trusting
+    // that it started.
+    {
         n1_future_block_cannot_jam_the_chain();
         n2_a_150_transfer_block_syncs();
         n3_block_over_the_byte_budget_still_syncs();
         n4_transfer_with_peer_is_an_error();
         n5_require_identity_refuses_anonymous_and_keeps_serving();
-    } else {
-        std::cout << "N1-N5 (node processes) are skipped on Windows: not verified there yet\n";
     }
     std::error_code ec;
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5"}) fs::remove_all(fs::temp_directory_path() / d, ec);

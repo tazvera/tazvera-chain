@@ -37,6 +37,7 @@ constexpr const char* kUsage =
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
+    "  --serve-timeout <s>       stop waiting for peers after this many seconds (default: no limit)\n"
     "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
@@ -145,6 +146,7 @@ int main(int argc, char** argv) {
     std::string listen_port;
     std::string serve_port;
     std::string max_peers_text;
+    std::string serve_timeout_text;
     std::string every_text;
     std::string retries_text;
     std::string identity_file;
@@ -171,6 +173,7 @@ int main(int argc, char** argv) {
         if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
         if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
+        if (a == "--serve-timeout" && i + 1 < argc) { serve_timeout_text = argv[++i]; continue; }
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
@@ -256,6 +259,8 @@ int main(int argc, char** argv) {
     // Checked before the mode block: "--max-peers 3" on its own is a mistake whether or not a mode was given,
     // and skipping the block would have let it through as a plain load.
     if (!max_peers_text.empty() && serve_port.empty()) return usage_error("--max-peers only means something with --serve");
+    if (!serve_timeout_text.empty() && serve_port.empty() && listen_port.empty())
+        return usage_error("--serve-timeout only means something with --serve or --listen");
     if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
     if (!retries_text.empty() && every_text.empty()) return usage_error("--retries only means something with --every");
     // A node that demands an identity while offering none would be asking for what it does not give.
@@ -276,6 +281,14 @@ int main(int argc, char** argv) {
         std::uint16_t port = 0;
         const std::string& port_text = !listen_port.empty() ? listen_port : (!serve_port.empty() ? serve_port : peer_port);
         if (!parse_port(port_text, port)) return usage_error("the port must be a number between 1 and 65535");
+
+        std::uint64_t serve_timeout = 0;      // 0 = wait for ever, as a real node does
+        if (!serve_timeout_text.empty()) {
+            taz::Amount value = 0;
+            if (!parse_amount(serve_timeout_text, value) || value == 0 || value > 3600)
+                return usage_error("--serve-timeout must be between 1 and 3600 seconds");
+            serve_timeout = value;
+        }
 
         std::uint64_t max_peers = 5;
         if (!max_peers_text.empty()) {
@@ -706,11 +719,16 @@ int main(int argc, char** argv) {
             // A refused or timed-out connection is not a served peer: otherwise a handful of anonymous connections
             // would use up the quota and stop the node.
             std::uint64_t served = 0;
+            // A node that can only be stopped by killing it leaks a process in CI and hides a hang as a timeout.
+            const taz::Deadline serve_deadline =
+                serve_timeout == 0 ? taz::no_deadline()
+                                   : std::chrono::steady_clock::now() + std::chrono::seconds(serve_timeout);
             while (served < wanted) {
                 taz::Socket peer;
-                if (!taz::accept_one(listener.socket, peer, &net_err)) {
-                    std::cerr << "taznode: " << net_err << "\n";
-                    all_ok = false;
+                if (!taz::accept_one(listener.socket, peer, &net_err, serve_deadline)) {
+                    // Running out of time is not a failure of this node: it served what it could.
+                    std::cout << "taznode: stopped waiting after " << serve_timeout << "s with " << served
+                              << " of " << wanted << " peer(s) served" << std::endl;
                     break;
                 }
                 // The ten seconds start when the connection is accepted, not at each read.
