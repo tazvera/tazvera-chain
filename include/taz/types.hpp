@@ -17,7 +17,7 @@ using Signature = std::array<std::uint8_t, 64>;
 // Core v8.2: protocol 2 = R2 veto (one-shot postpone). Protocol 1 chain files are not loadable in this build.
 // v8.9: the one place the core version lives. CMakeLists.txt reads this line and the test suite compares
 // it with the README title, so the three can no longer drift apart (they had drifted by six releases).
-inline constexpr std::string_view CORE_VERSION = "9.0";
+inline constexpr std::string_view CORE_VERSION = "9.1";
 inline constexpr std::uint32_t PROTOCOL_VERSION = 2;
 inline constexpr std::string_view CHAIN_ID = "tazvera-local-prototype-v1";
 inline constexpr Amount FEE_TRANSFER_V1 = 1000;

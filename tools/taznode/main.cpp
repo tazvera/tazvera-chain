@@ -313,8 +313,10 @@ int main(int argc, char** argv) {
             for (std::uint64_t n = 0; n < send; ++n) {
                 const std::uint64_t wanted = from_height + 1 + n;
                 const taz::Block* found = nullptr;
-                for (const taz::Block& b : chain.blocks())
-                    if (b.height == wanted) { found = &b; break; }
+                // v9.1: blocks are stored in height order from 0, so block `wanted` sits at index `wanted`
+                // (it used to walk the whole chain for every block it sent).
+                if (wanted < chain.blocks().size() && chain.blocks()[static_cast<std::size_t>(wanted)].height == wanted)
+                    found = &chain.blocks()[static_cast<std::size_t>(wanted)];
                 if (found == nullptr) {
                     std::cerr << "taznode: our own chain is missing block " << wanted << "\n";
                     return false;
@@ -362,11 +364,6 @@ int main(int argc, char** argv) {
                     break;
                 }
                 bytes += payload.size();
-                if (bytes > kSyncByteBudget) {
-                    std::cout << "taznode: sync budget reached after " << added
-                              << " block(s); the rest waits for the next round\n";
-                    break;
-                }
                 taz::Block block;
                 std::string why;
                 if (!taz::parse_block_text(payload, block, &why)) {
@@ -384,6 +381,14 @@ int main(int argc, char** argv) {
                     break;
                 }
                 ++added;
+                // v9.1: the byte budget is checked AFTER the block is accepted. Checked before accepting (as in
+                // v9.0), one block bigger than the budget was read, thrown away, and sent again every round
+                // without ever being added: such a block could never sync.
+                if (bytes > kSyncByteBudget) {
+                    std::cout << "taznode: sync budget reached after " << added
+                              << " block(s); the rest waits for the next round\n";
+                    break;
+                }
             }
             // Save whatever was accepted, even when the batch broke in the middle: a block that is in memory but
             // not on disk is a chain that disagrees with its own file after a crash.
@@ -602,7 +607,7 @@ int main(int argc, char** argv) {
             }
             const std::uint64_t wanted = listen_port.empty() ? max_peers : 1;
             std::cout << "taznode: listening on 127.0.0.1:" << listener.port
-                      << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << "\n";
+                      << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << std::endl;   // v9.1: flushed, so a script that waits for this line (the tests do) is not left waiting in a stdio buffer
             for (std::uint64_t served = 0; served < wanted; ++served) {
                 taz::Socket peer;
                 if (!taz::accept_one(listener.socket, peer, &net_err)) {
