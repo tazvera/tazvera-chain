@@ -581,8 +581,12 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
 bool parse_block_text(std::string_view text, Block& out, std::string* error) {
     try {
         if (text.empty()) fail("the block message is empty");
-        if (text.size() > 256 * 1024) fail("the block message is larger than a block can be");
-        Parser parser(text, 100000);
+        // v9.1: these two limits were 256 KiB and 100,000 JSON values, which a legal block (MAX_BLOCK_TXS = 10000
+        // transactions, about 11 MB and several hundred thousand values) exceeds long before consensus says no:
+        // such a block was received and then refused as "larger than a block can be". They now match the network
+        // message bound (32 MiB) and leave room for the largest legal block; test_hardening91 parses one.
+        if (text.size() > 32u * 1024u * 1024u) fail("the block message is larger than a block can be");
+        Parser parser(text, 1'500'000);
         const JVal jv = parser.parse_document();
         // The file format allows a block with and without the veto key depending on the chain level. Both are
         // legitimate shapes, so both are tried — but nothing else is relaxed: parse_block is the same function

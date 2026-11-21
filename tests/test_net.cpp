@@ -88,12 +88,13 @@ static void n03_oversize_refused() {
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
-    // announce 10 MB and send nothing else: the receiver must refuse without waiting or allocating
+    // announce 64 MiB (twice the 32 MiB limit of v9.1; the limit was 64 KiB before, when this said 10 MB) and send
+    // nothing else: the receiver must refuse without waiting or allocating
     std::string header;
+    header.push_back(static_cast<char>(0x04));
     header.push_back(static_cast<char>(0));
-    header.push_back(static_cast<char>(0x98));
-    header.push_back(static_cast<char>(0x96));
-    header.push_back(static_cast<char>(0x80));
+    header.push_back(static_cast<char>(0));
+    header.push_back(static_cast<char>(0));
     CHECK(send_all(client, header, &err));
     std::uint8_t type = 0; std::string payload;
     CHECK(!recv_message(server, type, payload, &err));

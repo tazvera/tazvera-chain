@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v9.0
+# TAZVERA Chain — Core v9.1
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -301,7 +301,7 @@ chain — was reported as broken (rules 5/10, state root 2/808).
 
 ## Version, today
 
-The current core version is **9.0**, in one place (`CORE_VERSION` in `include/taz/types.hpp`), mirrored by this
+The current core version is **9.1**, in one place (`CORE_VERSION` in `include/taz/types.hpp`), mirrored by this
 title and read by CMake. `t15_version_consistency` fails the build if those ever disagree again.
 
 Two things that are easy to misread:
@@ -310,7 +310,7 @@ Two things that are easy to misread:
   through `load_chain_at_startup()`, which compares the pin against the commitment recomputed from the genesis
   balances rather than the value stored in the file. `taz_startup_tests` and `taz_node_binary_tests` cover the
   right pin, a wrong one, a malformed one and a missing one. What is still missing is everything around it: there
-  is one node, no network, no peers, no consensus — so a pin protects a single operator from the wrong file, not
+  are a few local nodes on 127.0.0.1, no authenticated peers, no consensus — so a pin protects a single operator from the wrong file, not
   a chain from a determined attacker with a majority. `load_chain_json()` remains the *import* path, documented
   as unauthenticated.
 - **Documentation fixes do not change the version.** A later change that touches only comments or documents
@@ -369,3 +369,34 @@ apart for six releases before v8.9 introduced `t15_version_consistency`, which n
 - **Tests:** `t17_cleanup_on_failure_utf8` forces a failed save inside `taz-टेस्ट-fail` and asserts no `.tmp.`
   file survives; `t18_stale_cleanup_unicode` checks the sweep itself under a non-ASCII directory — an old
   temporary file is removed and a young one is left alone for the process that may still be writing it.
+
+## v9.1: a block that is legal must also be syncable
+
+Found by reading the v9.0 network code and running it (every item below was reproduced before it was fixed; the
+tests in `tests/test_hardening91.cpp` fail on the v9.0 code):
+
+- **A legal block could never be synced.** Consensus allows `MAX_BLOCK_TXS` = 10000 transactions in a block, but one
+  network message could carry only 64 KiB. 150 ordinary transfers (127,826 bytes) is a valid block that no other node
+  could ever receive. The message bound is now 32 MiB, and a test measures the worst-case block (10000 maximal
+  transactions) and requires it to fit. `recv_exact` no longer reserves the length the peer announces.
+- **A block larger than the sync byte budget (4 MiB) was read, dropped and re-sent every round.** The budget is now
+  checked after a block is accepted, so one block always makes progress.
+- **Sending blocks walked the whole chain for every block.** It now indexes by height.
+- Two `-Wconversion` warnings in `net.cpp` (`ssize_t` to `int`) are gone.
+
+Already fixed on main before this version (by the v9.0 follow-up pull requests; re-verified here by running the
+reproductions): the SIGPIPE kill (`MSG_NOSIGNAL`), a peer block with a far-future timestamp jamming the chain
+(peer blocks get the same `now + 120` limit as local ones), `--transfer` with a peer mode being silently ignored,
+the per-message deadline.
+
+### Known limits of the network layer (honest list, v9.1)
+- Fork choice at equal height is "smaller tip hash wins". The rule gives agreement, not security: on a chain
+  without producers anyone can grind a valid block with a smaller hash and replace a node's last block. Forks
+  deeper than one block are not resolved (the node keeps its chain and says so).
+- Without producer signatures, "longest chain" is free: empty blocks cost nothing.
+- Peers are not authenticated; a node serves one peer at a time; `--serve` is single-threaded.
+- The library (`Chain::accept_block`) still has no clock opinion by default; the node supplies one. Anything that
+  calls `accept_block` without `max_timestamp` (tools, tests, future code) can accept a block stamped with the
+  largest possible time, after which no block can follow it.
+- `-Wstringop-overflow` is reported by GCC 13 inside `<bits/stl_construct.h>` for one translation unit; not
+  investigated yet (probably a false positive, not proven).
