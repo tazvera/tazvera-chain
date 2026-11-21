@@ -47,6 +47,11 @@ public:
     // height, previous hash, timestamp, block size, every transaction, and the claimed state root.
     ChainResult validate_block(const Block& block,
                                std::int64_t max_timestamp = NO_TIMESTAMP_LIMIT) const;
+    // v9.0: drop every block above `height` and rebuild the state from genesis. This is what makes a fork
+    // choice real: without a way back, "the other chain wins" is only a sentence. Rebuilding from genesis is
+    // deliberately the slow, obviously-correct way — a snapshot would be faster and a new thing to get wrong.
+    ChainResult truncate_to(std::uint64_t height);
+
     // validate_block + commit. On any failure the chain is unchanged.
     ChainResult accept_block(const Block& block,
                              std::int64_t max_timestamp = NO_TIMESTAMP_LIMIT);
