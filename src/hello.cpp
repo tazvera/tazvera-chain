@@ -67,6 +67,7 @@ std::string encode_hello(const Hello& hello) {
     out += "height=" + std::to_string(hello.best_height) + "\n";
     out += "root=" + to_hex(hello.state_root) + "\n";
     out += "tip=" + to_hex(hello.tip_hash) + "\n";
+    out += "nonce=" + to_hex(hello.nonce) + "\n";
     if (hello_has_identity(hello)) {
         out += "pubkey=" + to_hex(hello.pubkey) + "\n";
         if (!all_zero(hello.signature)) out += "signature=" + to_hex(hello.signature) + "\n";
@@ -101,6 +102,8 @@ bool hello_signature_ok(const Hello& hello) {
 
 Address hello_address(const Hello& hello) { return address_from_pubkey(hello.pubkey); }
 
+bool hello_has_nonce(const Hello& hello) { return !all_zero(hello.nonce); }
+
 bool decode_hello(std::string_view text, Hello& out, std::string* why) {
     auto fail = [&](std::string message) {
         if (why) *why = std::move(message);
@@ -122,7 +125,7 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
 
     Hello parsed;
     bool have_proto = false, have_chain = false, have_genesis = false, have_height = false;
-    bool have_root = false, have_tip = false, have_pubkey = false, have_signature = false;
+    bool have_root = false, have_tip = false, have_pubkey = false, have_signature = false, have_nonce = false;
     for (std::size_t i = 1; i < lines.size(); ++i) {
         const std::string& line = lines[i];
         if (line.empty()) continue;
@@ -157,6 +160,10 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
             if (have_tip) return fail("duplicate tip");
             if (!parse_hex32(value, parsed.tip_hash)) return fail("tip must be 64 hex characters");
             have_tip = true;
+        } else if (key == "nonce") {
+            if (have_nonce) return fail("duplicate nonce");
+            if (!parse_hex32(value, parsed.nonce)) return fail("nonce must be 64 hex characters");
+            have_nonce = true;
         } else if (key == "pubkey") {
             if (have_pubkey) return fail("duplicate pubkey");
             if (!parse_hex32(value, parsed.pubkey)) return fail("pubkey must be 64 hex characters");
@@ -169,7 +176,7 @@ bool decode_hello(std::string_view text, Hello& out, std::string* why) {
             return fail("unknown field \"" + key + "\"");
         }
     }
-    if (!have_proto || !have_chain || !have_genesis || !have_height || !have_root || !have_tip)
+    if (!have_proto || !have_chain || !have_genesis || !have_height || !have_root || !have_tip || !have_nonce)
         return fail("a required field is missing");
     // Identity is optional, but half of it is a mistake: a key with no signature proves nothing, and a signature
     // with no key cannot be checked.
@@ -191,6 +198,9 @@ Hello hello_for(const Chain& chain) {
     h.chain_id = CHAIN_ID;
     h.genesis_commitment = chain.genesis_commitment();
     h.best_height = chain.height();
+    // A failed random read leaves the nonce at zero, which hello_has_nonce() reports; the node refuses to use
+    // such a hello on a connection rather than signing something predictable.
+    if (!random_bytes(h.nonce)) return h;
     h.state_root = chain.state().state_root();
     h.tip_hash = chain.blocks().empty() ? Hash32{} : chain.blocks().back().hash();
     return h;

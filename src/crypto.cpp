@@ -22,6 +22,11 @@ Hash32 sha256(std::span<const std::uint8_t> data) {
     return out;
 }
 Hash32 sha256(const std::vector<std::uint8_t>& data) { return sha256(std::span<const std::uint8_t>(data)); }
+bool random_bytes(std::span<std::uint8_t> out) {
+    if (out.empty()) return true;
+    return RAND_bytes(out.data(), static_cast<int>(out.size())) == 1;
+}
+
 bool public_from_private(const PrivKey& private_seed, PubKey& public_key) {
     PkeyPtr key(EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, private_seed.data(), private_seed.size()), EVP_PKEY_free);
     if (!key) return false;
