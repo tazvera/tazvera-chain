@@ -253,6 +253,32 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
     CHECK(slurp(out).find("proof verified on this connection") != std::string::npos);
 }
 
+// v9.2: --serve-timeout must end a node that is waiting for a peer that never comes. Without it the process
+// outlives the test on Windows, which is exactly why these tests were off there.
+static void n6_serve_timeout_ends_the_node() {
+    Key a = new_key(), b = new_key();
+    Chain c = two_account_chain(a, b, 1000000);
+    const fs::path dir = fs::temp_directory_path() / "taz91-n6";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    std::string err;
+    CHECK(save_chain_json(c, (dir / "c.json").string(), &err));
+
+    const std::uint16_t port = free_port();
+    const std::string out = (dir / "o.txt").string();
+    const std::string cmd = node() + " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c) +
+                            " --listen " + std::to_string(port) + " --serve-timeout 3";
+    const auto start = std::chrono::steady_clock::now();
+    const int rc = run_waiting(cmd, out);
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
+
+    CHECK(rc == 0);                                   // running out of time is not a failure
+    CHECK(elapsed >= 2);                              // it really waited
+    CHECK(elapsed <= 40);                             // and it really stopped
+    CHECK(slurp(out).find("stopped waiting after 3s") != std::string::npos);
+    std::cout << "  a node with --serve-timeout 3 stopped after " << elapsed << "s\n";
+}
+
 int main() {
     { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }   // Windows needs WSAStartup first
     h3_worst_case_block_fits();
@@ -266,9 +292,10 @@ int main() {
         n3_block_over_the_byte_budget_still_syncs();
         n4_transfer_with_peer_is_an_error();
         n5_require_identity_refuses_anonymous_and_keeps_serving();
+        n6_serve_timeout_ends_the_node();
     }
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5"}) fs::remove_all(fs::temp_directory_path() / d, ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Hardening v9.1 tests passed. This is not a security audit.\n";
     return EXIT_SUCCESS;

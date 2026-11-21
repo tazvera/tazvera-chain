@@ -11,6 +11,7 @@
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
+#include <thread>
 #include <iostream>
 #include <string>
 
@@ -112,6 +113,42 @@ static void n04_garbage_refused() {
     CHECK(!err.empty());
 }
 
+// v9.2: a peer that trickles one byte every two seconds must be cut off at the absolute deadline. Without the
+// deadline, each read only has the socket's three-second timeout, so a trickling peer holds the connection for
+// ever — which is the difference this test exists to prove.
+static void n06_slow_peer_is_cut_at_the_deadline() {
+    Listener listener;
+    Socket server, client;
+    std::string err;
+    CHECK(listen_loopback(0, listener, &err));
+    CHECK(connect_loopback(listener.port, client, &err));
+
+    // the client dribbles bytes for as long as it is allowed to
+    std::thread dribbler([&] {
+        const char byte = 'x';
+        for (int i = 0; i < 12; ++i) {
+            std::string chunk(1, byte);
+            if (!send_all(client, chunk, nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        }
+    });
+
+    CHECK(accept_one(listener.socket, server, &err));
+    const Chain chain = make_chain(1000);
+    const Hello ours = hello_for(chain);
+    Hello theirs;
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::seconds(10);
+    const bool ok = exchange_hello(server, ours, theirs, false, &err, deadline);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
+
+    CHECK(!ok);                                  // it must not be allowed to finish
+    CHECK(elapsed >= 8);                         // and it must not give up early: the socket timeout alone is 3s
+    CHECK(elapsed <= 20);                        // nor hang past the deadline by much
+    std::cout << "  a trickling peer was cut off after " << elapsed << "s\n";
+    dribbler.join();
+}
+
 static void n05_closed_port_is_an_error() {
     Listener listener; std::string err;
     CHECK(listen_loopback(0, listener, &err));
@@ -169,6 +206,7 @@ int main() {
     n03_oversize_refused();
     n04_garbage_refused();
     n05_closed_port_is_an_error();
+    n06_slow_peer_is_cut_at_the_deadline();
     n06_send_to_closed_peer_is_an_error();
     n07_deadline_cuts_off_a_slow_peer();
     net_cleanup();
