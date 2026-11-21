@@ -31,6 +31,7 @@ add_library(tazcore
     src/hello.cpp
     src/net.cpp
     src/fork.cpp
+    src/auth.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
@@ -111,6 +112,10 @@ add_test(NAME taz_producer_tests COMMAND taz_producer_tests)
 # v9.1: regression tests for the network problems found in v9.0 (a legal block too big for one message, a block over the
 # sync budget that never syncs, a future-dated block that jams a chain, a silently ignored --transfer).
 find_package(Threads REQUIRED)
+add_executable(taz_auth_tests tests/test_auth.cpp)
+target_link_libraries(taz_auth_tests PRIVATE tazcore)
+add_test(NAME taz_auth_tests COMMAND taz_auth_tests)
+
 add_executable(taz_bigblock_tests tests/test_bigblock.cpp)
 target_link_libraries(taz_bigblock_tests PRIVATE tazcore)
 add_test(NAME taz_bigblock_tests COMMAND taz_bigblock_tests)

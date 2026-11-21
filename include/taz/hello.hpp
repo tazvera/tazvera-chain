@@ -24,6 +24,9 @@ struct Hello {
     Hash32 tip_hash{};              // the hash of the newest block: this is what covers the history
     // v9.0: optional proof of who is speaking. All zero means anonymous, which is allowed and said out loud —
     // a signature says "this key spoke", never "this peer can be trusted".
+    // v9.1: a fresh 32-byte nonce per connection. It is what makes an identity proof belong to THIS connection:
+    // without it a recorded handshake could be replayed by anyone.
+    Hash32 nonce{};
     PubKey pubkey{};
     Signature signature{};
 };
@@ -37,6 +40,7 @@ struct Hello {
 //   height=<decimal>
 //   root=<64 hex>
 //   tip=<64 hex>
+//   nonce=<64 hex>
 //   pubkey=<64 hex>      (optional, only with signature)
 //   signature=<128 hex>  (optional, only with pubkey)
 //
@@ -69,5 +73,7 @@ bool hello_has_identity(const Hello& hello);
 // True only when a signature is present and verifies. An absent signature is not a pass.
 bool hello_signature_ok(const Hello& hello);
 Address hello_address(const Hello& hello);
+// A hello whose nonce is all zero came from a failed random read and must not be used on a connection.
+bool hello_has_nonce(const Hello& hello);
 
 }  // namespace taz
