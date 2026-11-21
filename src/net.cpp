@@ -280,12 +280,13 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
     return recv_exact(socket, length, payload, error, deadline);
 }
 
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error) {
+bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error,
+                    Deadline deadline) {
     std::uint8_t type = 0;
     std::string payload;
     auto send_ours = [&]() { return send_message(socket, kMsgHello, encode_hello(ours), error); };
     auto recv_theirs = [&]() {
-        if (!recv_message(socket, type, payload, error)) return false;
+        if (!recv_message(socket, type, payload, error, deadline)) return false;
         if (type != kMsgHello) {
             if (error) *error = "the peer did not start with a hello";
             return false;

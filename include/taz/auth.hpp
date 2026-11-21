@@ -19,7 +19,9 @@ static_assert(kAuthDomain.size() == 15, "the domain length is part of the signed
 
 // Canonical encoding: no separators, every variable-length field carries a u32 big-endian length, every integer
 // is fixed width big-endian. Length prefixes are what stop "ab"+"c" and "a"+"bc" from producing the same bytes.
-// The hello arguments are the exact bytes that travelled on the wire, not a re-encoding of them.
+// The hello arguments are the canonical encoding of each hello (encode_hello output), built by both sides with
+// the same function. The decoder accepts fields in any order, so the raw bytes can differ between two honest
+// nodes while the canonical form cannot.
 std::string auth_transcript(const Hello& first, std::string_view first_hello_bytes,
                             const Hello& second, std::string_view second_hello_bytes);
 

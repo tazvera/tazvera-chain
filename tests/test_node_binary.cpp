@@ -175,6 +175,8 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 0") == 2);   // 1..3600
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --retries 3") == 2);              // needs --every
+    // a node that demands an identity while offering none is a usage error
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --require-identity") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries abc") == 2);
     // a peer that is not there is survived once and then given up on, without hanging
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries 1") == 3);

@@ -182,6 +182,38 @@ static void n4_transfer_with_peer_is_an_error() {
     CHECK(rc != 0);                                               // v9.0: exit 0, nothing produced
     CHECK(slurp(dir / "o.txt").find("cannot be combined") != std::string::npos);
 }
+// v9.1: --require-identity against a real node process. An anonymous peer must be refused, the node must keep
+// waiting, and a peer that proves its key must then be accepted — that is the whole point of the flag.
+static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
+    Key a = new_key(), b = new_key(), id = new_key();
+    Chain c = two_account_chain(a, b, 1000000);
+    const fs::path dir = fs::temp_directory_path() / "taz91-n5";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    std::string err;
+    CHECK(save_chain_json(c, (dir / "c.json").string(), &err));
+    std::ofstream(dir / "id.txt") << to_hex(id.sk) << "\n" << to_hex(id.pk) << "\n";
+
+    const std::uint16_t port = free_port();
+    const std::string out = (dir / "a.out").string();
+    const std::string chain_arg = " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c);
+    const std::string server = node() + chain_arg + " --listen " + std::to_string(port) +
+                               " --require-identity --identity \"" + (dir / "id.txt").string() + "\" > \"" + out + "\" 2>&1 &";
+    CHECK(std::system(server.c_str()) == 0);
+    CHECK(wait_for(out, "listening", 10));
+
+    // an anonymous peer is refused, and the node does not exit
+    const std::string anon = node() + chain_arg + " --peer " + std::to_string(port) + " > \"" + (dir / "anon.out").string() + "\" 2>&1";
+    CHECK(std::system(anon.c_str()) != 0);
+    CHECK(wait_for(out, "did not prove an identity", 10));
+    CHECK(wait_for(out, "still waiting for", 10));
+
+    // a peer that proves its key is accepted
+    const std::string signed_peer = node() + chain_arg + " --peer " + std::to_string(port) +
+                                    " --identity \"" + (dir / "id.txt").string() + "\" > \"" + (dir / "ok.out").string() + "\" 2>&1";
+    if (std::system(signed_peer.c_str()) != 0) std::cerr << "  (the proving node exited non-zero)\n";
+    CHECK(wait_for(out, "served 1 of 1", 20));
+    CHECK(slurp(out).find("proof verified on this connection") != std::string::npos);
+}
 #endif
 
 int main() {
@@ -192,11 +224,12 @@ int main() {
     n2_a_150_transfer_block_syncs();
     n3_block_over_the_byte_budget_still_syncs();
     n4_transfer_with_peer_is_an_error();
+    n5_require_identity_refuses_anonymous_and_keeps_serving();
 #else
     std::cout << "N1-N4 (node processes) are skipped on Windows\n";
 #endif
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4"}) fs::remove_all(fs::temp_directory_path() / d, ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Hardening v9.1 tests passed. This is not a security audit.\n";
     return EXIT_SUCCESS;

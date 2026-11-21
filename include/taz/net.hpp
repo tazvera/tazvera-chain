@@ -37,6 +37,7 @@ inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export f
 inline constexpr std::uint8_t kMsgBlocks = 3;  // one block, as the export format writes it
 inline constexpr std::uint8_t kMsgWant = 4;    // "give me your block at this height" (decimal payload)
 inline constexpr std::uint8_t kMsgNoBlock = 5; // "I do not have that block"
+inline constexpr std::uint8_t kMsgAuth = 6;    // an identity proof bound to this connection
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.
@@ -85,6 +86,7 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
                   Deadline deadline = no_deadline());
 
 // One side of the handshake. `send_first` must be true on exactly one of the two ends.
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error = nullptr);
+bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first,
+                    std::string* error = nullptr, Deadline deadline = no_deadline());
 
 }  // namespace taz
