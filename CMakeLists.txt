@@ -111,6 +111,10 @@ add_test(NAME taz_producer_tests COMMAND taz_producer_tests)
 # v9.1: regression tests for the network problems found in v9.0 (a legal block too big for one message, a block over the
 # sync budget that never syncs, a future-dated block that jams a chain, a silently ignored --transfer).
 find_package(Threads REQUIRED)
+add_executable(taz_bigblock_tests tests/test_bigblock.cpp)
+target_link_libraries(taz_bigblock_tests PRIVATE tazcore)
+add_test(NAME taz_bigblock_tests COMMAND taz_bigblock_tests)
+
 add_executable(taz_hardening91_tests tests/test_hardening91.cpp)
 target_link_libraries(taz_hardening91_tests PRIVATE tazcore Threads::Threads)
 target_compile_definitions(taz_hardening91_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
