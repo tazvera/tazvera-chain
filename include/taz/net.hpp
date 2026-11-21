@@ -26,7 +26,12 @@ using socket_t = int;
 inline constexpr socket_t kInvalidSocket = -1;
 #endif
 
-inline constexpr std::uint32_t kMaxPayloadBytes = 64 * 1024;   // one message, not a stream
+// v9.1: 32 MiB (was 64 KiB). Consensus allows MAX_BLOCK_TXS (10000) transactions in a block, and a block of ~150
+// ordinary transfers is already ~128 KB of JSON: with a 64 KiB limit a perfectly valid block, made by anyone
+// (or by a producer), could never be synced to any other node. test_hardening91 measures the worst-case block and
+// requires it to fit. The bound is still checked BEFORE anything is allocated, and recv_exact no longer reserves
+// what the peer announced, so a four-byte header cannot buy a 32 MiB allocation.
+inline constexpr std::uint32_t kMaxPayloadBytes = 32u * 1024u * 1024u;   // one message, not a stream
 inline constexpr std::uint8_t kMsgHello = 1;
 inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export format writes it
 inline constexpr std::uint8_t kMsgBlocks = 3;  // one block, as the export format writes it

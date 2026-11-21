@@ -203,8 +203,8 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error) 
 #else
         const int flags = MSG_NOSIGNAL;
 #endif
-        const int chunk = ::send(socket.raw(), bytes.data() + sent,
-                                 static_cast<int>(bytes.size() - sent), flags);
+        const auto chunk = ::send(socket.raw(), bytes.data() + sent,
+                                  static_cast<int>(bytes.size() - sent), flags);
         if (chunk <= 0) {
             if (error) *error = "the connection closed while sending";
             return false;
@@ -216,8 +216,9 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error) 
 
 bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error, Deadline deadline) {
     out.clear();
-    out.reserve(count);
-    std::vector<char> buffer(1024);
+    // v9.1: no out.reserve(count). `count` is the length the PEER announced; reserving it up front hands any
+    // stranger a large allocation for a five-byte header. The string grows as real bytes arrive.
+    std::vector<char> buffer(16 * 1024);
     while (out.size() < count) {
         // The per-call socket timeout alone lets a peer that trickles one byte every few seconds hold this
         // process for as long as it likes. With a deadline, the remaining time also becomes the socket timeout,
@@ -236,7 +237,7 @@ bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::
             }
         }
         const std::size_t want = std::min(buffer.size(), count - out.size());
-        const int got = ::recv(socket.raw(), buffer.data(), static_cast<int>(want), 0);
+        const auto got = ::recv(socket.raw(), buffer.data(), static_cast<int>(want), 0);
         if (got == 0) {
             if (error) *error = "the connection closed while receiving";
             return false;
