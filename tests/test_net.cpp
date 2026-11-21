@@ -121,6 +121,22 @@ static void n05_closed_port_is_an_error() {
     CHECK(!client.valid());
 }
 
+// v9.0: a peer that hangs up must not kill this process. Without MSG_NOSIGNAL the
+// second send raises SIGPIPE and the whole test binary dies (exit 141), which is why
+// this test would not merely fail — it would disappear.
+static void n06_send_to_closed_peer_is_an_error() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
+
+    client.close();                                   // the peer goes away
+    bool failed = false;
+    for (int i = 0; i < 4 && !failed; ++i)            // the first send may still fit in the socket buffer
+        failed = !send_message(server, kMsgHello, std::string(4096, 'x'), &err);
+    CHECK(failed);
+    CHECK(!err.empty());
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -129,6 +145,7 @@ int main() {
     n03_oversize_refused();
     n04_garbage_refused();
     n05_closed_port_is_an_error();
+    n06_send_to_closed_peer_is_an_error();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
