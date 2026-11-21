@@ -178,6 +178,9 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries abc") == 2);
     // a peer that is not there is survived once and then given up on, without hanging
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries 1") == 3);
+    // --transfer does one thing and stops; combining it with a network mode used to do neither, silently
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --transfer 22" +
+              std::string(38, '2') + ":1 --peer 1") == 2);
 
     // restart: the same chain, the same height, the same state root — the block was really written
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin) == 0);

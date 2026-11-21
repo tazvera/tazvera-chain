@@ -248,6 +248,8 @@ int main(int argc, char** argv) {
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
+        if (!transfer_spec.empty())
+            return usage_error("--transfer does one thing and stops; it cannot be combined with --listen, --serve or --peer");
 
         auto parse_port = [](const std::string& text, std::uint16_t& out) -> bool {
             taz::Amount value = 0;
@@ -350,7 +352,12 @@ int main(int argc, char** argv) {
                     ok = false;
                     break;
                 }
-                const taz::ChainResult result = chain.accept_block(block);
+                // A block with timestamp INT64_MAX is valid on its own and freezes the chain forever, because
+                // every honest block after it must be "strictly greater". A peer's block is therefore only
+                // accepted within the same clock slack this node allows itself when producing.
+                const std::int64_t now_peer = std::chrono::duration_cast<std::chrono::seconds>(
+                                                  std::chrono::system_clock::now().time_since_epoch()).count();
+                const taz::ChainResult result = chain.accept_block(block, now_peer + 120);
                 if (!result.ok) {
                     std::cerr << "taznode: the peer sent a block we cannot accept: " << result.error << "\n";
                     ok = false;
@@ -538,6 +545,11 @@ int main(int argc, char** argv) {
         // same second would otherwise be refused, which looks like a chain bug and is only a clock resolution
         // problem, so step past the tip when needed.
         const std::int64_t tip_time = chain.blocks().back().timestamp;
+        if (tip_time >= now + 120) {
+            std::cerr << "taznode: the chain's tip timestamp (" << tip_time
+                      << ") is beyond this clock; refusing to extend a chain that cannot be extended\n";
+            return 5;
+        }
         const std::int64_t stamp = now > tip_time ? now : tip_time + 1;
         const std::int64_t max_timestamp = now + 120;      // a little clock slack, no more
         const std::vector<taz::Transaction> txs{tx};
@@ -547,6 +559,18 @@ int main(int argc, char** argv) {
             : chain.append_block_signed(txs, stamp, sk, pk, max_timestamp);
         if (!produced.ok) {
             std::cerr << "taznode: the block was refused: " << produced.error << "\n";
+            return 5;
+        }
+        // A block nobody can transport is a block nobody can verify: the sync path refuses anything larger than
+        // one message, so producing one would fork this node off the network by itself. Refuse to make it, and
+        // put the chain back the way it was — nothing has been written yet, so a reload is the honest rollback.
+        if (taz::block_to_json(chain.blocks().back()).size() > taz::kMaxPayloadBytes) {
+            std::cerr << "taznode: this block is larger than one sync message (" << taz::kMaxPayloadBytes
+                      << " bytes), so no other node could ever receive it; not producing it\n";
+            taz::Chain restored;
+            std::string reload_err;
+            if (taz::load_chain_json_text(taz::to_json(chain), restored, &reload_err))
+                chain = std::move(restored);
             return 5;
         }
         std::string save_err;

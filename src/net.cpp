@@ -175,8 +175,15 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error) {
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error) {
     std::size_t sent = 0;
     while (sent < bytes.size()) {
+        // MSG_NOSIGNAL: without it a peer that closed the connection kills this process with SIGPIPE instead of
+        // returning an error. A node that dies because a stranger hung up is not a node.
+#ifdef _WIN32
+        const int flags = 0;
+#else
+        const int flags = MSG_NOSIGNAL;
+#endif
         const int chunk = ::send(socket.raw(), bytes.data() + sent,
-                                 static_cast<int>(bytes.size() - sent), 0);
+                                 static_cast<int>(bytes.size() - sent), flags);
         if (chunk <= 0) {
             if (error) *error = "the connection closed while sending";
             return false;
