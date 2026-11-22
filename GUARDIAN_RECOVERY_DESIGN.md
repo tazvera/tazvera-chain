@@ -1,5 +1,7 @@
 # TAZVERA Guardian Recovery — Design v1 (Proposal)
 
+> **Note (v9.2):** the chain already implements a different recovery model (fund migration, M-of-N, veto). See `GUARDIAN_RECOVERY_STATUS.md` before relying on the statements below that nothing is implemented.
+
 **Status:** Design proposal only. Not implemented. Not safe for real funds.
 **Target:** `tazvera-chain` local prototype.
 **Policy:** 3 guardians, threshold 2-of-3, delayed recovery, independent owner veto.

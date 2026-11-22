@@ -1,5 +1,7 @@
 # Guardian Recovery — Implementation Boundaries
 
+> **Note (v9.2):** the chain already implements a different recovery model (fund migration, M-of-N, veto). See `GUARDIAN_RECOVERY_STATUS.md` before relying on the statements below that nothing is implemented.
+
 This file prevents a prototype from being presented as a finished wallet recovery feature.
 
 ## What this first design package does

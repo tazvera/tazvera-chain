@@ -1,5 +1,7 @@
 # TAZVERA Guardian Recovery — Test Plan v1
 
+> **Note (v9.2):** the chain already implements a different recovery model (fund migration, M-of-N, veto). See `GUARDIAN_RECOVERY_STATUS.md` before relying on the statements below that nothing is implemented.
+
 **Status:** Test specification only. No test is claimed to have run.
 
 ## A. Registration tests
