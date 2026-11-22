@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v9.1
+# TAZVERA Chain — Core v9.2
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -400,3 +400,10 @@ the per-message deadline.
   largest possible time, after which no block can follow it.
 - `-Wstringop-overflow` is reported by GCC 13 inside `<bits/stl_construct.h>` for one translation unit; not
   investigated yet (probably a false positive, not proven).
+\n
+## v9.2: peers can prove who they are
+
+- Each Hello carries a fresh 32-byte nonce. After the Hello both sides can send an auth message: a public key and an Ed25519 signature over a transcript (domain, protocol, chain ID and genesis commitment of **both** sides, both nonces, both Hellos exactly as sent). `--require-identity` refuses a peer that does not prove one.
+- The transcript is ordered by nonce, so both sides build the same bytes. That makes a bounced copy of our own proof verify, so a peer whose nonce equals ours (a reflection) and a peer with an all-zero nonce are refused.
+- A hung step now ends in a failed test: the Windows workflow runs ctest with a 120 s timeout.
+- **Not done / known limits:** the node-process tests (N1-N5) are skipped on Windows (never verified there); a pure relay that forwards bytes unchanged is not stopped by signatures (needs an encrypted channel); who is *allowed* to connect (an allowlist) is not implemented; forks deeper than one block are not resolved.
