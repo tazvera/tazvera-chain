@@ -3,6 +3,7 @@
 //   veto_postpone.json   a live veto key postpones a recovery once; the recovery then completes
 //   pending_discard.json a thief's pending veto is discarded because the guardians' recovery is already agreed
 //   owner_cancel.json    no veto key: the owner cancels a recovery twice, then the guardians win
+//   vote_expiry.json     v9.3: a guardian's vote expires, so the next guardian's vote stands alone
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -47,5 +48,11 @@ int main(int argc, char** argv) {
       until(w.c, w.c.state().find(w.o.addr)->recovery.ready_height); if (w.c.state().balance(w.n.addr) == 0) return 1; save(w.c, dir, "pending_discard.json"); }
     { World w; for (int i = 0; i < 2; ++i) { w.votes(); put(w.c, {cancel(w.o, Address{}, nx(w.c, w.o))}); }
       w.votes(); until(w.c, w.c.state().find(w.o.addr)->recovery.ready_height); if (w.c.state().balance(w.n.addr) == 0) return 1; save(w.c, dir, "owner_cancel.json"); }
+    // v9.3: one guardian votes, the vote expires, a second guardian's vote then stands alone; only a third fresh vote agrees.
+    { World w; put(w.c, {vote(w.g[0], w.o.addr, w.n.addr, nx(w.c, w.g[0]))}); const auto cast = w.c.height();
+      until(w.c, cast + VOTE_EXPIRY_BLOCKS); put(w.c, {vote(w.g[1], w.o.addr, w.n.addr, nx(w.c, w.g[1]))});
+      if (w.c.state().find(w.o.addr)->recovery.active || w.c.state().find(w.o.addr)->votes.size() != 1) return 1;   // the old vote is gone
+      put(w.c, {vote(w.g[2], w.o.addr, w.n.addr, nx(w.c, w.g[2]))}); if (!w.c.state().find(w.o.addr)->recovery.active) return 1;
+      until(w.c, w.c.state().find(w.o.addr)->recovery.ready_height); if (w.c.state().balance(w.n.addr) == 0) return 1; save(w.c, dir, "vote_expiry.json"); }
     return 0;
 }

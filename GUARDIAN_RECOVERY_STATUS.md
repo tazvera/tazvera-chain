@@ -25,8 +25,9 @@ Both are written down here so nobody builds the second one by accident on top of
 1. **Stable account ID and key rotation.** Not implemented, and not needed for fund migration. The honest cost of the
    current model: the recovered funds sit at a **new address**, and **anything sent to the old address later stays
    with the old key** (a thief's key if it was stolen). Recipients must be told the new address.
-2. **Request expiry.** A vote has no expiry height. A guardian's old vote stays until the list changes or someone
-   cancels, and a later vote by another guardian can complete it. (Smallest useful fix: expire votes after N blocks.)
+2. ~~Request expiry.~~ **Done in v9.3 (protocol 3):** a vote counts for `VOTE_EXPIRY_BLOCKS` = 1000 blocks and is then
+   dropped; its height is in the state root. (The papers' separate expiry height on the whole request is not needed
+   for fund migration: the 300-block delay already bounds an agreed recovery.)
 3. **Proof of possession of the veto key.** The veto is just an address; the chain cannot check that anyone holds it.
    A veto address nobody controls means nobody can cancel.
 4. **Fixed 3 guardians / 2-of-3.** The code allows 1–5 with any threshold.
@@ -41,7 +42,7 @@ Both are written down here so nobody builds the second one by accident on top of
 
 ## Suggested next steps, smallest first
 
-1. Vote expiry (a new constant, a stored vote height, tests that fail without it) — state-root change, so a protocol bump.
+1. ~~Vote expiry~~ done in v9.3.
 2. Decide on purpose whether key rotation is wanted at all. It is a protocol migration (see the design paper), much larger
    than fund migration, and fund migration already protects the main case (lost or stolen key).
 3. Only then touch the papers: bring their wording in line with the model that is chosen.

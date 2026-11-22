@@ -15,10 +15,12 @@ using PrivKey = std::array<std::uint8_t, 32>;
 using Signature = std::array<std::uint8_t, 64>;
 
 // Core v8.2: protocol 2 = R2 veto (one-shot postpone). Protocol 1 chain files are not loadable in this build.
+// Core v9.3: protocol 3 = a guardian's recovery vote expires (VOTE_EXPIRY_BLOCKS) and carries its height in the state root.
+// Protocol 2 chain files are not loadable in this build.
 // v8.9: the one place the core version lives. CMakeLists.txt reads this line and the test suite compares
 // it with the README title, so the three can no longer drift apart (they had drifted by six releases).
-inline constexpr std::string_view CORE_VERSION = "9.2";
-inline constexpr std::uint32_t PROTOCOL_VERSION = 2;
+inline constexpr std::string_view CORE_VERSION = "9.3";
+inline constexpr std::uint32_t PROTOCOL_VERSION = 3;
 inline constexpr std::string_view CHAIN_ID = "tazvera-local-prototype-v1";
 inline constexpr Amount FEE_TRANSFER_V1 = 1000;
 inline constexpr std::size_t MAX_BLOCK_TXS = 10000;
@@ -29,4 +31,7 @@ inline constexpr std::size_t MAX_GUARDIANS = 5;
 inline constexpr std::uint64_t RECOVERY_DELAY_BLOCKS = 300;
 // After a veto postpones once, recovery still executes; a thief cannot block forever.
 inline constexpr std::uint64_t VETO_POSTPONE_BLOCKS = 300;
+// v9.3: a guardian's vote counts for this many blocks after the block it was cast in. An old vote can no longer be
+// completed by another guardian months later. (Placeholder, like the other delays: not a mainnet parameter.)
+inline constexpr std::uint64_t VOTE_EXPIRY_BLOCKS = 1000;
 }

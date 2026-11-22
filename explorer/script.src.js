@@ -98,6 +98,7 @@ function txSignable(t) {
 }
 
 /* ---------- the account state machine (a mirror of the C++ State) ---------- */
+const VOTE_EXPIRY = 1000n;  // v9.3: a guardian vote counts through block (cast height + this); then it is dropped
 const VETO_POSTPONE = 300n; // v8.2: a live veto key may postpone an active recovery ONCE by this many blocks
 const noRec = () => ({ active: false, target: ZERO20, ready: 0n, postponed: false });
 const noPg = () => ({ active: false, list: [], thr: 0n, veto: ZERO20, ready: 0n });
@@ -141,6 +142,8 @@ function beginBlock(S, h) {
       else { a.g = { list: a.pg.list, thr: a.pg.thr, veto: a.pg.veto }; a.pg = noPg(); a.votes = new Map(); }
     }
   }
+  // v9.3: drop every guardian vote that has expired (mirror of State::begin_block step 2b)
+  for (const a of S.acc.values()) for (const [gk, v] of [...a.votes]) if (h - v.height > VOTE_EXPIRY) a.votes.delete(gk);
   const due2 = [...S.acc.entries()].filter(([, a]) => a.rec.active && a.rec.ready <= h).map(([k, a]) => [a.rec.ready, k])
     .sort((p, q) => (p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : p[1] < q[1] ? -1 : p[1] > q[1] ? 1 : 0));
   for (const [, addr] of due2) {
@@ -244,8 +247,8 @@ function applyTx(S, c, t, h) {
     if (!prot.g.list.includes(t.from)) return "भेजने वाला इस खाते का guardian नहीं है";
     if (prot.rec.active) return "वापसी पहले से इंतज़ार में है";
     snd.bal -= t.fee; snd.nonce += 1n;
-    prot.votes.set(t.from, t.newOwner);
-    let agree = 0n; for (const v of prot.votes.values()) if (v === t.newOwner) agree += 1n;
+    prot.votes.set(t.from, { target: t.newOwner, height: h });
+    let agree = 0n; for (const v of prot.votes.values()) if (v.target === t.newOwner) agree += 1n;
     if (agree >= prot.g.thr) { prot.rec = { active: true, target: t.newOwner, ready: h + c.recoveryDelay, postponed: false }; prot.votes = new Map(); }
     S.acc.set(t.from, snd); S.acc.set(t.to, prot); S.burned += t.fee;
     return { held, target };
@@ -291,7 +294,7 @@ async function stateRoot(S) {
     if (gext) {
       putG(a.g.list, a.g.thr, a.g.veto); parts.push(u8(a.pg.active ? 1 : 0)); putG(a.pg.list, a.pg.thr, a.pg.veto); parts.push(u64(a.pg.ready));
       parts.push(u64(BigInt(a.votes.size)));
-      for (const gk of [...a.votes.keys()].sort()) parts.push(hexToBytes(gk), hexToBytes(a.votes.get(gk)));
+      for (const gk of [...a.votes.keys()].sort()) parts.push(hexToBytes(gk), hexToBytes(a.votes.get(gk).target), u64(a.votes.get(gk).height));
       parts.push(u8(a.rec.active ? 1 : 0), hexToBytes(a.rec.target), u64(a.rec.ready), u8(a.rec.postponed ? 1 : 0));
     }
   }
