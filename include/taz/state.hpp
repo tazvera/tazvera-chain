@@ -31,6 +31,12 @@ struct PendingRecovery {
     std::uint64_t ready_height{0};
     bool veto_postponed{false}; // R2: veto may postpone once, not cancel forever
 };
+// One guardian's recovery vote: the address he wants the funds moved to, and the block he voted in (v9.3: it expires).
+struct Vote {
+    Address target{};
+    std::uint64_t height{0};
+    friend bool operator==(const Vote&, const Vote&) = default;
+};
 struct Account {
     Amount balance{0};
     std::uint64_t nonce{0};
@@ -40,7 +46,7 @@ struct Account {
     PendingSafety pending{};
     GuardianConfig guardians{};
     PendingGuardians pending_guardians{};
-    std::map<Address, Address> votes{};   // guardian -> the new address he voted for (cleared when agreed)
+    std::map<Address, Vote> votes{};      // guardian -> his vote (cleared when agreed; expires after VOTE_EXPIRY_BLOCKS)
     PendingRecovery recovery{};
     bool has_safety_extension() const noexcept { return !safety.is_default() || window_spent != 0 || pending.active; }
     bool has_guardian_extension() const noexcept {

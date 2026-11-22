@@ -14,6 +14,11 @@
 #include <iostream>
 #include <regex>
 #include <thread>
+// v9.3: the protocol number is read from the constant, not typed here, so the next protocol bump cannot silently
+// turn these refusal checks into no-ops.
+static const std::string kPv = "\"protocol_version\": \"" + std::to_string(taz::PROTOCOL_VERSION) + "\"";
+static const std::string kPvNext = "\"protocol_version\": \"" + std::to_string(taz::PROTOCOL_VERSION + 1) + "\"";
+static const std::string kPvNumber = "\"protocol_version\": " + std::to_string(taz::PROTOCOL_VERSION);
 using namespace taz;
 namespace fs = std::filesystem;
 static int failures = 0;
@@ -162,9 +167,9 @@ static void t03_strict_json() {
         {"comment", "// hi\n" + good}, {"block comment", rstr(good, "{\n", "{ /* x */\n")},
         {"BOM", std::string("\xEF\xBB\xBF") + good}, {"NUL byte", rstr(good, "\"format\"", std::string("\"for\0mat\"", 9))},
         {"single quotes", rstr(good, "\"format\"", "'format'")},
-        {"number instead of string", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": 2")},
-        {"true", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": true")},
-        {"null", rstr(good, "\"protocol_version\": \"2\"", "\"protocol_version\": null")},
+        {"number instead of string", rstr(good, kPv, kPvNumber)},
+        {"true", rstr(good, kPv, "\"protocol_version\": true")},
+        {"null", rstr(good, kPv, "\"protocol_version\": null")},
         {"duplicate key", rstr(good, "\"chain_id\"", "\"format\": \"x\", \"chain_id\"")},
         {"escape in string", rstr(good, "tazvera-local-prototype-v1", "tazvera-local\\u002dprototype-v1")},
         {"control char in string", rstr(good, "tazvera-local-prototype-v1", "tazvera-local\tprototype-v1")},
@@ -243,10 +248,10 @@ static void t05_integrity() {
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 0), &why) && why.find("chain") != std::string::npos);
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 3), &why));
     CHECK(refuses(rstr(text, "\"chain_id\": \"tazvera-local-prototype-v1\"", "\"chain_id\": \"tazvera-local-prototype-v2\"", 5), &why));
-    // protocol version: header, block, transaction — change 2 → 1 (older) or 2 → 3 (unsupported)
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 0), &why));
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 2), &why));
-    CHECK(refuses(rstr(text, "\"protocol_version\": \"2\"", "\"protocol_version\": \"3\"", 4), &why));
+    // protocol version: header, block, transaction — change N → 1 (older) or N → N+1 (unsupported), N = PROTOCOL_VERSION
+    CHECK(refuses(rstr(text, kPv, "\"protocol_version\": \"1\"", 0), &why));
+    CHECK(refuses(rstr(text, kPv, "\"protocol_version\": \"1\"", 2), &why));
+    CHECK(refuses(rstr(text, kPv, kPvNext, 4), &why));
     // kinds and guardian data
     CHECK(refuses(rstr(text, "\"kind\": \"3\"", "\"kind\": \"6\""), &why));
     CHECK(refuses(rstr(text, "\"kind\": \"3\"", "\"kind\": \"1\""), &why));
@@ -392,7 +397,7 @@ static void t09_versions() {
         std::string repl = p; repl.insert(repl.size() - 2, "1");
         CHECK(refuses(rstr(tg, p, repl), &why) && why.find("differs") != std::string::npos);
     }
-    CHECK(refuses(rstr(tp, "\"protocol_version\": \"2\"", "\"protocol_version\": \"1\"", 0)));
+    CHECK(refuses(rstr(tp, kPv, "\"protocol_version\": \"1\"", 0)));
     // old layouts (no guardian fields at all) are refused with a clear reason
     CHECK(refuses(std::regex_replace(tp6, std::regex("\"new_owner\": \"[0-9a-f]{40}\", \"guardian_threshold\": \"[0-9]+\", \"guardians\": \\[\\], "), ""), &why));
 }

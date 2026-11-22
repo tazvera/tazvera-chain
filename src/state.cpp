@@ -87,6 +87,10 @@ BlockEvents State::begin_block(std::uint64_t height) {
             }
         }
     }
+    // 2b) v9.3: drop every guardian vote that has expired (a vote cast in block V counts through block V + VOTE_EXPIRY_BLOCKS).
+    // An account with votes always has guardians (a vote needs them), so it never becomes an empty account here.
+    for (auto& [_, acc] : accounts_)
+        std::erase_if(acc.votes, [height](const auto& entry) { return height - entry.second.height > VOTE_EXPIRY_BLOCKS; });
     // 3) carry out every agreed recovery whose waiting time is over, in a fixed order: (ready height, address)
     std::vector<std::pair<std::uint64_t, Address>> recoveries;
     for (const auto& [addr, acc] : accounts_) if (acc.recovery.active && acc.recovery.ready_height <= height) recoveries.emplace_back(acc.recovery.ready_height, addr);
@@ -190,9 +194,9 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         if (!std::binary_search(prot.guardians.list.begin(), prot.guardians.list.end(), tx.from)) return fail("sender is not a guardian of this account");
         if (prot.recovery.active) return fail("a recovery is already waiting");
         sender.balance -= tx.fee; sender.nonce += 1;
-        prot.votes[tx.from] = tx.new_owner;
+        prot.votes[tx.from] = Vote{tx.new_owner, height};
         std::uint64_t agree = 0;
-        for (const auto& [_, target] : prot.votes) if (target == tx.new_owner) ++agree;
+        for (const auto& [_, vote] : prot.votes) if (vote.target == tx.new_owner) ++agree;
         if (agree >= prot.guardians.threshold) {
             prot.recovery = PendingRecovery{true, tx.new_owner, height + RECOVERY_DELAY_BLOCKS};
             prot.votes.clear();
@@ -268,7 +272,7 @@ Hash32 State::state_root() const {
             put_u8(bytes, a.pending_guardians.active ? 1 : 0);
             put_guardians(a.pending_guardians.config); put_u64(bytes, a.pending_guardians.ready_height);
             put_u64(bytes, a.votes.size());
-            for (const auto& [g, target] : a.votes) { put_addr(g); put_addr(target); }
+            for (const auto& [g, vote] : a.votes) { put_addr(g); put_addr(vote.target); put_u64(bytes, vote.height); }
             put_u8(bytes, a.recovery.active ? 1 : 0); put_addr(a.recovery.target); put_u64(bytes, a.recovery.ready_height); put_u8(bytes, a.recovery.veto_postponed ? 1 : 0);
         }
     }

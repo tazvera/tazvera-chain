@@ -127,6 +127,46 @@ static void test_stranger_cannot_veto_or_vote() {
     CHECK(c.state().find(w.o.addr)->recovery.active);
 }
 
+// ---- v9.3: a guardian's vote expires -----------------------------------------------------------------------------------
+static void test_vote_expires() {
+    // The last block in which the first vote still counts: another guardian's matching vote completes the recovery.
+    { World w; Chain& c = w.c;
+      CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0]))}));
+      const auto cast = c.height();
+      CHECK(c.state().find(w.o.addr)->votes.size() == 1 && c.state().find(w.o.addr)->votes.begin()->second.height == cast);
+      empty_until(c, cast + VOTE_EXPIRY_BLOCKS - 1);
+      CHECK(put(c, {vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
+      CHECK(c.height() == cast + VOTE_EXPIRY_BLOCKS);
+      CHECK(c.state().find(w.o.addr)->recovery.active); }
+    // One block later the first vote is gone: the second vote stands alone and nothing is agreed.
+    { World w; Chain& c = w.c;
+      CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0]))}));
+      const auto cast = c.height();
+      empty_until(c, cast + VOTE_EXPIRY_BLOCKS);
+      CHECK(put(c, {vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
+      CHECK(c.height() == cast + VOTE_EXPIRY_BLOCKS + 1);
+      const Account* a = c.state().find(w.o.addr);
+      CHECK(!a->recovery.active);
+      CHECK(a->votes.size() == 1 && a->votes.begin()->first == w.g[1].addr);                  // only the fresh vote is stored
+      CHECK(put(c, {vote(w.g[2], w.o.addr, w.n.addr, nx(c, w.g[2]))}));                       // two fresh votes still do agree
+      CHECK(c.state().find(w.o.addr)->recovery.active);
+      CHECK(conserved(c, w.total)); }
+    // An expired vote with nobody voting afterwards disappears from the state; the veto key then has nothing to clear.
+    { World w; Chain& c = w.c;
+      CHECK(put(c, {setg(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, Address{}, nx(c, w.o))}));   // same list: no-op change
+      CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0]))}));
+      empty_until(c, c.height() + VOTE_EXPIRY_BLOCKS + 1);
+      CHECK(c.state().find(w.o.addr)->votes.empty()); }
+}
+static void test_vote_height_is_in_the_root() {
+    // Same keys, same votes, same final height; only the block the vote was cast in differs. The roots must differ.
+    World w; Chain a = w.c, b = w.c;
+    CHECK(put(a, {})); CHECK(put(a, {vote(w.g[0], w.o.addr, w.n.addr, nx(a, w.g[0]))}));
+    CHECK(put(b, {vote(w.g[0], w.o.addr, w.n.addr, nx(b, w.g[0]))})); CHECK(put(b, {}));
+    CHECK(a.height() == b.height());
+    CHECK(a.state().state_root() != b.state().state_root());
+}
+
 // ---- C. restart: save / load in the middle of a recovery ----------------------------------------------------------------
 static void test_restart_mid_recovery() {
     World w; Chain& c = w.c;
@@ -238,6 +278,7 @@ static void test_owner_key_can_cancel_without_veto() {
 
 int main() {
     test_genesis(); test_pending_veto_dropped_when_recovery_agreed(); test_veto_postpones_only_once(); test_stranger_cannot_veto_or_vote();
+    test_vote_expires(); test_vote_height_is_in_the_root();
     test_restart_mid_recovery(); test_genesis_pin(); test_owner_key_can_cancel_without_veto(); test_fuzz_file(); test_fuzz_transactions();
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Security v8.2 tests passed. This is not a security audit.\n"; return EXIT_SUCCESS;

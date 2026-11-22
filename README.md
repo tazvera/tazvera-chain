@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v9.2
+# TAZVERA Chain — Core v9.3
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -407,3 +407,10 @@ the per-message deadline.
 - The transcript is ordered by nonce, so both sides build the same bytes. That makes a bounced copy of our own proof verify, so a peer whose nonce equals ours (a reflection) and a peer with an all-zero nonce are refused.
 - A hung step now ends in a failed test: the Windows workflow runs ctest with a 120 s timeout.
 - **Not done / known limits:** the node-process tests (N1-N5) are skipped on Windows (never verified there); a pure relay that forwards bytes unchanged is not stopped by signatures (needs an encrypted channel); who is *allowed* to connect (an allowlist) is not implemented; forks deeper than one block are not resolved.
+
+## v9.3: a guardian's recovery vote expires
+
+- A `RecoveryVote` cast in block V counts through block V + `VOTE_EXPIRY_BLOCKS` (1000, a placeholder like the other delays). `begin_block` then drops it, so an old vote can no longer be completed by another guardian months later. Before this, a stale vote stayed until the guardian list changed or someone cancelled.
+- The vote's block height is part of the state root (V3 layout), so this is a **protocol change: PROTOCOL_VERSION 2 -> 3**. Protocol-2 chain files are refused by this build; the three explorer demo chains were regenerated.
+- Tests: `test_vote_expires` (last valid block, one block too late, expired vote is removed) and `test_vote_height_is_in_the_root`; each fails when the rule, the boundary or the height-in-root is removed. The explorer's JavaScript mirror got the same rule, and `taz_gen_veto_demo` writes a `vote_expiry.json` chain that `explorer/check_demos.js` replays against it.
+- Still open: funds sent to the old address after a recovery stay with the old key; the veto key is only an address (no proof anyone holds it); see `GUARDIAN_RECOVERY_STATUS.md`.
