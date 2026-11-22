@@ -98,6 +98,20 @@ int main() {
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis abc") == 2);
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + std::string(64, 'z')) == 2);
 
+    // 4b. --new-key makes a key file, prints the address, and never replaces an existing one
+    {
+        const std::string k1 = tmpdir() + "/newkey1.txt";
+        const std::string k2 = tmpdir() + "/newkey2.txt";
+        fs::remove(k1, ec); fs::remove(k2, ec);
+        CHECK(run(exe + " --new-key " + q(k1)) == 0);
+        CHECK(run(exe + " --new-key " + q(k2)) == 0);
+        const std::string a1 = slurp(k1), a2 = slurp(k2);
+        CHECK(a1.size() == 130 && a2.size() == 130);        // 64 hex, newline, 64 hex, newline
+        CHECK(a1 != a2);                                    // a second key is a different key
+        CHECK(run(exe + " --new-key " + q(k1)) != 0);       // the same path again is refused
+        CHECK(slurp(k1) == a1);                             // and the file is untouched
+    }
+
     // 5. a real, valid chain file and still no pin: the node must not start
     CHECK(run(exe + " --chain " + q(chain)) == 2);
 
