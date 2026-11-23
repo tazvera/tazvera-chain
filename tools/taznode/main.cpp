@@ -467,6 +467,22 @@ int main(int argc, char** argv) {
         // The serve loop counts that, not the bare fact that a socket opened.
         auto handle_peer = [&](taz::Socket& sock, bool we_speak_first, taz::Deadline deadline) -> bool {
             taz::Hello ours = taz::hello_for(chain);   // current height and a fresh nonce, every time
+            taz::Hello theirs;
+            if (require_identity) {
+                // Strict mode uses the shared, tested API: it refreshes our nonce, signs the hello, checks the
+                // peer's hello, and verifies the connection-bound identity proof. The CLI still performs the
+                // accept-confirmation below before syncing.
+                if (!taz::exchange_authenticated_hello(sock, ours, identity_sk, theirs, we_speak_first,
+                                                       &net_err, deadline)) {
+                    std::cerr << "taznode: authenticated handshake refused: " << net_err << "\n";
+                    return false;
+                }
+                std::cout << "taznode: peer identity="
+                          << taz::to_hex(taz::address_from_pubkey(theirs.pubkey))
+                          << " (proof verified on this connection)\n";
+            } else {
+                // Optional-identity mode intentionally retains anonymous-peer compatibility. It still verifies
+                // any identity proof that is present; it does not claim that hello-only exchange is authentication.
             if (!taz::hello_has_nonce(ours)) {
                 std::cerr << "taznode: this node could not generate a nonce; refusing to start a handshake\n";
                 return false;
@@ -478,7 +494,6 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: could not sign the handshake with the identity key\n";
                 return false;
             }
-            taz::Hello theirs;
             std::string their_hello_bytes;
             if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err, deadline, &their_hello_bytes)) {
                 std::cerr << "taznode: the handshake failed: " << net_err << "\n";
@@ -499,14 +514,8 @@ int main(int argc, char** argv) {
                 return false;
             }
 
-            // The identity proof is bound to this connection: both hellos, both nonces, the chain identity. The
             // connector is A and the accepter is B, so both sides build the same bytes.
-            // The exact bytes on the wire: what we sent, and what arrived. Re-encoding was a shortcut that only
-            // works while the peer spells the hello exactly as we do — and the decoder accepts the fields in any
-            // order, so it would have failed closed against an honest node that ordered them differently.
             const std::string my_hello_bytes = taz::encode_hello(ours);
-            // No role argument: the transcript orders the two hellos by nonce, so both sides build the same bytes
-            // whatever order they happen to pass, and reflection still differs because the nonces differ.
             const std::string transcript =
                 taz::auth_transcript(ours, my_hello_bytes, theirs, their_hello_bytes);
             if (transcript.empty()) {
@@ -556,6 +565,7 @@ int main(int argc, char** argv) {
                 }
                 std::cout << "taznode: peer identity=" << taz::to_hex(taz::address_from_pubkey(theirs_auth.pubkey))
                           << " (proof verified on this connection)\n";
+            }
             }
 
             // A refusal must be visible to the other side. Without this the connecting node had already read its
