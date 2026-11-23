@@ -168,12 +168,13 @@ static void n08_authenticated_handshake_ok() {
     Hello server_got, client_got;
     std::string server_err, client_err;
     bool server_ok = false, client_ok = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
         server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
-                                                 false, &server_err);
+                                                 false, &server_err, deadline);
     });
     client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
-                                             true, &client_err);
+                                             true, &client_err, deadline);
     server_thread.join();
 
     CHECK(server_ok);
@@ -209,12 +210,13 @@ static void n11_authenticated_handshake_refreshes_reused_nonce() {
     Hello server_got, client_got;
     std::string server_err, client_err;
     bool server_ok = false, client_ok = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
         server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
-                                                 false, &server_err);
+                                                 false, &server_err, deadline);
     });
     client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
-                                             true, &client_err);
+                                             true, &client_err, deadline);
     server_thread.join();
 
     CHECK(server_ok);
@@ -275,28 +277,31 @@ static void n13_auth_proof_key_must_match_hello_key() {
     CHECK(generate_keypair(local_key, local_pub));
     CHECK(generate_keypair(hello_key, hello_pub));
     CHECK(generate_keypair(proof_key, proof_pub));
+    CHECK(local_pub != hello_pub);
+    CHECK(hello_pub != proof_pub);
 
     Hello local = hello_for(chain), peer = hello_for(chain), server_got;
     CHECK(sign_hello(peer, hello_key));
     const std::string peer_raw = encode_hello(peer);
     bool server_ok = true;
     std::string server_err;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
         server_ok = exchange_authenticated_hello(server, local, local_key, server_got,
-                                                 false, &server_err);
+                                                 false, &server_err, deadline);
     });
 
-    CHECK(send_message(client, kMsgHello, peer_raw, &err));
+    CHECK(send_message(client, kMsgHello, peer_raw, &err, deadline));
     std::uint8_t type = 0;
     std::string server_raw;
-    CHECK(recv_message(client, type, server_raw, &err));
+    CHECK(recv_message(client, type, server_raw, &err, deadline));
     CHECK(type == kMsgHello);
     Hello server_hello;
     CHECK(decode_hello(server_raw, server_hello, &err));
     const std::string transcript = auth_transcript(peer, peer_raw, server_hello, server_raw);
     AuthMessage wrong_key_proof;
     CHECK(sign_auth(wrong_key_proof, proof_key, transcript));
-    CHECK(send_message(client, kMsgAuth, encode_auth(wrong_key_proof), &err));
+    CHECK(send_message(client, kMsgAuth, encode_auth(wrong_key_proof), &err, deadline));
 
     server_thread.join();
     CHECK(!server_ok);
