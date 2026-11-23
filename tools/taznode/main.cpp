@@ -549,6 +549,12 @@ int main(int argc, char** argv) {
                     std::cerr << "taznode: the peer's identity proof cannot be read: " << why << "\n";
                     return false;
                 }
+                // If the peer advertised a signed hello identity, the connection proof must belong to
+                // that same key. Otherwise a peer could advertise one identity and prove control of another.
+                if (taz::hello_has_identity(theirs) && theirs_auth.pubkey != theirs.pubkey) {
+                    std::cerr << "taznode: the connection proof key does not match the signed hello identity; refused\\n";
+                    return false;
+                }
                 bool anonymous = true;
                 for (std::uint8_t b : theirs_auth.pubkey)
                     if (b != 0) anonymous = false;
