@@ -71,12 +71,15 @@ struct Listener {
 // port 0 asks the OS for a free port; the chosen one comes back in Listener::port.
 bool listen_loopback(std::uint16_t port, Listener& out, std::string* error = nullptr);
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error = nullptr);
-// Raw bytes, for framing tests and for the transport itself.
-bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
 // A deadline of TimePoint::max() means "no deadline beyond the per-call socket timeout". Anything else is an
 // absolute point in time: a peer that keeps trickling bytes is cut off there, not three seconds after each one.
 using Deadline = std::chrono::steady_clock::time_point;
 inline Deadline no_deadline() { return Deadline::max(); }
+
+// Raw bytes, for framing tests and for the transport itself. A finite deadline applies to the whole send,
+// including every partial write, rather than restarting the timeout after each successful write.
+bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr,
+              Deadline deadline = no_deadline());
 
 // With a deadline, accept_one() waits only until then and reports a timeout instead of blocking for ever.
 bool accept_one(const Socket& listener, Socket& out, std::string* error = nullptr,
