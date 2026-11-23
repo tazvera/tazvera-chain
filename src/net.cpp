@@ -359,6 +359,8 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
 
     // A fresh nonce is mandatory: otherwise a recorded identity proof could be replayed.
     if (!hello_has_nonce(ours)) return fail("local hello has no fresh nonce");
+    if (std::all_of(private_seed.begin(), private_seed.end(), [](std::uint8_t b) { return b == 0; }))
+        return fail("local identity key is empty");
     if (!sign_hello(ours, private_seed)) return fail("could not sign the local hello");
 
     const std::string our_raw_hello = encode_hello(ours);
