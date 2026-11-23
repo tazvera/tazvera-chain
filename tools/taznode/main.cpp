@@ -559,11 +559,7 @@ int main(int argc, char** argv) {
                 for (std::uint8_t b : theirs_auth.pubkey)
                     if (b != 0) anonymous = false;
                 if (anonymous) {
-                    if (require_identity) {
-                        std::cerr << "taznode: the peer did not prove an identity and this node requires one" << std::endl;
-                        return false;
-                    }
-                    std::cout << "taznode: peer is anonymous (no identity proof)\n";
+                    std::cout << "taznode: peer is anonymous (no identity proof)\\n";
                 } else {
                     if (!taz::auth_ok(theirs_auth, transcript)) {
                         std::cerr << "taznode: the peer's identity proof does not verify; refused\n";
