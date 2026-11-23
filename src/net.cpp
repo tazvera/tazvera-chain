@@ -224,9 +224,24 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadlin
     return true;
 }
 
-bool send_all(const Socket& socket, std::string_view bytes, std::string* error) {
+bool send_all(const Socket& socket, std::string_view bytes, std::string* error, Deadline deadline) {
     std::size_t sent = 0;
     while (sent < bytes.size()) {
+        // SO_SNDTIMEO limits one blocking send call, not the complete loop. Recompute the remaining time before
+        // every partial write so a receiver that slowly drains its socket cannot extend the absolute deadline.
+        if (deadline != no_deadline()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                if (error) *error = "the peer took longer than the time allowed for this exchange";
+                return false;
+            }
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+            if (!set_timeout_ms(socket, ms, nullptr)) {
+                if (error) *error = "could not set the socket timeouts";
+                return false;
+            }
+        }
         // MSG_NOSIGNAL: without it a peer that closed the connection kills this process with SIGPIPE instead of
         // returning an error. A node that dies because a stranger hung up is not a node.
 #ifdef _WIN32
@@ -237,7 +252,7 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error) 
         const auto chunk = ::send(socket.raw(), bytes.data() + sent,
                                   static_cast<int>(bytes.size() - sent), flags);
         if (chunk <= 0) {
-            if (error) *error = "the connection closed while sending";
+            if (error) *error = would_block() ? "timed out while sending" : "the connection closed while sending";
             return false;
         }
         sent += static_cast<std::size_t>(chunk);
@@ -308,7 +323,7 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
     put_u32(frame, static_cast<std::uint32_t>(payload.size()));
     frame.push_back(static_cast<char>(type));
     frame.append(payload.data(), payload.size());
-    return send_all(socket, frame, error);
+    return send_all(socket, frame, error, deadline);
 }
 
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
