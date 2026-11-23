@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "taz/crypto.hpp"
 #include "taz/persist.hpp"
 
@@ -97,6 +98,35 @@ int main() {
     // 4. a malformed pin is a usage error, not a load attempt
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis abc") == 2);
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + std::string(64, 'z')) == 2);
+
+    // 4b. --new-key makes a key file, prints the address, and never replaces an existing one
+    {
+        const std::string k1 = tmpdir() + "/newkey1.txt";
+        const std::string k2 = tmpdir() + "/newkey2.txt";
+        fs::remove(k1, ec); fs::remove(k2, ec);
+        CHECK(run(exe + " --new-key " + q(k1)) == 0);
+        CHECK(run(exe + " --new-key " + q(k2)) == 0);
+        const std::string a1 = slurp(k1), a2 = slurp(k2);
+        // Two lines of 64 hex each — counted as lines, not as bytes. On Windows the text-mode writer turns every
+        // newline into CRLF, so a byte count would be testing the line ending rather than the key.
+        auto key_lines = [](const std::string& text) {
+            std::vector<std::string> lines;
+            std::string cur;
+            for (char c : text) {
+                if (c == '\n') { lines.push_back(cur); cur.clear(); }
+                else if (c != '\r') cur.push_back(c);
+            }
+            if (!cur.empty()) lines.push_back(cur);
+            return lines;
+        };
+        const auto l1 = key_lines(a1), l2 = key_lines(a2);
+        CHECK(l1.size() == 2 && l2.size() == 2);
+        for (const auto& line : l1) CHECK(line.size() == 64);
+        for (const auto& line : l2) CHECK(line.size() == 64);
+        CHECK(a1 != a2);                                    // a second key is a different key
+        CHECK(run(exe + " --new-key " + q(k1)) != 0);       // the same path again is refused
+        CHECK(slurp(k1) == a1);                             // and the file is untouched
+    }
 
     // 5. a real, valid chain file and still no pin: the node must not start
     CHECK(run(exe + " --chain " + q(chain)) == 2);

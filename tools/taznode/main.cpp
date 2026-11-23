@@ -33,6 +33,7 @@ constexpr const char* kUsage =
     "  --expect-genesis <hex>    the genesis commitment you trust, taken from outside the file\n"
     "  --init-genesis <a>:<n>    create a new chain with these two genesis accounts (use exactly twice)\n"
     "  --key-file <path>         prototype key file: line 1 = 64 hex private seed, line 2 = 64 hex public key\n"
+    "  --new-key <path>          make a new key file and print its address, then stop (never overwrites)\n"
     "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
@@ -153,6 +154,7 @@ int main(int argc, char** argv) {
     bool require_identity = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
+    std::string new_key_file;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--help" || a == "-h") { std::cout << kUsage; return 0; }
@@ -170,6 +172,10 @@ int main(int argc, char** argv) {
             if (seen_key) return usage_error("--key-file was given twice");
             seen_key = true; key_file = argv[++i]; continue;
         }
+        if (a == "--new-key" && i + 1 < argc) {
+            if (!new_key_file.empty()) return usage_error("--new-key was given twice");
+            new_key_file = argv[++i]; continue;
+        }
         if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
         if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
@@ -184,6 +190,33 @@ int main(int argc, char** argv) {
             seen_transfer = true; transfer_spec = argv[++i]; continue;
         }
         return usage_error("unknown argument \"" + a + "\"");
+    }
+    // Making a key needs no chain, so this is handled before that check and then stops.
+    if (!new_key_file.empty()) {
+        if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
+            !serve_port.empty() || seen_key || !identity_file.empty())
+            return usage_error("--new-key makes a key and stops; it cannot be combined with other actions");
+        if (std::ifstream(new_key_file)) return usage_error("the key file already exists; refusing to overwrite it");
+        taz::PrivKey sk{};
+        taz::PubKey pk{};
+        if (!taz::generate_keypair(sk, pk)) {
+            std::cerr << "taznode: could not generate a key\n";
+            return 3;
+        }
+        {
+            std::ofstream out(new_key_file);
+            if (!out) {
+                std::cerr << "taznode: cannot write the key file\n";
+                return 3;
+            }
+            out << taz::to_hex(sk) << "\n" << taz::to_hex(pk) << "\n";
+        }
+        // The address is what an operator shares. The seed is NOT printed: it is already in the file, and a seed
+        // on a terminal ends up in scrollback, shell history and screenshots.
+        std::cout << "taznode: wrote a new key to " << new_key_file << "\n"
+                  << "taznode: its address is " << taz::to_hex(taz::address_from_pubkey(pk)) << "\n"
+                  << "taznode: keep that file private; anyone with it can spend from this address\n";
+        return 0;
     }
     if (chain_file.empty()) return usage_error("--chain is required");
 
