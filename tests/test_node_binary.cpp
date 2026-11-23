@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "taz/crypto.hpp"
 #include "taz/persist.hpp"
 
@@ -106,7 +107,22 @@ int main() {
         CHECK(run(exe + " --new-key " + q(k1)) == 0);
         CHECK(run(exe + " --new-key " + q(k2)) == 0);
         const std::string a1 = slurp(k1), a2 = slurp(k2);
-        CHECK(a1.size() == 130 && a2.size() == 130);        // 64 hex, newline, 64 hex, newline
+        // Two lines of 64 hex each — counted as lines, not as bytes. On Windows the text-mode writer turns every
+        // newline into CRLF, so a byte count would be testing the line ending rather than the key.
+        auto key_lines = [](const std::string& text) {
+            std::vector<std::string> lines;
+            std::string cur;
+            for (char c : text) {
+                if (c == '\n') { lines.push_back(cur); cur.clear(); }
+                else if (c != '\r') cur.push_back(c);
+            }
+            if (!cur.empty()) lines.push_back(cur);
+            return lines;
+        };
+        const auto l1 = key_lines(a1), l2 = key_lines(a2);
+        CHECK(l1.size() == 2 && l2.size() == 2);
+        for (const auto& line : l1) CHECK(line.size() == 64);
+        for (const auto& line : l2) CHECK(line.size() == 64);
         CHECK(a1 != a2);                                    // a second key is a different key
         CHECK(run(exe + " --new-key " + q(k1)) != 0);       // the same path again is refused
         CHECK(slurp(k1) == a1);                             // and the file is untouched
