@@ -355,16 +355,16 @@ static void n07_send_deadline_cuts_off_a_slow_receiver() {
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
-    // The receiver drains small chunks slowly. Each successful partial write must NOT restart the 500 ms
+    // The receiver drains chunks slowly. Each successful partial write must NOT restart the 500 ms
     // total deadline; a simple "no reader" test would only exercise the per-call socket timeout.
     std::thread slow_reader([&] {
         std::string chunk;
         for (;;) {
-            if (!recv_exact(client, 64u * 1024u, chunk, nullptr)) return;
+            if (!recv_exact(client, 512u * 1024u, chunk, nullptr)) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     });
-    const std::string payload(8u * 1024u * 1024u, 'x'); // exceeds normal loopback send buffers
+    const std::string payload(kMaxPayloadBytes, 'x'); // maximum legal frame payload; far above socket buffers
     const auto started = std::chrono::steady_clock::now();
     const bool sent = send_message(server, kMsgBlocks, payload, &err,
                                    started + std::chrono::milliseconds(500));
