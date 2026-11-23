@@ -198,6 +198,9 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 3);   // nothing listening
+    // strict peer authentication must not start unless this node also has an identity key
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
+              " --require-identity --peer 1") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --serve 2") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --max-peers 3") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --serve 1 --max-peers 0") == 2);
