@@ -371,7 +371,8 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
 
     const HandshakeDecision decision = check_peer(ours, theirs);
     if (!decision.ok) return fail("peer hello refused: " + decision.reason);
-    if (!hello_signature_ok(theirs)) return fail("peer hello identity signature is missing or invalid");
+    if (!hello_has_identity(theirs)) return fail("peer did not prove an identity");
+    if (!hello_signature_ok(theirs)) return fail("peer hello identity signature is invalid");
 
     // The second signature binds both exact hello frames to this connection, not merely to a reusable key.
     const std::string transcript = auth_transcript(ours, our_raw_hello, theirs, their_raw_hello);
