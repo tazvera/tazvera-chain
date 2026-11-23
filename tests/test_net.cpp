@@ -355,18 +355,28 @@ static void n07_send_deadline_cuts_off_a_slow_receiver() {
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
-    // Larger than normal loopback socket buffers, so the send must block when the peer refuses to read.
-    const std::string payload(kMaxPayloadBytes, 'x');
+    // The receiver drains small chunks slowly. Each successful partial write must NOT restart the 500 ms
+    // total deadline; a simple "no reader" test would only exercise the per-call socket timeout.
+    std::thread slow_reader([&] {
+        std::string chunk;
+        for (;;) {
+            if (!recv_exact(client, 64u * 1024u, chunk, nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+    const std::string payload(8u * 1024u * 1024u, 'x'); // exceeds normal loopback send buffers
     const auto started = std::chrono::steady_clock::now();
     const bool sent = send_message(server, kMsgBlocks, payload, &err,
                                    started + std::chrono::milliseconds(500));
     const auto took =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+    server.close(); // unblock the reader before joining it
 
     CHECK(!sent);
     CHECK(!err.empty());
     CHECK(took.count() >= 300);
     CHECK(took.count() < 2500);
+    slow_reader.join();
 }
 
 // v9.0: the deadline must cut off a peer that trickles bytes, not wait three seconds after each one.
