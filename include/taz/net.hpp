@@ -89,7 +89,8 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
                   Deadline deadline = no_deadline());
 
-// One side of the handshake. `send_first` must be true on exactly one of the two ends.
+// Compatibility-only chain handshake: checks framing and exchanges hello data, but does NOT authenticate a peer.
+// `send_first` must be true on exactly one of the two ends. Use exchange_authenticated_hello for key proof.
 bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first,
                     std::string* error = nullptr, Deadline deadline = no_deadline(),
                     std::string* their_raw_hello = nullptr);
