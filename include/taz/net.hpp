@@ -94,4 +94,10 @@ bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool
                     std::string* error = nullptr, Deadline deadline = no_deadline(),
                     std::string* their_raw_hello = nullptr);
 
+// Stronger handshake: both peers sign their fresh hello and prove control of that identity over
+// the transcript containing both exact hello frames. This authenticates keys, not peer authorization.
+bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivKey& private_seed,
+                                   Hello& theirs, bool send_first, std::string* error = nullptr,
+                                   Deadline deadline = no_deadline());
+
 }  // namespace taz
