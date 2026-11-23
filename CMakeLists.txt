@@ -100,14 +100,18 @@ add_test(NAME taz_net_tests COMMAND taz_net_tests)
 add_executable(taz_handshake_adversarial_tests tests/test_handshake_adversarial.cpp)
 target_link_libraries(taz_handshake_adversarial_tests PRIVATE tazcore Threads::Threads)
 add_test(NAME taz_handshake_adversarial_tests COMMAND taz_handshake_adversarial_tests)
-set_tests_properties(taz_handshake_adversarial_tests PROPERTIES TIMEOUT 120)
+# PASS_REGULAR_EXPRESSION makes the exit code irrelevant and requires the final line with the exact number of cases
+# that ran: a test that is skipped, cut short or silently loses cases (on any platform) cannot pass.
+set_tests_properties(taz_handshake_adversarial_tests PROPERTIES TIMEOUT 120
+    PASS_REGULAR_EXPRESSION "handshake adversarial tests: all passed \\(20 cases\\)")
 
 add_executable(taz_node_adversarial_tests tests/test_node_adversarial.cpp)
 target_link_libraries(taz_node_adversarial_tests PRIVATE tazcore Threads::Threads)
 target_compile_definitions(taz_node_adversarial_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
 add_dependencies(taz_node_adversarial_tests taznode)
 add_test(NAME taz_node_adversarial_tests COMMAND taz_node_adversarial_tests)
-set_tests_properties(taz_node_adversarial_tests PROPERTIES TIMEOUT 120)
+set_tests_properties(taz_node_adversarial_tests PROPERTIES TIMEOUT 180
+    PASS_REGULAR_EXPRESSION "node adversarial tests: all passed \\(27 cases\\)")
 
 add_executable(taz_hello_tests tests/test_hello.cpp)
 target_link_libraries(taz_hello_tests PRIVATE tazcore)
