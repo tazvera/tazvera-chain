@@ -338,6 +338,9 @@ int main(int argc, char** argv) {
             taz::PubKey identity_pk{};
             if (!read_key_file(identity_file, identity_sk, identity_pk, why))
                 return usage_error("identity key: " + why);
+            taz::PubKey derived_identity_pk{};
+            if (!taz::public_from_private(identity_sk, derived_identity_pk) || derived_identity_pk != identity_pk)
+                return usage_error("identity key file is inconsistent: the public key does not belong to the private seed");
             have_identity = true;
         }
 
