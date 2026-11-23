@@ -201,6 +201,13 @@ int main() {
     // strict peer authentication must not start unless this node also has an identity key
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --require-identity --peer 1") == 2);
+
+    // An identity file whose public key does not match its private seed must be refused before networking.
+    const std::string bad_identity = tmpdir() + "/bad-identity.key";
+    write_text(bad_identity, taz::to_hex(sk) + "\\n" + taz::to_hex(pk2) + "\\n");
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
+              " --identity " + q(bad_identity) + " --require-identity --peer 1") == 2);
+    fs::remove(bad_identity, ec);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --serve 2") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --max-peers 3") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --serve 1 --max-peers 0") == 2);
