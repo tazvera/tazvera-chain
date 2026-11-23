@@ -481,91 +481,91 @@ int main(int argc, char** argv) {
                           << taz::to_hex(taz::address_from_pubkey(theirs.pubkey))
                           << " (proof verified on this connection)\n";
             } else {
-                // Optional-identity mode intentionally retains anonymous-peer compatibility. It still verifies
-                // any identity proof that is present; it does not claim that hello-only exchange is authentication.
-            if (!taz::hello_has_nonce(ours)) {
-                std::cerr << "taznode: this node could not generate a nonce; refusing to start a handshake\n";
-                return false;
-            }
-            // The hello's own signature is kept exactly as it was before this change: removing a check that
-            // already existed is not a refactor, it is a regression with a nicer name. The auth message below is
-            // the stronger, connection-bound proof; this one stays because it was already here.
-            if (have_identity && !taz::sign_hello(ours, identity_sk)) {
-                std::cerr << "taznode: could not sign the handshake with the identity key\n";
-                return false;
-            }
-            std::string their_hello_bytes;
-            if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err, deadline, &their_hello_bytes)) {
-                std::cerr << "taznode: the handshake failed: " << net_err << "\n";
-                return false;
-            }
-            if (!taz::hello_has_nonce(theirs)) {
-                std::cerr << "taznode: the peer's hello has no nonce; refusing\n";
-                return false;
-            }
-            // The pre-existing hello signature check, unchanged: present and invalid is still a refusal.
-            if (taz::hello_has_identity(theirs) && !taz::hello_signature_ok(theirs)) {
-                std::cerr << "taznode: the peer sent an identity signature that does not verify; refused\n";
-                return false;
-            }
-            const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
-            if (!decision.ok) {
-                std::cerr << "taznode: peer refused: " << decision.reason << "\n";
-                return false;
-            }
+                    // Optional-identity mode intentionally retains anonymous-peer compatibility. It still verifies
+                    // any identity proof that is present; it does not claim that hello-only exchange is authentication.
+                if (!taz::hello_has_nonce(ours)) {
+                    std::cerr << "taznode: this node could not generate a nonce; refusing to start a handshake\n";
+                    return false;
+                }
+                // The hello's own signature is kept exactly as it was before this change: removing a check that
+                // already existed is not a refactor, it is a regression with a nicer name. The auth message below is
+                // the stronger, connection-bound proof; this one stays because it was already here.
+                if (have_identity && !taz::sign_hello(ours, identity_sk)) {
+                    std::cerr << "taznode: could not sign the handshake with the identity key\n";
+                    return false;
+                }
+                std::string their_hello_bytes;
+                if (!taz::exchange_hello(sock, ours, theirs, we_speak_first, &net_err, deadline, &their_hello_bytes)) {
+                    std::cerr << "taznode: the handshake failed: " << net_err << "\n";
+                    return false;
+                }
+                if (!taz::hello_has_nonce(theirs)) {
+                    std::cerr << "taznode: the peer's hello has no nonce; refusing\n";
+                    return false;
+                }
+                // The pre-existing hello signature check, unchanged: present and invalid is still a refusal.
+                if (taz::hello_has_identity(theirs) && !taz::hello_signature_ok(theirs)) {
+                    std::cerr << "taznode: the peer sent an identity signature that does not verify; refused\n";
+                    return false;
+                }
+                const taz::HandshakeDecision decision = taz::check_peer(ours, theirs);
+                if (!decision.ok) {
+                    std::cerr << "taznode: peer refused: " << decision.reason << "\n";
+                    return false;
+                }
 
-            // connector is A and the accepter is B, so both sides build the same bytes.
-            const std::string my_hello_bytes = taz::encode_hello(ours);
-            const std::string transcript =
-                taz::auth_transcript(ours, my_hello_bytes, theirs, their_hello_bytes);
-            if (transcript.empty()) {
-                std::cerr << "taznode: could not build the authentication transcript; refusing\n";
-                return false;
-            }
-            taz::AuthMessage mine;
-            if (have_identity && !taz::sign_auth(mine, identity_sk, transcript)) {
-                std::cerr << "taznode: could not sign the authentication transcript\n";
-                return false;
-            }
-            // Both sides send first and then read, so neither can be left waiting for a message the other will
-            // only send after reading.
-            if (!taz::send_message(sock, taz::kMsgAuth, taz::encode_auth(mine), &net_err, deadline)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                return false;
-            }
-            std::uint8_t type = 0;
-            std::string payload;
-            if (!taz::recv_message(sock, type, payload, &net_err, deadline)) {
-                std::cerr << "taznode: " << net_err << "\n";
-                return false;
-            }
-            if (type != taz::kMsgAuth) {
-                std::cerr << "taznode: the peer did not send an identity proof\n";
-                return false;
-            }
-            taz::AuthMessage theirs_auth;
-            std::string why;
-            if (!taz::decode_auth(payload, theirs_auth, &why)) {
-                std::cerr << "taznode: the peer's identity proof cannot be read: " << why << "\n";
-                return false;
-            }
-            bool anonymous = true;
-            for (std::uint8_t b : theirs_auth.pubkey)
-                if (b != 0) anonymous = false;
-            if (anonymous) {
-                if (require_identity) {
-                    std::cerr << "taznode: the peer did not prove an identity and this node requires one" << std::endl;
+                // connector is A and the accepter is B, so both sides build the same bytes.
+                const std::string my_hello_bytes = taz::encode_hello(ours);
+                const std::string transcript =
+                    taz::auth_transcript(ours, my_hello_bytes, theirs, their_hello_bytes);
+                if (transcript.empty()) {
+                    std::cerr << "taznode: could not build the authentication transcript; refusing\n";
                     return false;
                 }
-                std::cout << "taznode: peer is anonymous (no identity proof)\n";
-            } else {
-                if (!taz::auth_ok(theirs_auth, transcript)) {
-                    std::cerr << "taznode: the peer's identity proof does not verify; refused\n";
+                taz::AuthMessage mine;
+                if (have_identity && !taz::sign_auth(mine, identity_sk, transcript)) {
+                    std::cerr << "taznode: could not sign the authentication transcript\n";
                     return false;
                 }
-                std::cout << "taznode: peer identity=" << taz::to_hex(taz::address_from_pubkey(theirs_auth.pubkey))
-                          << " (proof verified on this connection)\n";
-            }
+                // Both sides send first and then read, so neither can be left waiting for a message the other will
+                // only send after reading.
+                if (!taz::send_message(sock, taz::kMsgAuth, taz::encode_auth(mine), &net_err, deadline)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                std::uint8_t type = 0;
+                std::string payload;
+                if (!taz::recv_message(sock, type, payload, &net_err, deadline)) {
+                    std::cerr << "taznode: " << net_err << "\n";
+                    return false;
+                }
+                if (type != taz::kMsgAuth) {
+                    std::cerr << "taznode: the peer did not send an identity proof\n";
+                    return false;
+                }
+                taz::AuthMessage theirs_auth;
+                std::string why;
+                if (!taz::decode_auth(payload, theirs_auth, &why)) {
+                    std::cerr << "taznode: the peer's identity proof cannot be read: " << why << "\n";
+                    return false;
+                }
+                bool anonymous = true;
+                for (std::uint8_t b : theirs_auth.pubkey)
+                    if (b != 0) anonymous = false;
+                if (anonymous) {
+                    if (require_identity) {
+                        std::cerr << "taznode: the peer did not prove an identity and this node requires one" << std::endl;
+                        return false;
+                    }
+                    std::cout << "taznode: peer is anonymous (no identity proof)\n";
+                } else {
+                    if (!taz::auth_ok(theirs_auth, transcript)) {
+                        std::cerr << "taznode: the peer's identity proof does not verify; refused\n";
+                        return false;
+                    }
+                    std::cout << "taznode: peer identity=" << taz::to_hex(taz::address_from_pubkey(theirs_auth.pubkey))
+                              << " (proof verified on this connection)\n";
+                }
             }
 
             // A refusal must be visible to the other side. Without this the connecting node had already read its
