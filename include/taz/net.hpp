@@ -97,8 +97,10 @@ bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool
 
 // Stronger handshake: both peers sign their fresh hello and prove control of that identity over
 // the transcript containing both exact hello frames. This authenticates keys, not peer authorization.
+// Authenticated handshakes get a finite default absolute deadline. Callers may pass a shorter explicit
+// deadline; omitting it must not let a slow-trickle peer keep the handshake alive indefinitely.
 bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivKey& private_seed,
                                    Hello& theirs, bool send_first, std::string* error = nullptr,
-                                   Deadline deadline = no_deadline());
+                                   Deadline deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10));
 
 }  // namespace taz
