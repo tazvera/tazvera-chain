@@ -153,6 +153,59 @@ static void n06_slow_peer_is_cut_at_the_deadline() {
     dribbler.join();
 }
 
+// v9.3: the authenticated handshake proves control of both peer keys and binds the proof to fresh hellos.
+static void n08_authenticated_handshake_ok() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
+
+    const Chain chain = make_chain(1000);
+    PrivKey server_key{}, client_key{}; PubKey server_pub{}, client_pub{};
+    CHECK(generate_keypair(server_key, server_pub));
+    CHECK(generate_keypair(client_key, client_pub));
+
+    Hello server_hello = hello_for(chain), client_hello = hello_for(chain);
+    Hello server_got, client_got;
+    std::string server_err, client_err;
+    bool server_ok = false, client_ok = false;
+    std::thread server_thread([&] {
+        server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
+                                                 false, &server_err);
+    });
+    client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
+                                             true, &client_err);
+    server_thread.join();
+
+    CHECK(server_ok);
+    CHECK(client_ok);
+    if (!server_err.empty()) std::cerr << "  server auth: " << server_err << "\n";
+    if (!client_err.empty()) std::cerr << "  client auth: " << client_err << "\n";
+    CHECK(hello_signature_ok(server_hello));
+    CHECK(hello_signature_ok(client_hello));
+    CHECK(server_got.pubkey == client_pub);
+    CHECK(client_got.pubkey == server_pub);
+    CHECK(check_peer(server_hello, server_got).ok);
+    CHECK(check_peer(client_hello, client_got).ok);
+}
+
+// An unsigned hello may identify a chain, but it must never pass the authenticated handshake.
+static void n09_unsigned_peer_refused() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    const Chain chain = make_chain(1000);
+    PrivKey local_key{}; PubKey local_pub{};
+    CHECK(generate_keypair(local_key, local_pub));
+    Hello local = hello_for(chain);
+    Hello anonymous = hello_for(chain);
+    CHECK(send_message(client, kMsgHello, encode_hello(anonymous), &err));
+
+    Hello got;
+    CHECK(!exchange_authenticated_hello(server, local, local_key, got, false, &err));
+    CHECK(err.find("identity signature") != std::string::npos);
+}
+
 static void n05_closed_port_is_an_error() {
     Listener listener; std::string err;
     CHECK(listen_loopback(0, listener, &err));
@@ -213,6 +266,8 @@ int main() {
     n06_slow_peer_is_cut_at_the_deadline();
     n06_send_to_closed_peer_is_an_error();
     n07_deadline_cuts_off_a_slow_peer();
+    n08_authenticated_handshake_ok();
+    n09_unsigned_peer_refused();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
