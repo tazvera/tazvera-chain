@@ -6,6 +6,7 @@
 // What this proves: two sockets on 127.0.0.1 exchange the hello, a peer on a different chain is refused, a peer
 // announcing a huge message is refused before anything is allocated, garbage is refused, and a closed port is an
 // error rather than a crash.
+#include "taz/auth.hpp"
 #include "taz/net.hpp"
 #include <chrono>
 #include "taz/chain.hpp"
