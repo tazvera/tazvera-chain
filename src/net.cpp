@@ -1,5 +1,6 @@
 #include "taz/net.hpp"
 #include "taz/auth.hpp"
+#include "taz/crypto.hpp"
 #include <algorithm>
 #include <vector>
 
@@ -357,8 +358,9 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
         return false;
     };
 
-    // A fresh nonce is mandatory: otherwise a recorded identity proof could be replayed.
-    if (!hello_has_nonce(ours)) return fail("local hello has no fresh nonce");
+    // Never trust a caller-supplied nonce here: a non-zero value may still be stale or reused.
+    // Generate a fresh unpredictable nonce for every authenticated connection before signing.
+    if (!random_bytes(ours.nonce)) return fail("could not generate a fresh local nonce");
     if (std::all_of(private_seed.begin(), private_seed.end(), [](std::uint8_t b) { return b == 0; }))
         return fail("local identity key is empty");
     if (!sign_hello(ours, private_seed)) return fail("could not sign the local hello");
