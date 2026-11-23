@@ -146,5 +146,12 @@ endif()
 
 # v8.10: writes chain files that exercise the veto rules, so the explorer cross-check can be run against
 # chains the C++ core itself produced (not only against the three shipped demos).
+add_executable(taz_network_binding_tests tests/test_network_binding.cpp)
+target_link_libraries(taz_network_binding_tests PRIVATE tazcore)
+add_test(NAME taz_network_binding_tests COMMAND taz_network_binding_tests)
+# The exact case count must be printed: a test that is skipped or cut short cannot pass on any platform.
+set_tests_properties(taz_network_binding_tests PROPERTIES TIMEOUT 120
+    PASS_REGULAR_EXPRESSION "network binding tests: all passed \\(9 cases\\)")
+
 add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
 target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
