@@ -217,22 +217,27 @@ static void test_fuzz_file() {
     std::cout << "fuzz file: " << refused << " refused, " << accepted << " accepted (same ledger only)\n";
 }
 static void test_fuzz_transactions() {
-    World w; Chain& c = w.c; const Key ks[] = {w.o, w.g[0], w.g[1], w.g[2], w.n, w.x};
+    World w; const Chain baseline = w.c; const Key ks[] = {w.o, w.g[0], w.g[1], w.g[2], w.n, w.x};
     int ok = 0, bad = 0;
+    // Keep every fuzz case on the same short baseline. Appending all 4,000 cases to one
+    // ever-growing chain made validation work grow quadratically under ASan/UBSan.
+    // Independent trials preserve 4,000 randomized block-validation cases without that
+    // unrelated chain-growth cost.
     for (int i = 0; i < 4000; ++i) {
+        Chain trial = baseline;
         std::vector<Transaction> txs;
         for (std::uint64_t t = rnd(4); t > 0; --t) {
             const Key& f = ks[rnd(6)]; const Key& o = ks[rnd(6)];
-            Transaction tx = base(f, rnd(4) == 0 ? rnd(50) : nx(c, f));
+            Transaction tx = base(f, rnd(4) == 0 ? rnd(50) : nx(baseline, f));
             tx.kind = static_cast<TxKind>(rnd(6)); tx.to = rnd(2) ? o.addr : Address{}; tx.amount = rnd(3) ? rnd(3000000) : UINT64_MAX - rnd(3);
             tx.new_owner = o.addr; tx.veto = rnd(2) ? ks[rnd(6)].addr : Address{}; tx.guardian_threshold = rnd(5);
             tx.guardians = {ks[rnd(6)].addr, ks[rnd(6)].addr}; tx.daily_limit = rnd(5000000); tx.hold_threshold = rnd(5000000); tx.hold_blocks = rnd(20);
             resign(tx, f); if (rnd(10) == 0) tx.signature[rnd(tx.signature.size())] ^= static_cast<std::uint8_t>(1 + rnd(255));  // some with a broken signature
             txs.push_back(tx);
         }
-        const auto before = c.state().state_root();
-        if (c.append_block(txs, g_ts++).ok) ++ok; else { ++bad; CHECK(c.state().state_root() == before); }        // failed block changes nothing
-        CHECK(conserved(c, w.total));
+        const auto before = trial.state().state_root();
+        if (trial.append_block(txs, g_ts++).ok) ++ok; else { ++bad; CHECK(trial.state().state_root() == before); } // failed block changes nothing
+        CHECK(conserved(trial, w.total));
     }
     CHECK(ok > 100 && bad > 100);
     std::cout << "fuzz transactions: " << ok << " blocks accepted, " << bad << " refused, supply conserved\n";

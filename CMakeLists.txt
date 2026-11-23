@@ -129,6 +129,9 @@ add_test(NAME taz_hardening91_tests COMMAND taz_hardening91_tests)
 add_executable(taz_security82_tests tests/test_security82.cpp)
 target_link_libraries(taz_security82_tests PRIVATE tazcore)
 add_test(NAME taz_security82_tests COMMAND taz_security82_tests)
+# The deterministic JSON/transaction fuzz suite is intentionally heavier under ASan/UBSan.
+# Give this one security test a bounded 5-minute budget; other tests keep the 120-second default.
+set_tests_properties(taz_security82_tests PROPERTIES TIMEOUT 300)
 
 # v8.3: libFuzzer targets. Off by default; the "Fuzz (libFuzzer)" workflow turns them on with clang.
 option(TAZ_BUILD_FUZZERS "Build the libFuzzer targets (clang, -fsanitize=fuzzer)" OFF)

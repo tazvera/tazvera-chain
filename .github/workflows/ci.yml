@@ -5,6 +5,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # v9.0: the Ubuntu mirrors answer 503 often enough that a flaky mirror was failing a green commit.
@@ -18,7 +19,7 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --timeout 120
       - name: Chains the core wrote for the veto rules
         run: |
           mkdir -p gen
@@ -31,6 +32,7 @@ jobs:
           git diff --exit-code -- explorer/index.html
   sanitizers:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # v9.0: the Ubuntu mirrors answer 503 often enough that a flaky mirror was failing a green commit.
@@ -44,4 +46,4 @@ jobs:
       - name: Build
         run: cmake --build build-san --parallel 2
       - name: Test
-        run: ctest --test-dir build-san --output-on-failure
+        run: ctest --test-dir build-san --output-on-failure --timeout 120
