@@ -7,14 +7,17 @@
 // height with the same state root.
 // Exit codes: 0 ok, 2 usage, 3 refused to load / refused peer, 4 refused to overwrite, 5 block refused.
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 #include "taz/crypto.hpp"
 #include "taz/persist.hpp"
+#include "taz/net.hpp"
 
 #ifndef TAZ_NODE_BINARY
 #error "TAZ_NODE_BINARY must be defined (see CMakeLists.txt)"
@@ -208,6 +211,39 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --identity " + q(bad_identity) + " --require-identity --peer 1") == 2);
     fs::remove(bad_identity, ec);
+
+    // Exercise the real taznode strict-authentication path between two separate processes.
+    const std::string client_identity = tmpdir() + "/client-identity.key";
+    write_text(client_identity, taz::to_hex(sk2) + "\n" + taz::to_hex(pk2) + "\n");
+    std::string net_error;
+    CHECK(taz::net_startup(&net_error));
+    taz::Listener reserved_port;
+    CHECK(taz::listen_loopback(0, reserved_port, &net_error));
+    const std::uint16_t strict_port = reserved_port.port;
+    reserved_port.socket.close();  // hand the OS-selected free port to the server process
+    const std::string server_log = tmpdir() + "/strict-server.log";
+    const std::string server_cmd = exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
+        " --serve " + std::to_string(strict_port) + " --max-peers 1 --serve-timeout 8 --identity " +
+        q(key_file) + " --require-identity > " + q(server_log) + " 2>&1";
+    int server_rc = -1;
+    std::thread server_thread([&] { server_rc = run(server_cmd); });
+    bool server_ready = false;
+    for (int attempt = 0; attempt < 50 && !server_ready; ++attempt) {
+        server_ready = slurp(server_log).find("listening on 127.0.0.1:") != std::string::npos;
+        if (!server_ready) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    CHECK(server_ready);
+    const int client_rc = server_ready
+        ? run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
+              " --peer " + std::to_string(strict_port) + " --identity " + q(client_identity) +
+              " --require-identity")
+        : -1;
+    server_thread.join();
+    CHECK(client_rc == 0);
+    CHECK(server_rc == 0);
+    taz::net_cleanup();
+    fs::remove(client_identity, ec);
+    fs::remove(server_log, ec);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --serve 2") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --max-peers 3") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --serve 1 --max-peers 0") == 2);
