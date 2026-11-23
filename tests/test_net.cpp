@@ -188,6 +188,42 @@ static void n08_authenticated_handshake_ok() {
     CHECK(check_peer(client_hello, client_got).ok);
 }
 
+// A caller may accidentally reuse a previously populated Hello. The authenticated transport
+// must replace that value with a fresh nonce before signing, rather than trusting non-zero bytes.
+static void n11_authenticated_handshake_refreshes_reused_nonce() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    const Chain chain = make_chain(1000);
+    PrivKey server_key{}, client_key{}; PubKey server_pub{}, client_pub{};
+    CHECK(generate_keypair(server_key, server_pub));
+    CHECK(generate_keypair(client_key, client_pub));
+
+    Hello server_hello = hello_for(chain), client_hello = hello_for(chain);
+    Hash32 stale_nonce{};
+    stale_nonce.fill(0xA5);
+    server_hello.nonce = stale_nonce;
+    client_hello.nonce = stale_nonce;
+
+    Hello server_got, client_got;
+    std::string server_err, client_err;
+    bool server_ok = false, client_ok = false;
+    std::thread server_thread([&] {
+        server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
+                                                 false, &server_err);
+    });
+    client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
+                                             true, &client_err);
+    server_thread.join();
+
+    CHECK(server_ok);
+    CHECK(client_ok);
+    CHECK(server_hello.nonce != stale_nonce);
+    CHECK(client_hello.nonce != stale_nonce);
+    CHECK(server_hello.nonce != client_hello.nonce);
+}
+
 // An unsigned hello may identify a chain, but it must never pass the authenticated handshake.
 static void n09_unsigned_peer_refused() {
     Listener listener; Socket server, client; std::string err;
@@ -280,6 +316,7 @@ int main() {
     n06_send_to_closed_peer_is_an_error();
     n07_deadline_cuts_off_a_slow_peer();
     n08_authenticated_handshake_ok();
+    n11_authenticated_handshake_refreshes_reused_nonce();
     n09_unsigned_peer_refused();
     n10_zero_local_identity_refused();
     net_cleanup();
