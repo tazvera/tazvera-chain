@@ -242,6 +242,27 @@ static void n09_unsigned_peer_refused() {
     CHECK(err.find("peer did not prove an identity") != std::string::npos);
 }
 
+// A peer that advertises a key but sends a broken hello signature must not pass strict authentication.
+static void n12_invalid_peer_hello_signature_refused() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    const Chain chain = make_chain(1000);
+    PrivKey local_key{}, peer_key{}; PubKey local_pub{}, peer_pub{};
+    CHECK(generate_keypair(local_key, local_pub));
+    CHECK(generate_keypair(peer_key, peer_pub));
+
+    Hello local = hello_for(chain), peer = hello_for(chain), got;
+    CHECK(sign_hello(peer, peer_key));
+    peer.signature[0] ^= 0x01;  // corrupt the signed hello after signing
+    CHECK(!hello_signature_ok(peer));
+    CHECK(send_message(client, kMsgHello, encode_hello(peer), &err));
+
+    CHECK(!exchange_authenticated_hello(server, local, local_key, got, false, &err));
+    CHECK(err.find("identity signature is invalid") != std::string::npos);
+}
+
 // A zero-filled seed is not an identity and must be rejected before any hello is sent.
 static void n10_zero_local_identity_refused() {
     Listener listener; Socket server, client; std::string err;
@@ -318,6 +339,7 @@ int main() {
     n08_authenticated_handshake_ok();
     n11_authenticated_handshake_refreshes_reused_nonce();
     n09_unsigned_peer_refused();
+    n12_invalid_peer_hello_signature_refused();
     n10_zero_local_identity_refused();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
