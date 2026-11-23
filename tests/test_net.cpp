@@ -206,6 +206,19 @@ static void n09_unsigned_peer_refused() {
     CHECK(err.find("identity signature") != std::string::npos);
 }
 
+// A zero-filled seed is not an identity and must be rejected before any hello is sent.
+static void n10_zero_local_identity_refused() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    const Chain chain = make_chain(1000);
+    Hello local = hello_for(chain), got;
+    PrivKey empty_key{};
+    CHECK(!exchange_authenticated_hello(server, local, empty_key, got, false, &err));
+    CHECK(err.find("identity key is empty") != std::string::npos);
+}
+
 static void n05_closed_port_is_an_error() {
     Listener listener; std::string err;
     CHECK(listen_loopback(0, listener, &err));
@@ -268,6 +281,7 @@ int main() {
     n07_deadline_cuts_off_a_slow_peer();
     n08_authenticated_handshake_ok();
     n09_unsigned_peer_refused();
+    n10_zero_local_identity_refused();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
