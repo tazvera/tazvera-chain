@@ -481,8 +481,8 @@ int main(int argc, char** argv) {
                           << taz::to_hex(taz::address_from_pubkey(theirs.pubkey))
                           << " (proof verified on this connection)\n";
             } else {
-                    // Optional-identity mode intentionally retains anonymous-peer compatibility. It still verifies
-                    // any identity proof that is present; it does not claim that hello-only exchange is authentication.
+                // Optional-identity mode intentionally retains anonymous-peer compatibility. It still verifies
+                // any identity proof that is present; it does not claim that hello-only exchange is authentication.
                 if (!taz::hello_has_nonce(ours)) {
                     std::cerr << "taznode: this node could not generate a nonce; refusing to start a handshake\n";
                     return false;
