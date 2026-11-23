@@ -204,7 +204,7 @@ int main() {
 
     // An identity file whose public key does not match its private seed must be refused before networking.
     const std::string bad_identity = tmpdir() + "/bad-identity.key";
-    write_text(bad_identity, taz::to_hex(sk) + "\\n" + taz::to_hex(pk2) + "\\n");
+    write_text(bad_identity, taz::to_hex(sk) + "\n" + taz::to_hex(pk2) + "\n");
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --identity " + q(bad_identity) + " --require-identity --peer 1") == 2);
     fs::remove(bad_identity, ec);
