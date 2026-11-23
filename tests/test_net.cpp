@@ -340,7 +340,9 @@ static void n14_authenticated_handshake_has_default_deadline() {
     std::thread dribbler([&] {
         // 4-byte length (200), auth message type, then 200 bytes. One byte every 100 ms
         // keeps each individual recv alive but takes longer than the 10-second absolute deadline.
-        const std::string prefix = std::string("\\0\\0\\0\\xC8", 4) + std::string(1, static_cast<char>(kMsgAuth));
+        std::string prefix;
+        prefix.push_back('\0'); prefix.push_back('\0'); prefix.push_back('\0');
+        prefix.push_back(static_cast<char>(200)); prefix.push_back(static_cast<char>(kMsgAuth));
         for (char byte : prefix) {
             if (finished.load()) return;
             if (!send_all(client, std::string(1, byte), nullptr)) return;
@@ -361,7 +363,7 @@ static void n14_authenticated_handshake_has_default_deadline() {
     CHECK(took.count() >= 8000);
     CHECK(took.count() < 14000);
     std::cout << "  default authenticated-handshake deadline stopped trickle after "
-              << took.count() << " ms\\n";
+              << took.count() << " ms\n";
 }
 
 // A zero-filled seed is not an identity and must be rejected before any hello is sent.
