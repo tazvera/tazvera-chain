@@ -349,6 +349,26 @@ static void n06_send_to_closed_peer_is_an_error() {
     CHECK(!err.empty());
 }
 
+// A peer that never reads must not extend a large send by allowing repeated partial writes to make progress.
+static void n07_send_deadline_cuts_off_a_slow_receiver() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    // Larger than normal loopback socket buffers, so the send must block when the peer refuses to read.
+    const std::string payload(kMaxPayloadBytes, 'x');
+    const auto started = std::chrono::steady_clock::now();
+    const bool sent = send_message(server, kMsgBlocks, payload, &err,
+                                   started + std::chrono::milliseconds(500));
+    const auto took =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+
+    CHECK(!sent);
+    CHECK(!err.empty());
+    CHECK(took.count() >= 300);
+    CHECK(took.count() < 2500);
+}
+
 // v9.0: the deadline must cut off a peer that trickles bytes, not wait three seconds after each one.
 // The client announces a body and then goes quiet; the receive has to give up at the deadline, not at the
 // per-call socket timeout.
@@ -381,6 +401,7 @@ int main() {
     n05_closed_port_is_an_error();
     n06_slow_peer_is_cut_at_the_deadline();
     n06_send_to_closed_peer_is_an_error();
+    n07_send_deadline_cuts_off_a_slow_receiver();
     n07_deadline_cuts_off_a_slow_peer();
     n08_authenticated_handshake_ok();
     n11_authenticated_handshake_refreshes_reused_nonce();
