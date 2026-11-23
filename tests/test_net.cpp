@@ -239,7 +239,7 @@ static void n09_unsigned_peer_refused() {
 
     Hello got;
     CHECK(!exchange_authenticated_hello(server, local, local_key, got, false, &err));
-    CHECK(err.find("identity signature") != std::string::npos);
+    CHECK(err.find("peer did not prove an identity") != std::string::npos);
 }
 
 // A zero-filled seed is not an identity and must be rejected before any hello is sent.
