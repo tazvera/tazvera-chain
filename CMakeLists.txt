@@ -12,9 +12,25 @@ message(STATUS "TAZVERA core version ${TAZ_CORE_VERSION}")
 
 project(tazvera_chain_core VERSION ${TAZ_CORE_VERSION} LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# C++26 is this project's standard. Fail early when the compiler is too old.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+    message(FATAL_ERROR "TAZVERA Chain requires GCC 16 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
+    message(FATAL_ERROR "TAZVERA Chain requires Clang 22 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.50)
+    message(FATAL_ERROR "TAZVERA Chain requires Visual Studio 2022 17.14 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
+# Sanitizer instrumentation makes each deterministic fuzz case substantially slower.
+option(TAZVERA_SANITIZED "Build with a reduced fuzz workload (for ASan/UBSan runs)" OFF)
+if(TAZVERA_SANITIZED)
+    add_compile_definitions(TAZ_SANITIZED_BUILD=1)
+    message(STATUS "TAZVERA: reduced fuzz workload (sanitizer build)")
+endif()
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 
