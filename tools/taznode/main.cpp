@@ -350,7 +350,12 @@ int main(int argc, char** argv) {
         // Block-by-block sync: the node that is ahead sends only the blocks the other one is missing, one
         // message each. The receiver knows how many to expect from the hello heights, so no end marker is
         // needed, and every block goes through accept_block() — the same validation a block from disk gets.
-        constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next poll continues
+        constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next conversation continues
+        // F1: set by the last conversation when blocks were left over (either direction), together with the two
+        // heights it started from. A --peer node uses them to carry on at once instead of waiting a whole poll
+        // interval per 200 blocks - or, without --every, stopping after the first 200 and never catching up.
+        bool more_to_sync = false;
+        std::uint64_t sync_our_height = 0, sync_their_height = 0;
         // announced is the height this node put in the hello, and it is what the receiver counted with. Using
         // chain.height() here instead would send one block too many whenever this node produced a block between
         // the hello and the send, and that extra block would sit in the socket and be read as the next
@@ -385,8 +390,10 @@ int main(int argc, char** argv) {
                 }
             }
             std::cout << "taznode: sent " << send << " block(s) from height " << (from_height + 1) << "\n";
-            if (missing > send)
+            if (missing > send) {
+                more_to_sync = true;
                 std::cout << "taznode: " << (missing - send) << " block(s) left for the next sync\n";
+            }
             return true;
         };
         auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
@@ -458,6 +465,8 @@ int main(int argc, char** argv) {
             }
             if (added > 0)
                 std::cout << "taznode: accepted " << added << " block(s), height is now " << chain.height() << "\n";
+            // Progress (added > 0) is required, so a peer that stalls cannot keep the caller going.
+            if (ok && added > 0 && chain.height() < sync_their_height) more_to_sync = true;
             return ok;
         };
 
@@ -591,13 +600,14 @@ int main(int argc, char** argv) {
                 std::cout << "taznode: already in sync at height " << chain.height() << "; nothing to send\n";
                 return true;
             }
-            // Refuse before receiving: the hello already states the peer's height, and every block is replayed.
-            constexpr std::uint64_t kMaxSyncAhead = 1000;
-            if (theirs.best_height > chain.height() + kMaxSyncAhead) {
-                std::cerr << "taznode: the peer claims to be " << (theirs.best_height - chain.height())
-                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused before syncing\n";
-                return false;
-            }
+            // F1: there used to be a refusal here for a peer more than 1000 blocks ahead. One conversation moves
+            // at most 200 blocks, so such a node could never catch up and a new node could never join a chain
+            // that had grown past 1000 blocks. The refusal protected nothing: every block is validated by
+            // accept_block() as it arrives, and a conversation is bounded by 200 blocks, 4 MiB and 60 s. A
+            // peer that lies about its height just ends the conversation early with nothing added.
+            more_to_sync = false;
+            sync_our_height = chain.height();
+            sync_their_height = theirs.best_height;
             // Both sides see the same two hellos, so both compute the same direction: the one that is ahead
             // sends, the one that is behind receives. Nobody waits for data the other decided not to send.
             if (chain.height() > theirs.best_height)
@@ -708,6 +718,8 @@ int main(int argc, char** argv) {
             // wait, repeat. It is not gossip in the academic sense and it does not scale, but it means a new
             // block reaches the other node without anyone typing a command — which is the point.
             std::uint64_t round = 0, failures = 0;
+            bool catching_up = false;
+            std::uint64_t prev_our = 0, prev_their = 0;
             for (;;) {
                 ++round;
                 taz::Socket socket;
@@ -722,6 +734,16 @@ int main(int argc, char** argv) {
                 if (round_ok) {
                     failures = 0;
                     all_ok = true;
+                    // F1: blocks were left over and the last conversation moved the heights since the one
+                    // before: carry on now. Without the second condition a peer that accepts the blocks and
+                    // gets nowhere would be asked forever.
+                    if (more_to_sync && (!catching_up || sync_our_height != prev_our || sync_their_height != prev_their)) {
+                        catching_up = true;
+                        prev_our = sync_our_height; prev_their = sync_their_height;
+                        std::cout << "taznode: still behind or ahead after round " << round << "; continuing without waiting\n";
+                        continue;
+                    }
+                    catching_up = false;
                 } else {
                     ++failures;
                     all_ok = false;
