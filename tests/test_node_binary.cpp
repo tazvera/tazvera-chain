@@ -201,7 +201,8 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 2);   // identity is required by default
-    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1") == 3); // explicit anonymous mode reaches the absent peer\n    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --identity " + q(key_file) + " --peer 1") == 3); // identity alone enables strict authentication\n    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --require-identity --peer 1") == 2);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1") == 3); // explicit anonymous mode reaches the absent peer
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --identity " + q(key_file) + " --peer 1") == 3); // identity alone enables strict authentication\n    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --require-identity --peer 1") == 2);
     // strict peer authentication must not start unless this node also has an identity key
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --require-identity --peer 1") == 2);
