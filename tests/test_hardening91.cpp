@@ -142,10 +142,10 @@ static std::string sync_run(const fs::path& dir, const Chain& a, const Chain& b,
     // --serve-timeout: a node waiting for a peer that never comes would outlive this test on Windows, where
     // nothing kills a background process for us.
     const std::string a_cmd = node() + " --chain \"" + (dir / "A.json").string() + "\" --expect-genesis " + pin(a) +
-                              " --listen " + std::to_string(port) + " --serve-timeout 40";
+                              " --listen " + std::to_string(port) + " --serve-timeout 40 --allow-anonymous";
     CHECK(run_in_background(a_cmd, out));
     CHECK(wait_for(out, "listening", 10));
-    const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port);
+    const std::string b_cmd = node() + " --chain \"" + (dir / "B.json").string() + "\" --expect-genesis " + pin(b) + " --peer " + std::to_string(port) + " --allow-anonymous";
     const int b_rc = run_waiting(b_cmd, (dir / "b.out").string());
     if (b_rc != 0) std::cerr << "  (the connecting node exited with " << b_rc << ")\n";
     const std::string wanted_line = expect_served ? "served 1 of 1" : "still waiting for 1 peer(s)";
@@ -215,7 +215,7 @@ static void n4_transfer_with_peer_is_an_error() {
     std::string err; CHECK(save_chain_json(c, (dir / "c.json").string(), &err));
     std::ofstream(dir / "key.txt") << to_hex(a.sk) << "\n" << to_hex(a.pk) << "\n";
     const std::string cmd = node() + " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c) + " --key-file \"" + (dir / "key.txt").string()
-                          + "\" --transfer " + to_hex(b.addr) + ":5 --peer 1";
+                          + "\" --transfer " + to_hex(b.addr) + ":5 --peer 1 --allow-anonymous";
     const int rc = run_waiting(cmd, (dir / "o.txt").string());
     CHECK(rc != 0);                                               // v9.0: exit 0, nothing produced
     CHECK(slurp(dir / "o.txt").find("cannot be combined") != std::string::npos);
@@ -240,7 +240,7 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
     CHECK(wait_for(out, "listening", 10));
 
     // an anonymous peer is refused, and the node does not exit
-    const std::string anon = node() + chain_arg + " --peer " + std::to_string(port);
+    const std::string anon = node() + chain_arg + " --peer " + std::to_string(port) + " --allow-anonymous";
     // Now that the accepter confirms before syncing, a refused peer must notice and fail.
     CHECK(run_waiting(anon, (dir / "anon.out").string()) != 0);
     if (!wait_for(out, "did not prove an identity", 10)) std::cerr << "  server output:\n" << slurp(out) << "\n";
@@ -268,7 +268,7 @@ static void n6_serve_timeout_ends_the_node() {
     const std::uint16_t port = free_port();
     const std::string out = (dir / "o.txt").string();
     const std::string cmd = node() + " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c) +
-                            " --listen " + std::to_string(port) + " --serve-timeout 3";
+                            " --listen " + std::to_string(port) + " --serve-timeout 3 --allow-anonymous";
     const auto start = std::chrono::steady_clock::now();
     const int rc = run_waiting(cmd, out);
     const auto elapsed =
