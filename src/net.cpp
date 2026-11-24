@@ -286,6 +286,15 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error, 
             sent += static_cast<std::size_t>(chunk);
         }
 
+        if (std::chrono::steady_clock::now() >= deadline) {
+            u_long blocking = 0;
+            const int restored = ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking);
+            if (error) {
+                *error = "the peer took longer than the time allowed for this exchange";
+                if (restored != 0) *error += "; could not restore blocking socket mode";
+            }
+            return false;
+        }
         u_long blocking = 0;
         if (ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking) != 0) {
             if (error) *error = "send completed but could not restore blocking socket mode";
