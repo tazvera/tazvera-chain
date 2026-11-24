@@ -1,7 +1,4 @@
 name: Fuzz (libFuzzer)
-# Separate from the core CI on purpose: a fuzz run is slow and noisy, and a red result here is a
-# question about the loader, not a broken build. Pull requests get a short smoke run; the weekly
-# schedule gets the same run, so a regression cannot sit unnoticed.
 on:
   workflow_dispatch:
   pull_request:
@@ -9,17 +6,21 @@ on:
     - cron: "0 3 * * 1"
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang and OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y clang cmake libssl-dev
+      - name: Install Clang 22 and OpenSSL headers
+        run: sudo apt-get update && sudo apt-get install -y clang-22 cmake libssl-dev
+      - name: Verify C++26 compiler mode
+        run: |
+          clang++-22 --version
+          printf 'int main(){}\n' | clang++-22 -std=c++2c -x c++ -fsyntax-only -
       - name: Configure with the fuzzers enabled
         run: >
-          cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
+          cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++-22 -DCMAKE_BUILD_TYPE=Debug
           -DTAZ_BUILD_FUZZERS=ON
-          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+          -DCMAKE_CXX_FLAGS="-std=c++2c -fsanitize=address,undefined -fno-omit-frame-pointer -g"
       - name: Build
         run: cmake --build build-fuzz --parallel 2
       - name: Seed the corpus from the shipped chain files

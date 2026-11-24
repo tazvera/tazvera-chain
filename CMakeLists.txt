@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 
 # v8.9: the version lives in include/taz/types.hpp (CORE_VERSION) and nowhere else. taz_persist_tests
 # compares it with the README title, so a drifted document fails CI instead of surviving a review.
@@ -12,9 +12,18 @@ message(STATUS "TAZVERA core version ${TAZ_CORE_VERSION}")
 
 project(tazvera_chain_core VERSION ${TAZ_CORE_VERSION} LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Require a compiler with an explicit C++26 language mode; never silently fall back.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+    message(FATAL_ERROR "TAZVERA Chain requires GCC 16 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
+    message(FATAL_ERROR "TAZVERA Chain requires Clang 22 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+elseif(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "Unsupported C++26 compiler: ${CMAKE_CXX_COMPILER_ID}")
+endif()
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 

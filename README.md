@@ -2,7 +2,7 @@
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
-This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. Since v9.0 it also contains a node, `taznode`, which creates and loads a chain, produces signed blocks, and talks to other nodes **on 127.0.0.1 only**. It still does **not** implement consensus, finality, peer authentication, staking, smart contracts or a wallet.
+This package replaces the broken Phase-1 core with a small, buildable C++26 foundation. Since v9.0 it also contains a node, `taznode`, which creates and loads a chain, produces signed blocks, and talks to other nodes **on 127.0.0.1 only**. It still does **not** implement consensus, finality, peer authentication, staking, smart contracts or a wallet.
 
 ## What the node can and cannot do (v9.0)
 
@@ -25,15 +25,15 @@ This package replaces the broken Phase-1 core with a small, buildable C++20 foun
 
 ## Requirements
 
-- C++20 compiler
-- CMake 3.20 or newer
+- C++26 compiler
+- CMake 3.25 or newer
 - OpenSSL 3.x development headers/libraries
 
 Ubuntu/Debian example:
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake libssl-dev
+sudo apt install build-essential g++-16 cmake libssl-dev
 ```
 
 ## Build and test

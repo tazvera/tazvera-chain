@@ -4,18 +4,20 @@ on:
   pull_request:
 jobs:
   build-and-test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      # v9.0: the Ubuntu mirrors answer 503 often enough that a flaky mirror was failing a green commit.
-      # Retries and a longer timeout make the install step survive that without hiding a real failure.
       - name: Install dependencies
         run: |
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends cmake g++ libssl-dev
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends cmake g++-16 libssl-dev
+      - name: Verify C++26 compiler
+        run: |
+          g++-16 --version
+          printf 'int main(){}\n' | g++-16 -std=c++26 -x c++ -fsyntax-only -
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-16 -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
@@ -31,18 +33,20 @@ jobs:
           python3 explorer/build.py
           git diff --exit-code -- explorer/index.html
   sanitizers:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      # v9.0: the Ubuntu mirrors answer 503 often enough that a flaky mirror was failing a green commit.
-      # Retries and a longer timeout make the install step survive that without hiding a real failure.
       - name: Install dependencies
         run: |
           sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends cmake g++ libssl-dev
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends cmake g++-16 libssl-dev
+      - name: Verify C++26 compiler
+        run: |
+          g++-16 --version
+          printf 'int main(){}\n' | g++-16 -std=c++26 -x c++ -fsyntax-only -
       - name: Configure (ASan + UBSan)
-        run: cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"
+        run: cmake -S . -B build-san -DCMAKE_CXX_COMPILER=g++-16 -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"
       - name: Build
         run: cmake --build build-san --parallel 2
       - name: Test
