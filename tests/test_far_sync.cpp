@@ -40,6 +40,7 @@ static std::uint16_t free_port() {
     return l.port;                                                // the listener closes here; the node binds it a moment later
 }
 static std::string node() { return std::string("\"") + TAZ_NODE_BINARY + "\""; }
+static std::string q(const std::string& value) { return "\"" + value + "\""; }
 
 // Start a command in the background with its output in a file. POSIX shells use "&"; Windows has no such thing,
 // so cmd's own "start /b" does the same job. Returns whether the launcher itself succeeded — the node is still
