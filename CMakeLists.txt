@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.20)
 
 # v8.9: the version lives in include/taz/types.hpp (CORE_VERSION) and nowhere else. taz_persist_tests
 # compares it with the README title, so a drifted document fails CI instead of surviving a review.
@@ -16,13 +16,20 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Require a compiler with an explicit C++26 language mode; never silently fall back.
+# C++26 is this project's standard. Fail early when the compiler is too old.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
     message(FATAL_ERROR "TAZVERA Chain requires GCC 16 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
     message(FATAL_ERROR "TAZVERA Chain requires Clang 22 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
-elseif(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    message(FATAL_ERROR "Unsupported C++26 compiler: ${CMAKE_CXX_COMPILER_ID}")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.50)
+    message(FATAL_ERROR "TAZVERA Chain requires Visual Studio 2022 17.14 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
+# Sanitizer instrumentation makes each deterministic fuzz case substantially slower.
+option(TAZVERA_SANITIZED "Build with a reduced fuzz workload (for ASan/UBSan runs)" OFF)
+if(TAZVERA_SANITIZED)
+    add_compile_definitions(TAZ_SANITIZED_BUILD=1)
+    message(STATUS "TAZVERA: reduced fuzz workload (sanitizer build)")
 endif()
 
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
@@ -138,15 +145,9 @@ add_test(NAME taz_hardening91_tests COMMAND taz_hardening91_tests)
 add_executable(taz_security82_tests tests/test_security82.cpp)
 target_link_libraries(taz_security82_tests PRIVATE tazcore)
 add_test(NAME taz_security82_tests COMMAND taz_security82_tests)
-# Keep the full 6,000 JSON + 4,000 transaction fuzz iterations in normal CI.
-# Only the Debug sanitizer build uses a bounded deterministic smoke run to avoid machine-load timeouts.
-# Core security assertions above the fuzz section still run in full in every configuration.
+# The deterministic JSON/transaction fuzz suite is intentionally heavier under ASan/UBSan.
+# Give this one security test a bounded 5-minute budget; other tests keep the 120-second default.
 set_tests_properties(taz_security82_tests PROPERTIES TIMEOUT 300)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set_tests_properties(taz_security82_tests PROPERTIES
-        ENVIRONMENT "TAZ_SECURITY_FUZZ_FILE_ITERATIONS=1200;TAZ_SECURITY_FUZZ_TX_ITERATIONS=800"
-    )
-endif()
 
 # v8.3: libFuzzer targets. Off by default; the "Fuzz (libFuzzer)" workflow turns them on with clang.
 option(TAZ_BUILD_FUZZERS "Build the libFuzzer targets (clang, -fsanitize=fuzzer)" OFF)
