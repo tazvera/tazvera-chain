@@ -24,6 +24,10 @@
 #include <string>
 #include <thread>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 #ifndef TAZ_NODE_BINARY
 #error "TAZ_NODE_BINARY must be defined (see CMakeLists.txt)"
 #endif
