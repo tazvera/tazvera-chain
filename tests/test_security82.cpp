@@ -193,6 +193,16 @@ static void test_restart_mid_recovery() {
 // ---- D. fuzzing (deterministic seed; run again under ASan/UBSan in CI) --------------------------------------------------
 static std::uint64_t seed = 0x9e3779b97f4a7c15ULL;
 static std::uint64_t rnd(std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; }
+
+ // Keep full deterministic fuzz coverage by default; sanitizer CI can request a bounded smoke count.
+static int fuzz_iterations(const char* name, int fallback) {
+    const char* raw = std::getenv(name);
+    if (!raw || !*raw) return fallback;
+    char* end = nullptr;
+    const long value = std::strtol(raw, &end, 10);
+    if (end == raw || *end != 0 || value < 1) return fallback;
+    return static_cast<int>(std::min<long>(value, fallback));
+}
 static void test_fuzz_file() {
     World w; Chain& c = w.c;
     CHECK(put(c, {setg(w.o, {w.g[0].addr, w.g[1].addr, w.g[2].addr}, 2, w.x.addr, nx(c, w.o))}));
@@ -200,7 +210,8 @@ static void test_fuzz_file() {
     CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
     const std::string text = to_json(c);
     int accepted = 0, refused = 0;
-    for (int i = 0; i < 6000; ++i) {
+    const int iterations = fuzz_iterations("TAZ_SECURITY_FUZZ_FILE_ITERATIONS", 6000);
+    for (int i = 0; i < iterations; ++i) {
         std::string m = text; const std::size_t pos = rnd(m.size());
         switch (rnd(5)) {
             case 0: m[pos] = static_cast<char>(rnd(256)); break;
@@ -223,7 +234,8 @@ static void test_fuzz_transactions() {
     // ever-growing chain made validation work grow quadratically under ASan/UBSan.
     // Independent trials preserve 4,000 randomized block-validation cases without that
     // unrelated chain-growth cost.
-    for (int i = 0; i < 4000; ++i) {
+    const int iterations = fuzz_iterations("TAZ_SECURITY_FUZZ_TX_ITERATIONS", 4000);
+    for (int i = 0; i < iterations; ++i) {
         Chain trial = baseline;
         std::vector<Transaction> txs;
         for (std::uint64_t t = rnd(4); t > 0; --t) {
