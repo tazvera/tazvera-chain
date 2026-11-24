@@ -48,6 +48,7 @@ static bool connected_pair(Listener& l, Socket& server, Socket& client, std::str
     return listen_loopback(0, l, &err) && connect_loopback(l.port, client, &err) && accept_one(l.socket, server, &err);
 }
 static std::string slurp(const fs::path& p) { std::ifstream in(p, std::ios::binary); std::stringstream ss; ss << in.rdbuf(); return ss.str(); }
+static std::string q(const std::string& s) { return "\"" + s + "\""; }
 
 // ---- H3 ---------------------------------------------------------------------------------------------------------
 static void h3_worst_case_block_fits() {
