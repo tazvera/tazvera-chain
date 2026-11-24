@@ -139,12 +139,14 @@ add_executable(taz_security82_tests tests/test_security82.cpp)
 target_link_libraries(taz_security82_tests PRIVATE tazcore)
 add_test(NAME taz_security82_tests COMMAND taz_security82_tests)
 # Keep the full 6,000 JSON + 4,000 transaction fuzz iterations in normal CI.
-# Under ASan/UBSan, use a bounded deterministic smoke run to avoid machine-load timeouts.
+# Only the Debug sanitizer build uses a bounded deterministic smoke run to avoid machine-load timeouts.
 # Core security assertions above the fuzz section still run in full in every configuration.
-set_tests_properties(taz_security82_tests PROPERTIES
-    TIMEOUT 300
-    ENVIRONMENT "TAZ_SECURITY_FUZZ_FILE_ITERATIONS=1200;TAZ_SECURITY_FUZZ_TX_ITERATIONS=800"
-)
+set_tests_properties(taz_security82_tests PROPERTIES TIMEOUT 300)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set_tests_properties(taz_security82_tests PROPERTIES
+        ENVIRONMENT "TAZ_SECURITY_FUZZ_FILE_ITERATIONS=1200;TAZ_SECURITY_FUZZ_TX_ITERATIONS=800"
+    )
+endif()
 
 # v8.3: libFuzzer targets. Off by default; the "Fuzz (libFuzzer)" workflow turns them on with clang.
 option(TAZ_BUILD_FUZZERS "Build the libFuzzer targets (clang, -fsanitize=fuzzer)" OFF)
