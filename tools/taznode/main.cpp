@@ -297,8 +297,9 @@ int main(int argc, char** argv) {
     if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
     if (!retries_text.empty() && every_text.empty()) return usage_error("--retries only means something with --every");
     // A node that demands an identity while offering none would be asking for what it does not give.
-    if (require_identity && identity_file.empty())
-        return usage_error("--require-identity needs --identity: this node would demand what it does not offer");
+    const bool has_network_mode = !listen_port.empty() || !serve_port.empty() || !peer_port.empty();
+    if (require_identity && has_network_mode && identity_file.empty())
+        return usage_error("peer authentication is required by default: provide --identity, or use --allow-anonymous only for isolated local testing");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
