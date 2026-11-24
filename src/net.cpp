@@ -224,9 +224,101 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadlin
     return true;
 }
 
-bool send_all(const Socket& socket, std::string_view bytes, std::string* error) {
+bool send_all(const Socket& socket, std::string_view bytes, std::string* error, Deadline deadline) {
     std::size_t sent = 0;
+#ifdef _WIN32
+    // Winsock's SO_SNDTIMEO is not a reliable absolute deadline for a blocking send:
+    // a large send can remain blocked well beyond the timeout while the peer drains slowly.
+    // For deadline-bound sends, use nonblocking mode plus select() so every wait is
+    // bounded by the same absolute deadline. Restore the socket's normal blocking mode
+    // before returning; sockets created by this transport are blocking by default.
+    if (deadline != no_deadline()) {
+        u_long nonblocking = 1;
+        if (ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &nonblocking) != 0) {
+            if (error) *error = "could not enable nonblocking mode for a deadline-bound send";
+            return false;
+        }
+
+        auto fail = [&](const char* reason) {
+            u_long blocking = 0;
+            const int restored = ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking);
+            if (error) {
+                *error = reason;
+                if (restored != 0) *error += "; could not restore blocking socket mode";
+            }
+            return false;
+        };
+
+        while (sent < bytes.size()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline)
+                return fail("the peer took longer than the time allowed for this exchange");
+
+            const auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+            timeval tv{};
+            tv.tv_sec = static_cast<long>(left / 1000000);
+            tv.tv_usec = static_cast<long>(left % 1000000);
+
+            fd_set writable;
+            FD_ZERO(&writable);
+            FD_SET(static_cast<SOCKET>(socket.raw()), &writable);
+            const int ready = ::select(0, nullptr, &writable, nullptr, &tv);
+            if (ready == 0)
+                return fail("timed out while waiting to send");
+            if (ready == SOCKET_ERROR) {
+                if (WSAGetLastError() == WSAEINTR) continue;
+                return fail("waiting for the socket to become writable failed");
+            }
+
+            // Re-check after select(): readiness can race with another writer or the deadline.
+            if (std::chrono::steady_clock::now() >= deadline)
+                return fail("the peer took longer than the time allowed for this exchange");
+
+            const std::size_t remaining = bytes.size() - sent;
+            const int amount = static_cast<int>(std::min<std::size_t>(remaining, 64u * 1024u));
+            const int chunk = ::send(static_cast<SOCKET>(socket.raw()), bytes.data() + sent, amount, 0);
+            if (chunk == SOCKET_ERROR) {
+                const int code = WSAGetLastError();
+                if (code == WSAEWOULDBLOCK || code == WSAEINTR) continue;
+                return fail("the connection closed while sending");
+            }
+            if (chunk == 0) return fail("the connection closed while sending");
+            sent += static_cast<std::size_t>(chunk);
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            u_long blocking = 0;
+            const int restored = ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking);
+            if (error) {
+                *error = "the peer took longer than the time allowed for this exchange";
+                if (restored != 0) *error += "; could not restore blocking socket mode";
+            }
+            return false;
+        }
+        u_long blocking = 0;
+        if (ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking) != 0) {
+            if (error) *error = "send completed but could not restore blocking socket mode";
+            return false;
+        }
+        return true;
+    }
+#endif
     while (sent < bytes.size()) {
+        // SO_SNDTIMEO limits one blocking send call, not the complete loop. Recompute the remaining time before
+        // every partial write so a receiver that slowly drains its socket cannot extend the absolute deadline.
+        if (deadline != no_deadline()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                if (error) *error = "the peer took longer than the time allowed for this exchange";
+                return false;
+            }
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+            if (!set_timeout_ms(socket, ms, nullptr)) {
+                if (error) *error = "could not set the socket timeouts";
+                return false;
+            }
+        }
         // MSG_NOSIGNAL: without it a peer that closed the connection kills this process with SIGPIPE instead of
         // returning an error. A node that dies because a stranger hung up is not a node.
 #ifdef _WIN32
@@ -237,7 +329,7 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error) 
         const auto chunk = ::send(socket.raw(), bytes.data() + sent,
                                   static_cast<int>(bytes.size() - sent), flags);
         if (chunk <= 0) {
-            if (error) *error = "the connection closed while sending";
+            if (error) *error = would_block() ? "timed out while sending" : "the connection closed while sending";
             return false;
         }
         sent += static_cast<std::size_t>(chunk);
@@ -308,7 +400,7 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
     put_u32(frame, static_cast<std::uint32_t>(payload.size()));
     frame.push_back(static_cast<char>(type));
     frame.append(payload.data(), payload.size());
-    return send_all(socket, frame, error);
+    return send_all(socket, frame, error, deadline);
 }
 
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
