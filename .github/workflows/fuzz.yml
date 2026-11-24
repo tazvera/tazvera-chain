@@ -13,11 +13,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang and OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y clang cmake libssl-dev
+      - name: Install Clang 22 and OpenSSL headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release software-properties-common gnupg cmake libssl-dev
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y clang-22
       - name: Configure with the fuzzers enabled
         run: >
-          cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug
+          cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++-22 -DCMAKE_BUILD_TYPE=Debug
           -DTAZ_BUILD_FUZZERS=ON
           -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
       - name: Build
