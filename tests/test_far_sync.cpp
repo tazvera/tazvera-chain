@@ -103,10 +103,10 @@ static int catch_up(const fs::path& dir, const Chain& server_chain, const Chain&
     const std::uint16_t port = free_port();
     const std::string out = (dir / "s.out").string();
     const std::string s_cmd = node() + " --chain \"" + (dir / "S.json").string() + "\" --expect-genesis " + pin(server_chain) +
-                              " --serve " + std::to_string(port) + " --max-peers " + std::to_string(rounds) + " --serve-timeout 120";
+                              " --serve " + std::to_string(port) + " --max-peers " + std::to_string(rounds) + " --serve-timeout 120 --allow-anonymous";
     CHECK(run_in_background(s_cmd, out));
     CHECK(wait_for(out, "listening", 10));
-    const std::string c_cmd = node() + " --chain \"" + (dir / "C.json").string() + "\" --expect-genesis " + pin(client_chain) + " --peer " + std::to_string(port);
+    const std::string c_cmd = node() + " --chain \"" + (dir / "C.json").string() + "\" --expect-genesis " + pin(client_chain) + " --peer " + std::to_string(port) + " --allow-anonymous";
     const int rc = run_waiting(c_cmd, (dir / "c.out").string());
     const std::string done = "served " + std::to_string(rounds) + " of " + std::to_string(rounds);
     if (!wait_for(out, done, 30)) {
