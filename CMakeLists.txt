@@ -164,3 +164,9 @@ endif()
 # chains the C++ core itself produced (not only against the three shipped demos).
 add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
 target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
+
+# F2: a chain the node saved must always load again (exact case count so a silent skip cannot pass)
+add_executable(taz_persist_limit_tests tests/test_persist_limits.cpp)
+target_link_libraries(taz_persist_limit_tests PRIVATE tazcore)
+add_test(NAME taz_persist_limit_tests COMMAND taz_persist_limit_tests)
+set_tests_properties(taz_persist_limit_tests PROPERTIES PASS_REGULAR_EXPRESSION "persist limit tests: all passed \\(6 cases\\)" TIMEOUT 600)
