@@ -1,3 +1,4 @@
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -12,7 +13,7 @@ static int failures = 0;
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
 static Transaction base(const Key& f, std::uint64_t nonce) { Transaction tx; tx.from = f.addr; tx.nonce = nonce; tx.pubkey = f.pk; return tx; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) {
     Transaction tx = base(f, n); tx.to = to; tx.amount = a; resign(tx, f); return tx;
@@ -59,7 +60,7 @@ struct World {
     Chain c;
     Amount total = BIG + GENESIS_G0;
     explicit World(std::uint64_t threshold, bool with_guardians = true) {
-        CHECK(c.init_genesis(o.addr, BIG, g[0].addr, GENESIS_G0));
+        CHECK(c.init_genesis(o.addr, BIG, g[0].addr, GENESIS_G0)); taztest::use(c);
         CHECK(put(c, {transfer(o, g[1].addr, FUND, 0), transfer(o, g[2].addr, FUND, 1), transfer(o, x.addr, FUND, 2), transfer(o, y.addr, FUND, 3)}));
         if (with_guardians) CHECK(put(c, {setg(o, {g[0].addr, g[1].addr, g[2].addr}, threshold, 4)}));
     }
@@ -245,7 +246,7 @@ static void test_overflow_and_empty_edges() {
     constexpr Amount MAXA = std::numeric_limits<Amount>::max();
     Key o = new_key(), g0 = new_key(), g1 = new_key(), n = new_key();
     auto fresh = [&](Amount ob, Amount nb) {
-        State s; s.set_balance(o.addr, ob); s.set_balance(g0.addr, 100000); s.set_balance(g1.addr, 100000); if (nb) s.set_balance(n.addr, nb);
+        State s; s.bind_network(taztest::g_net); s.set_balance(o.addr, ob); s.set_balance(g0.addr, 100000); s.set_balance(g1.addr, 100000); if (nb) s.set_balance(n.addr, nb);
         CHECK(s.apply(setg(o, {g0.addr, g1.addr}, 2, 0), 1).ok);
         CHECK(s.apply(vote(g0, o.addr, n.addr, 0), 2).ok); CHECK(s.apply(vote(g1, o.addr, n.addr, 0), 3).ok);
         return s;
@@ -319,7 +320,7 @@ static void test_state_roots_and_export() {
     CHECK(put(p.c, {safety(p.o, 0, 0, 0, nx(p.c, p.o))})); CHECK(to_json(p.c).find("tazvera-chain-export-v2") != std::string::npos);
     // different guardian data => different roots
     World x(2);
-    State s1, s2; s1.set_balance(x.o.addr, 5000000); s2.set_balance(x.o.addr, 5000000);
+    State s1, s2; s1.bind_network(taztest::g_net); s2.bind_network(taztest::g_net); s1.set_balance(x.o.addr, 5000000); s2.set_balance(x.o.addr, 5000000);
     for (State* s : {&s1, &s2}) { s->set_balance(x.g[0].addr, 100000); s->set_balance(x.g[1].addr, 100000); }
     CHECK(s1.state_root() == s2.state_root());
     CHECK(s1.apply(setg(x.o, {x.g[0].addr, x.g[1].addr}, 1, 0), 1).ok); CHECK(s2.apply(setg(x.o, {x.g[0].addr, x.g[1].addr}, 2, 0), 1).ok);
@@ -354,7 +355,7 @@ static void test_signatures_cover_fields() {
 static void test_same_block_order_is_fixed() {
     Key a = new_key(), b = new_key(), g = new_key(), r = new_key();
     Key p = a, q = b; if (q.addr < p.addr) std::swap(p, q); // p has the smaller address
-    State s; s.set_balance(p.addr, 3000000); s.set_balance(q.addr, 5000000); s.set_balance(g.addr, 1000000);
+    State s; s.bind_network(taztest::g_net); s.set_balance(p.addr, 3000000); s.set_balance(q.addr, 5000000); s.set_balance(g.addr, 1000000);
     CHECK(s.apply(setg(p, {g.addr}, 1, 0), 1).ok); CHECK(s.apply(setg(q, {g.addr}, 1, 0), 1).ok);
     CHECK(s.apply(vote(g, p.addr, q.addr, 0), 2).ok);   // p's funds go to q
     CHECK(s.apply(vote(g, q.addr, r.addr, 1), 2).ok);   // q's funds go to r
@@ -366,7 +367,7 @@ static void test_same_block_order_is_fixed() {
 
 static void test_root_covers_recovery_data() {
     Key o = new_key(), g0 = new_key(), g1 = new_key(), n = new_key(), m = new_key();
-    auto base_state = [&] { State s; s.set_balance(o.addr, 5000000); s.set_balance(g0.addr, 1000000); s.set_balance(g1.addr, 1000000);
+    auto base_state = [&] { State s; s.bind_network(taztest::g_net); s.set_balance(o.addr, 5000000); s.set_balance(g0.addr, 1000000); s.set_balance(g1.addr, 1000000);
         CHECK(s.apply(setg(o, {g0.addr, g1.addr}, 2, 0), 1).ok); return s; };
     { State s1 = base_state(), s2 = base_state(); // same votes at different heights => scheduled at different heights
       CHECK(s1.apply(vote(g0, o.addr, n.addr, 0), 2).ok); CHECK(s1.apply(vote(g1, o.addr, n.addr, 0), 3).ok);
@@ -438,7 +439,7 @@ static void test_veto_key() {
 // One veto key may guard several accounts; a cancel signed for one must not work on another (found by mutation testing).
 static void test_veto_cancel_signature_covers_account() {
     Key o = new_key(), p = new_key(), g = new_key(), v = new_key(), n = new_key();
-    State s; for (const Key* k : {&o, &p, &g, &v}) s.set_balance(k->addr, 5000000);
+    State s; s.bind_network(taztest::g_net); for (const Key* k : {&o, &p, &g, &v}) s.set_balance(k->addr, 5000000);
     CHECK(s.apply(setg_veto(o, {g.addr}, 1, v.addr, 0), 1).ok); CHECK(s.apply(setg_veto(p, {g.addr}, 1, v.addr, 0), 1).ok);
     CHECK(s.apply(vote(g, o.addr, n.addr, 0), 2).ok); CHECK(s.apply(vote(g, p.addr, n.addr, 1), 2).ok);
     CHECK(s.find(o.addr)->recovery.active && s.find(p.addr)->recovery.active);
@@ -464,7 +465,7 @@ static void test_veto_changes_are_delayed_and_in_root() {
     empty_until(c, ready - 1); CHECK(c.state().find(w.o.addr)->guardians.veto == v.addr);
     empty_until(c, ready);     CHECK(c.state().find(w.o.addr)->guardians.veto == Address{});
     // the veto address is part of the state root
-    State s1, s2; s1.set_balance(w.o.addr, 5000000); s2.set_balance(w.o.addr, 5000000);
+    State s1, s2; s1.bind_network(taztest::g_net); s2.bind_network(taztest::g_net); s1.set_balance(w.o.addr, 5000000); s2.set_balance(w.o.addr, 5000000);
     CHECK(s1.apply(setg_veto(w.o, two, 2, v.addr, 0), 1).ok); CHECK(s2.apply(setg_veto(w.o, two, 2, v2.addr, 0), 1).ok);
     CHECK(s1.state_root() != s2.state_root());
 }
@@ -510,7 +511,7 @@ static void test_random_run() {
     constexpr int K = 5;
     Key k[K]; for (auto& x : k) x = new_key();
     Chain prod, foll; const Amount total = 3 * BIG;
-    for (Chain* c : {&prod, &foll}) CHECK(c->init_genesis(k[0].addr, BIG * 2, k[1].addr, BIG));
+    for (Chain* c : {&prod, &foll}) { CHECK(c->init_genesis(k[0].addr, BIG * 2, k[1].addr, BIG)); taztest::use(*c); }
     std::uint64_t seed = 987654321; auto rnd = [&seed](std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; };
     int blocks_ok = 0, scheduled = 0, executed = 0, cancelled = 0, swaps = 0, vetos = 0;
     auto accept = [&](const std::vector<Transaction>& txs) {
@@ -576,6 +577,7 @@ static void test_random_run() {
 }
 
 int main() {
+    taztest::g_net[0] = 1;   // tests that use a bare State (no Chain) still sign for a non-zero network
     test_shape_rules(); test_happy_path(); test_single_guardian_and_all_guardians(); test_owner_cancel();
     test_guardian_changes_are_delayed(); test_thief_cannot_outrun_guardians(); test_overflow_and_empty_edges();
     test_held_funds_and_statements(); test_state_roots_and_export(); test_signatures_cover_fields();

@@ -4,6 +4,7 @@
 //   pending_discard.json a thief's pending veto is discarded because the guardians' recovery is already agreed
 //   owner_cancel.json    no veto key: the owner cancels a recovery twice, then the guardians win
 //   vote_expiry.json     v9.3: a guardian's vote expires, so the next guardian's vote stands alone
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -14,7 +15,7 @@
 using namespace taz;
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; if (!generate_keypair(k.sk, k.pk)) { std::cerr << "keygen failed\n"; std::exit(2); } k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { if (!sign(k.sk, tx.signable_bytes(), tx.signature)) std::exit(2); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; if (!sign(k.sk, tx.signable_bytes(), tx.signature)) std::exit(2); }
 static Transaction base(const Key& f, std::uint64_t n) { Transaction tx; tx.from = f.addr; tx.nonce = n; tx.pubkey = f.pk; return tx; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) { Transaction tx = base(f, n); tx.to = to; tx.amount = a; resign(tx, f); return tx; }
 static Transaction setg(const Key& f, std::vector<Address> l, std::uint64_t thr, const Address& veto, std::uint64_t n) {
@@ -31,6 +32,7 @@ struct World {
     Key o = new_key(), g[3] = {new_key(), new_key(), new_key()}, n = new_key(), x = new_key(); Chain c;
     World() {
         if (!c.init_genesis(o.addr, 100000000, n.addr, 0)) std::exit(1);
+        taztest::use(c);
         put(c, {transfer(o, g[0].addr, 2000000, 0), transfer(o, g[1].addr, 2000000, 1), transfer(o, g[2].addr, 2000000, 2), transfer(o, x.addr, 2000000, 3)});
         put(c, {setg(o, {g[0].addr, g[1].addr, g[2].addr}, 2, Address{}, 4)});
     }

@@ -14,6 +14,7 @@ enum class TxKind : std::uint8_t {
 struct Transaction {
     std::uint32_t protocol_version{PROTOCOL_VERSION};
     std::string chain_id{CHAIN_ID};
+    Hash32 network_id{};     // protocol 4: the genesis commitment of the ONE network this transaction is for; part of the signed bytes
     Address from{};
     Address to{};            // Transfer: receiver. RecoveryVote: the account to recover. RecoveryCancel: zero (own account) or the account the veto key protects
     Amount amount{0};        // Transfer only

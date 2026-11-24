@@ -240,7 +240,7 @@ function parseChain(text) {
       producerKey: hxOr(b.producer_pubkey, 32, ZERO32, "producer_pubkey"),
       producerSig: hxOr(b.producer_signature, 64, ZERO64, "producer_signature"),
       txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 5n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
-        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
+        txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), networkId: hx(t.network_id, 32, "tx network_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
         nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
         limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
@@ -263,10 +263,11 @@ function parseChain(text) {
 
 /* ---------- transaction bytes ---------- */
 function txSignable(t) {
-  if (t.kind === 0) // plain transfer: identical to the original v1 layout
-    return cat(enc.encode("TAZVERA-TX-SIGNATURE-V1"), u32(t.version), lp(t.chainId), hexToBytes(t.from), hexToBytes(t.to),
+  // protocol 4: the network ID (the genesis commitment) is signed, so a signature made for one network is worthless on another
+  if (t.kind === 0)
+    return cat(enc.encode("TAZVERA-TX-SIGNATURE-V3"), u32(t.version), lp(t.chainId), hexToBytes(t.networkId), hexToBytes(t.from), hexToBytes(t.to),
       u64(t.amount), u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey));
-  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V2"), u32(t.version), lp(t.chainId), u8(t.kind), hexToBytes(t.from),
+  return cat(enc.encode("TAZVERA-TX-SIGNATURE-V4"), u32(t.version), lp(t.chainId), hexToBytes(t.networkId), u8(t.kind), hexToBytes(t.from),
     u64(t.fee), u64(t.nonce), u64(t.expiry), hexToBytes(t.pubkey),
     t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold))
     : t.kind === 2 ? hexToBytes(t.ref)
@@ -340,6 +341,7 @@ function beginBlock(S, h) {
 // Returns an error string, or {held, target} after changing S. Nothing is changed when an error is returned.
 function applyTx(S, c, t, h) {
   if (t.version !== c.version || t.chainId !== c.chainId) return "version या chain ID गलत";
+  if (t.networkId !== c.blocks[0].prev) return "लेन-देन किसी दूसरे नेटवर्क के लिए साइन हुआ है";   // protocol 4: block 0's previous_hash is the network ID
   if (t.fee !== c.fee) return "फ़ीस तय दर से अलग है";
   const noTo = t.to === ZERO20, noSafety = t.limit === 0n && t.thr === 0n && t.hold === 0n, noRef = t.ref === ZERO32;
   const noNew = t.newOwner === ZERO20, noG = t.guardians.length === 0 && t.gthr === 0n && t.veto === ZERO20;

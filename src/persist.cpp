@@ -245,15 +245,16 @@ constexpr std::string_view FORMAT_PREFIX = "tazvera-chain-export-";
 
 Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     const JVal& o = obj_of(jv, where);
-    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "network_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                                   "hold_threshold", "hold_blocks", "ref", "new_owner", "veto", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
-    else exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+    else exact_keys(o, {"txid", "protocol_version", "chain_id", "network_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                         "hold_threshold", "hold_blocks", "ref", "new_owner", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
     Transaction tx;
     const std::uint64_t pv = dec_u64(field(o, "protocol_version"), where + ".protocol_version");
     if (pv != PROTOCOL_VERSION) fail(where + " has an unsupported protocol version");
     tx.protocol_version = static_cast<std::uint32_t>(pv);
     tx.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
+    tx.network_id = hex_of<Hash32>(field(o, "network_id"), where + ".network_id");
     const std::uint64_t kind = dec_u64(field(o, "kind"), where + ".kind");
     if (kind > static_cast<std::uint64_t>(TxKind::RecoveryCancel)) fail(where + " has an unknown transaction kind");
     tx.kind = static_cast<TxKind>(kind);

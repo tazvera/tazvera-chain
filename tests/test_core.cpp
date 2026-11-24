@@ -1,3 +1,4 @@
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
@@ -12,6 +13,7 @@ static Key new_key() {
     Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k;
 }
 static void resign(Transaction& tx, const PrivKey& sk) {
+    tx.network_id = taztest::g_net;
     const auto bytes = tx.signable_bytes(); CHECK(sign(sk, bytes, tx.signature));
 }
 static Transaction make_tx(const Key& from, const Address& to, Amount amount, std::uint64_t nonce,
@@ -24,7 +26,7 @@ static constexpr Amount INITIAL = 100000000;
 
 static void test_signatures_and_basic_transfer() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); CHECK(chain.height() == 0);
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain); CHECK(chain.height() == 0);
     auto tx = make_tx(alice, bob.addr, 5000000, 0);
     CHECK(verify(alice.pk, tx.signable_bytes(), tx.signature));
     auto bad = tx; bad.signature[0] ^= 0x80; CHECK(!verify(alice.pk, bad.signable_bytes(), bad.signature));
@@ -45,7 +47,7 @@ static void test_signatures_and_basic_transfer() {
 
 static void test_rejections() {
     Key alice = new_key(), bob = new_key(), carol = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 5000));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 5000)); taztest::use(chain);
     const auto root = chain.state().state_root();
     // insufficient balance (bob has 5000, needs amount + 1000 fee)
     CHECK(!chain.append_block({make_tx(bob, carol.addr, 4500, 0)}, 1).ok);
@@ -76,7 +78,7 @@ static void test_rejections() {
 
 static void test_expiry() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain);
     CHECK(chain.append_block({}, 1).ok); // height 1, empty block
     // expiry_height 1 is still valid at height 2? No: 2 > 1, so it must be rejected.
     CHECK(!chain.append_block({make_tx(alice, bob.addr, 1, 0, /*expiry=*/1)}, 2).ok);
@@ -87,14 +89,14 @@ static void test_expiry() {
 
 static void test_receiver_overflow() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100)); taztest::use(chain);
     CHECK(!chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
     CHECK(chain.state().balance(alice.addr) == INITIAL); CHECK(chain.height() == 0);
 }
 
 static void test_atomic_block() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain);
     const auto before = chain.state().state_root();
     // first tx is valid, second is valid-looking but spends more than remains
     auto first = make_tx(alice, bob.addr, 1000000, 0);
@@ -115,7 +117,7 @@ static void test_atomic_block() {
 
 static void test_timestamps() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain);
     CHECK(!chain.append_block({}, 0).ok);   // not greater than genesis (0)
     CHECK(!chain.append_block({}, -5).ok);  // negative
     CHECK(chain.append_block({}, 10).ok);
@@ -128,7 +130,7 @@ static void test_timestamps() {
 
 static void test_block_size_limit() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain);
     std::vector<Transaction> many(MAX_BLOCK_TXS + 1, make_tx(alice, bob.addr, 1, 0));
     auto r = chain.append_block(many, 1);
     CHECK(!r.ok); CHECK(r.error.find("too many") != std::string::npos);
@@ -146,7 +148,7 @@ static void test_state_canonical_form() {
     State c; c.set_balance(x, 1); c.set_balance(y, 3); CHECK(a.state_root() != c.state_root());
     // genesis with an explicit zero balance equals genesis without that account
     Key alice = new_key(), bob = new_key();
-    Chain one, two; CHECK(one.init_genesis(alice.addr, 10, bob.addr, 0)); CHECK(two.init_genesis(alice.addr, 10, bob.addr, 0));
+    Chain one, two; CHECK(one.init_genesis(alice.addr, 10, bob.addr, 0)); taztest::use(one); CHECK(two.init_genesis(alice.addr, 10, bob.addr, 0));
     CHECK(one.blocks().front().hash() == two.blocks().front().hash());
     CHECK(one.state().account_count() == 1);
     Chain dup; CHECK(!dup.init_genesis(alice.addr, 1, alice.addr, 1)); // same address twice
@@ -155,7 +157,7 @@ static void test_state_canonical_form() {
 
 static void test_block_hash_commitments() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(chain);
     CHECK(chain.append_block({make_tx(alice, bob.addr, 1000, 0)}, 1).ok);
     const Block base = chain.blocks().back(); const auto h = base.hash();
     auto b = base; b.timestamp += 1; CHECK(b.hash() != h);
@@ -172,8 +174,8 @@ static void test_block_hash_commitments() {
 static void test_validate_and_accept_block() {
     Key alice = new_key(), bob = new_key();
     Chain producer, follower;
-    CHECK(producer.init_genesis(alice.addr, INITIAL, bob.addr, 0));
-    CHECK(follower.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+    CHECK(producer.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(producer);
+    CHECK(follower.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(follower);
     CHECK(producer.append_block({make_tx(alice, bob.addr, 1000, 0)}, 1).ok);
     const Block good = producer.blocks().back();
     // a different node re-executes the block and reaches the same state
@@ -222,6 +224,7 @@ static void test_wipe_and_keys() {
 }
 
 int main() {
+    taztest::g_net[0] = 1;   // tests that use a bare State (no Chain) still sign for a non-zero network
     test_signatures_and_basic_transfer();
     test_rejections();
     test_expiry();
