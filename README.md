@@ -52,7 +52,7 @@ The test suite checks valid signatures, modified-signature rejection, wrong-chai
 ## Important limitations and next work
 
 1. This is a repaired local core only. A successful local build is not proof of blockchain security.
-2. Networking exists in the narrowest form that can be tested: a loopback TCP transport, a hello that proves two nodes are on the same chain, and block-by-block sync between two processes on one machine. There is no peer authentication, no consensus, no finality, no RPC, no validator registration, no staking, no slashing, no wallet and no smart contracts. Local file persistence exists (v8 / v8.1 / v8.2 below) and is still not a database.
+2. Networking is a loopback-only prototype. Peer identity proof is required by default and is bound to the handshake transcript, but identity is not authorization: there is no trusted-peer allowlist, transport encryption, consensus or finality. `--allow-anonymous` disables the identity requirement and must be used only for isolated local compatibility tests. There is no RPC, validator registration, staking, slashing, wallet or smart contracts. Local file persistence is still not a database.
 3. The prototype uses one fixed transfer fee. Congestion policy, fee governance, validator economics, and the long-term sustainability of a finite staking reserve still need formal design.
 4. The 100% fee-burn choice means transaction fees do not pay validators. Resolve validator rewards before public testnet/mainnet.
 5. The address derivation here is a prototype convention, not a finalized public address standard.
