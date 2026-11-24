@@ -1,6 +1,8 @@
 name: Fuzz (libFuzzer)
 on:
   workflow_dispatch:
+  push:
+    branches: ["**"]
   pull_request:
   schedule:
     - cron: "0 3 * * 1"
