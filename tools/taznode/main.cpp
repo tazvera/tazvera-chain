@@ -468,6 +468,11 @@ int main(int argc, char** argv) {
                     break;
                 }
                 bytes += payload.size();
+                if (bytes > kSyncByteBudget && n + 1 < batch_count) {
+                    std::cerr << "taznode: oversized block must be the only block in a sync batch; refusing malformed batch\\n";
+                    ok = false;
+                    break;
+                }
                 taz::Block block;
                 std::string why;
                 if (!taz::parse_block_text(payload, block, &why)) {
