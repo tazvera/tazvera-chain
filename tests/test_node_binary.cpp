@@ -200,7 +200,7 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --peer 2") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
-    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 3);   // nothing listening
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 2);   // identity is required by default\n    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1") == 3); // explicit anonymous mode reaches the absent peer\n    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --require-identity --peer 1") == 2);
     // strict peer authentication must not start unless this node also has an identity key
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --require-identity --peer 1") == 2);
@@ -253,7 +253,7 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --retries 3") == 2);              // needs --every
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries abc") == 2);
     // a peer that is not there is survived once and then given up on, without hanging
-    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries 1") == 3);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1 --every 1 --retries 1") == 3);
     // --transfer does one thing and stops; combining it with a network mode used to do neither, silently
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --transfer 22" +
               std::string(38, '2') + ":1 --peer 1") == 2);
