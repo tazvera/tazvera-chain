@@ -66,6 +66,11 @@ class State {
 public:
     // Canonical form: an account with nothing in it is never stored, so "absent" and "empty"
     // always produce the same state root on every node.
+    // Protocol 4: the network this state belongs to (the genesis commitment). A state that was never bound applies nothing,
+    // and a bound one applies only transactions that were signed for exactly this network. Not part of the state root:
+    // it is the identity of the network, not an account.
+    void bind_network(const Hash32& network_id) noexcept { network_id_ = network_id; }
+    const Hash32& network_id() const noexcept { return network_id_; }
     void set_balance(const Address& address, Amount amount);
     Amount balance(const Address& address) const;
     std::uint64_t nonce(const Address& address) const;
@@ -83,5 +88,6 @@ private:
     std::map<Address, Account> accounts_;   // std::map = the same canonical order on every node
     std::map<Hash32, HeldTransfer> held_;   // keyed by the txid of the held transfer
     Amount burned_{0};
+    Hash32 network_id_{};
 };
 }

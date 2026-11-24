@@ -1,3 +1,4 @@
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -15,7 +16,7 @@ static int failures = 0;
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
 static Transaction base(const Key& f, std::uint64_t n) { Transaction tx; tx.from = f.addr; tx.nonce = n; tx.pubkey = f.pk; return tx; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n, std::uint64_t expiry = 0) {
     Transaction tx = base(f, n); tx.to = to; tx.amount = a; tx.expiry_height = expiry; resign(tx, f); return tx;
@@ -38,12 +39,12 @@ static bool rejected(Mempool& p, const Chain& c, const Transaction& t, const cha
 
 int main() {
     Key alice = new_key(), bob = new_key(), g1 = new_key(), g2 = new_key(), fresh = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 5000000));
+    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, 5000000)); taztest::use(chain);
 
     // UINT64_MAX must not wrap into block height zero in the local mempool.
     {
         Chain edge;
-        CHECK(edge.init_genesis(alice.addr, INITIAL, bob.addr, 0));
+        CHECK(edge.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(edge);
         Mempool edge_pool;
         const auto edge_tx = transfer(alice, bob.addr, 1, 0);
         std::string edge_error;
@@ -54,6 +55,7 @@ int main() {
         CHECK(edge_pool.prune_stale(edge.state(), max_height) == 0);
         CHECK(edge_pool.size() == 0);
     }
+    taztest::use(chain);   // the block above worked on a second network
 
     CHECK(chain.append_block({transfer(alice, g1.addr, 3000000, 0), transfer(alice, g2.addr, 3000000, 1)}, g_ts++).ok);
     Mempool pool(100, 8); std::string err;
@@ -96,7 +98,7 @@ int main() {
       CHECK(chain.state().find(alice.addr)->recovery.active);
       CHECK(rejected(p, chain, vote(g1, alice.addr, bob.addr, 1), "already waiting")); }
 
-    { Chain c2; CHECK(c2.init_genesis(alice.addr, INITIAL, bob.addr, 0)); Mempool p;
+    { Chain c2; CHECK(c2.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(c2); Mempool p;
       const auto mine = transfer(alice, bob.addr, 7000, 0); CHECK(p.submit(mine, c2.state(), c2.height(), &err));
       CHECK(p.submit(transfer(alice, bob.addr, 8000, 1), c2.state(), c2.height(), &err));
       CHECK(c2.append_block({transfer(alice, bob.addr, 9999, 0)}, g_ts++).ok);
@@ -105,7 +107,7 @@ int main() {
       CHECK(p.prune_stale(c2.state(), c2.height()) == 1);
       CHECK(p.size() == 1 && p.select(c2.state(), c2.height(), 10).size() == 1);
       CHECK(p.prune_stale(c2.state(), c2.height()) == 0); }
-    { Chain c3; CHECK(c3.init_genesis(alice.addr, INITIAL, bob.addr, 0)); Mempool p;
+    { Chain c3; CHECK(c3.init_genesis(alice.addr, INITIAL, bob.addr, 0)); taztest::use(c3); Mempool p;
       CHECK(p.submit(transfer(alice, bob.addr, 1, 0, 3), c3.state(), c3.height(), &err));
       CHECK(p.select(c3.state(), 5, 10).empty()); p.drop_expired(5); CHECK(p.size() == 0); }
 

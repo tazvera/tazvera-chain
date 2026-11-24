@@ -1,5 +1,6 @@
 // v9.0: the fork tie-break. Deterministic, not consensus — and the tests say so by checking that two nodes
 // looking at the same pair always make the same choice, in both directions.
+#include "net_ctx.hpp"
 #include "taz/fork.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
@@ -17,7 +18,7 @@ static Key new_key() {
     k.addr = address_from_pubkey(k.pk);
     return k;
 }
-static void resign(Transaction& tx, const Key& k) { if (!sign(k.sk, tx.signable_bytes(), tx.signature)) std::exit(2); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; if (!sign(k.sk, tx.signable_bytes(), tx.signature)) std::exit(2); }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) {
     Transaction tx; tx.from = f.addr; tx.to = to; tx.amount = a; tx.nonce = n; tx.pubkey = f.pk;
     resign(tx, f); return tx;
@@ -26,15 +27,15 @@ static std::int64_t ts = 900;
 
 static void f01_unrelated_chains() {
     Key o1 = new_key(), g = new_key(), o2 = new_key();
-    Chain a; CHECK(a.init_genesis(o1.addr, 1000, g.addr, 0));
-    Chain b; CHECK(b.init_genesis(o2.addr, 1000, g.addr, 0));
+    Chain a; CHECK(a.init_genesis(o1.addr, 1000, g.addr, 0)); taztest::use(a);
+    Chain b; CHECK(b.init_genesis(o2.addr, 1000, g.addr, 0)); taztest::use(b);
     CHECK(choose_chain(a, b).choice == ForkChoice::DifferentChain);
     CHECK(choose_chain(b, a).choice == ForkChoice::DifferentChain);
 }
 
 static void f02_longer_wins_both_ways() {
     Key o = new_key(), g = new_key();
-    Chain shortc; CHECK(shortc.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain shortc; CHECK(shortc.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(shortc);
     Chain longc = shortc;
     CHECK(longc.append_block({transfer(o, g.addr, 1, 0)}, ts++).ok);
     CHECK(choose_chain(shortc, longc).choice == ForkChoice::TakeTheirs);
@@ -43,18 +44,18 @@ static void f02_longer_wins_both_ways() {
 
 static void f03_equal_chains() {
     Key o = new_key(), g = new_key();
-    Chain a; CHECK(a.init_genesis(o.addr, 1000, g.addr, 0));
+    Chain a; CHECK(a.init_genesis(o.addr, 1000, g.addr, 0)); taztest::use(a);
     Chain b = a;
     CHECK(choose_chain(a, b).choice == ForkChoice::SameChain);
 }
 
 static void f04_equal_height_disagreement_is_decided_the_same_way() {
     Key o = new_key(), g = new_key();
-    Chain a; CHECK(a.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain a; CHECK(a.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(a);
     CHECK(a.append_block({transfer(o, g.addr, 1, 0)}, ts++).ok);
 
     // the same chain with a different second block: same height, same genesis, different state
-    Chain b; CHECK(b.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain b; CHECK(b.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(b);
     CHECK(b.append_block({transfer(o, g.addr, 2, 0)}, ts++).ok);
     CHECK(a.height() == b.height());
     CHECK(a.state().state_root() != b.state().state_root());
@@ -75,7 +76,7 @@ static void f05_truncate_rebuilds_the_state() {
     const std::int64_t t0 = ts;
     ts += 3;
 
-    Chain full; CHECK(full.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain full; CHECK(full.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(full);
     CHECK(full.append_block({transfer(o, g.addr, 10, 0)}, t0).ok);
     CHECK(full.append_block({transfer(o, g.addr, 20, 1)}, t0 + 1).ok);
     CHECK(full.append_block({transfer(o, g.addr, 30, 2)}, t0 + 2).ok);
@@ -110,7 +111,7 @@ static void f05_truncate_rebuilds_the_state() {
 static void f06_truncate_keeps_the_producers() {
     Key o = new_key(), g = new_key();
     std::vector<Address> producers{o.addr};
-    Chain c; CHECK(c.init_genesis(o.addr, 100000, g.addr, 0, producers));
+    Chain c; CHECK(c.init_genesis(o.addr, 100000, g.addr, 0, producers)); taztest::use(c);
     CHECK(!c.producers().empty());
     CHECK(c.append_block_signed({transfer(o, g.addr, 5, 0)}, ts++, o.sk, o.pk).ok);
     CHECK(c.append_block_signed({transfer(o, g.addr, 6, 1)}, ts++, o.sk, o.pk).ok);
@@ -126,8 +127,8 @@ static void f06_truncate_keeps_the_producers() {
 // chains "the same" and leave both nodes on different histories while each believed they agreed.
 static void f07_same_state_different_history_is_not_the_same_chain() {
     Key o = new_key(), g = new_key();
-    Chain a; CHECK(a.init_genesis(o.addr, 100000, g.addr, 0));
-    Chain b; CHECK(b.init_genesis(o.addr, 100000, g.addr, 0));
+    Chain a; CHECK(a.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(a);
+    Chain b; CHECK(b.init_genesis(o.addr, 100000, g.addr, 0)); taztest::use(b);
 
     // the same transfer, produced at two different times: identical state, different block hash
     CHECK(a.append_block({transfer(o, g.addr, 7, 0)}, 5000).ok);

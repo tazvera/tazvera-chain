@@ -804,6 +804,7 @@ int main(int argc, char** argv) {
         tx.amount = amount;
         tx.fee = taz::FEE_TRANSFER_V1;
         tx.nonce = chain.state().nonce(from);
+        tx.network_id = chain.network_id();   // protocol 4: the signature is for THIS network only
         tx.pubkey = pk;
         const std::vector<std::uint8_t> signable = tx.signable_bytes();
         if (!taz::sign(sk, signable, tx.signature)) return usage_error("the key cannot sign (is the key file right?)");

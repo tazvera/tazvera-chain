@@ -182,7 +182,8 @@ static void n06_producer_signature_is_network_bound() {
     CHECK(probe.append_block_signed({}, 10, producer.sk, producer.pk).ok);
     Block good = probe.blocks().back();
     // the signature the chain itself made equals the documented layout
-    CHECK(verify(good.producer_pubkey, block_message("TAZVERA-BLOCK-SIG-V3", &ch.network_id(), good), good.producer_signature));
+    const Hash32 net = ch.network_id();
+    CHECK(verify(good.producer_pubkey, block_message("TAZVERA-BLOCK-SIG-V3", &net, good), good.producer_signature));
     CHECK(ch.accept_block(good).ok);
 
     // the same block, signed for ANOTHER network, or in the protocol-3 layout, is refused on a fresh copy
@@ -226,11 +227,11 @@ static void n07_network_id_in_the_file() {
     }
     // a protocol-3 file (the number written by the previous release) is refused with a reason
     std::string v3 = text;
-    const std::string pv = "\"protocol_version\": " + std::to_string(PROTOCOL_VERSION);
+    const std::string pv = "\"protocol_version\": \"" + std::to_string(PROTOCOL_VERSION) + "\"";   // numbers are written as strings
     const std::size_t p = v3.find(pv);
     CHECK(p != std::string::npos);
     if (p != std::string::npos) {
-        v3.replace(p, pv.size(), "\"protocol_version\": 3");
+        v3.replace(p, pv.size(), "\"protocol_version\": \"3\"");
         Chain out; std::string why;
         CHECK(!load_chain_json_text(v3, out, &why));
         CHECK(!why.empty());

@@ -56,6 +56,9 @@ public:
     ChainResult accept_block(const Block& block,
                              std::int64_t max_timestamp = NO_TIMESTAMP_LIMIT);
 
+    // Protocol 4: the identity of this network. It is the genesis commitment and it is the previous_hash of block 0, so it
+    // is covered by every block hash; transactions and producer signatures sign it.
+    Hash32 network_id() const noexcept { return blocks_.empty() ? Hash32{} : blocks_[0].previous_hash; }
     std::uint64_t height() const noexcept { return blocks_.empty() ? 0 : blocks_.back().height; }
     const State& state() const noexcept { return state_; }
     const std::vector<Block>& blocks() const noexcept { return blocks_; }
