@@ -1,6 +1,4 @@
 name: Windows (experimental)
-# Separate from "C++ Core CI" on purpose: this build has never been run by the author.
-# A red result here is information about Windows support, not about the Linux core.
 on:
   workflow_dispatch:
   push:
@@ -23,6 +21,10 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-openssl
+      - name: Verify GCC 16 C++26 support
+        run: |
+          g++ --version
+          printf 'int main(){}\n' | g++ -std=c++26 -x c++ -fsyntax-only -
       - name: Configure
         run: cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
