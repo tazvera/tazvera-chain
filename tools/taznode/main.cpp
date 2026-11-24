@@ -446,7 +446,6 @@ int main(int argc, char** argv) {
                 std::cerr << "taznode: sync batch count is outside the expected range\n";
                 return false;
             }
-            const auto started = std::chrono::steady_clock::now();
             std::size_t bytes = 0;
             std::uint64_t added = 0;
             bool ok = true;
@@ -460,6 +459,11 @@ int main(int argc, char** argv) {
                 }
                 if (type != taz::kMsgBlocks) {
                     std::cerr << "taznode: the peer sent a message we did not ask for\n";
+                    ok = false;
+                    break;
+                }
+                if (added > 0 && payload.size() > kSyncByteBudget - std::min(bytes, kSyncByteBudget)) {
+                    std::cerr << "taznode: peer exceeded the 4 MiB sync batch budget; refusing the rest of this batch\\n";
                     ok = false;
                     break;
                 }
