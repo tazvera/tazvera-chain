@@ -151,7 +151,8 @@ int main(int argc, char** argv) {
     std::string every_text;
     std::string retries_text;
     std::string identity_file;
-    bool require_identity = false;\n    bool allow_anonymous = false;
+    bool require_identity = false;
+    bool allow_anonymous = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     std::string new_key_file;
@@ -183,7 +184,8 @@ int main(int argc, char** argv) {
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
-        if (a == "--require-identity") { require_identity = true; continue; }\n        if (a == "--allow-anonymous") { allow_anonymous = true; continue; }
+        if (a == "--require-identity") { require_identity = true; continue; }
+        if (a == "--allow-anonymous") { allow_anonymous = true; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -191,7 +193,12 @@ int main(int argc, char** argv) {
         }
         return usage_error("unknown argument \"" + a + "\"");
     }
-    if (allow_anonymous && require_identity)\n        return usage_error("--allow-anonymous and --require-identity cannot be used together");\n    // Identity is mandatory by default for every network mode. Anonymous compatibility must be an explicit opt-in.\n    require_identity = !allow_anonymous || require_identity;\n\n    // Making a key needs no chain, so this is handled before that check and then stops.
+    if (allow_anonymous && require_identity)
+        return usage_error("--allow-anonymous and --require-identity cannot be used together");
+    // Identity is mandatory by default for every network mode. Anonymous compatibility must be an explicit opt-in.
+    require_identity = !allow_anonymous || require_identity;
+
+    // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
         if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
             !serve_port.empty() || seen_key || !identity_file.empty())
