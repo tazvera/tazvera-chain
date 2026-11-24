@@ -19,6 +19,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #ifndef TAZ_NODE_BINARY
 #error "TAZ_NODE_BINARY must be defined (see CMakeLists.txt)"
@@ -40,6 +43,7 @@ static std::uint16_t free_port() {
     return l.port;                                                // the listener closes here; the node binds it a moment later
 }
 static std::string node() { return std::string("\"") + TAZ_NODE_BINARY + "\""; }
+static std::string q(const std::string& value) { return "\"" + value + "\""; }
 
 // Start a command in the background with its output in a file. POSIX shells use "&"; Windows has no such thing,
 // so cmd's own "start /b" does the same job. Returns whether the launcher itself succeeded — the node is still
@@ -64,7 +68,13 @@ static int run_waiting(const std::string& command, const std::string& out) {
 #else
     const std::string full = command + " > \"" + out + "\" 2>&1";
 #endif
-    return std::system(full.c_str());
+    const int status = std::system(full.c_str());
+#ifdef _WIN32
+    return status; // cmd returns the child's exit code directly.
+#else
+    if (status == -1 || !WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status); // POSIX system() returns an encoded wait status.
+#endif
 }
 static std::string pin(const Chain& c) { return to_hex(c.genesis_commitment()); }
 static bool wait_for(const fs::path& file, const std::string& text, int seconds) {
@@ -142,6 +152,53 @@ static void f3_far_behind_listener_receives_from_connecting_node() {
     CHECK(rc == 0);
     CHECK(height_of(dir / "S.json", full) == 1101);
 }
+// F2: the node must stop if a peer's accepted block cannot be persisted. Replace the client's
+// already-loaded chain file with a directory after its first refused connection, then let it reconnect.
+// The in-memory chain can accept the block, but the atomic save cannot replace the directory; the node
+// must exit with code 3 rather than continue serving a chain that is not on disk.
+static void f5_node_exits_when_sync_save_fails() {
+    Key a = new_key(), b = new_key();
+    Chain full = make_chain(1, a, b), fresh = make_chain(0, a, b);
+    const fs::path dir = fs::temp_directory_path() / "taz-f2-node-save-failure";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    const fs::path server_file = dir / "S.json";
+    const fs::path client_file = dir / "C.json";
+    const fs::path server_log = dir / "s.out";
+    const fs::path client_log = dir / "c.out";
+    std::string err;
+    CHECK(save_chain_json(full, server_file.string(), &err));
+    CHECK(save_chain_json(fresh, client_file.string(), &err));
+    const std::uint16_t port = free_port();
+
+    int client_rc = -1;
+    const std::string client_cmd = node() + " --chain " + q(client_file.string()) +
+        " --expect-genesis " + pin(fresh) + " --peer " + std::to_string(port) + " --every 1 --retries 6";
+    std::thread client([&] { client_rc = run_waiting(client_cmd, client_log.string()); });
+
+    // Wait for the node to prove it loaded the valid file and made a first connection attempt.
+    const bool attempted = wait_for(client_log, "connect", 8) || wait_for(client_log, "refused", 1);
+    CHECK(attempted);
+    if (attempted) {
+        fs::remove(client_file, ec);
+        CHECK(!ec);
+        ec.clear();
+        CHECK(fs::create_directory(client_file, ec));
+        CHECK(!ec);
+    }
+
+    const std::string server_cmd = node() + " --chain " + q(server_file.string()) +
+        " --expect-genesis " + pin(full) + " --serve " + std::to_string(port) +
+        " --max-peers 1 --serve-timeout 20";
+    CHECK(run_in_background(server_cmd, server_log.string()));
+    CHECK(wait_for(server_log, "listening", 8));
+    client.join();
+
+    CHECK(client_rc == 3);
+    CHECK(slurp(client_log).find("stopping rather than running ahead of the file") != std::string::npos);
+    CHECK(fs::is_directory(client_file));
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(dir, ec);
+}
+
 static void f4_equal_height_is_one_conversation() {
     Key a = new_key(), b = new_key();
     Chain same = make_chain(30, a, b);
@@ -157,9 +214,10 @@ int main() {
     f2_node_at_1000_catches_up_to_2500();
     f3_far_behind_listener_receives_from_connecting_node();
     f4_equal_height_is_one_conversation();
+    f5_node_exits_when_sync_save_fails();
     std::error_code ec;
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz-f1-a", "taz-f1-b", "taz-f1-c", "taz-f1-d"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
-    std::cout << "far-sync tests: all passed (4 cases)\n";
+    std::cout << "far-sync tests: all passed (5 cases)\n";
     return EXIT_SUCCESS;
 }

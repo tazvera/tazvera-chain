@@ -358,9 +358,9 @@ int main(int argc, char** argv) {
         // Built per peer, not once: after adopting a peer's chain our height changes, and telling the next peer
         // the old height would be a lie it acts on.
 
-        // Block-by-block sync: the node that is ahead sends only the blocks the other one is missing, one
-        // message each. The receiver knows how many to expect from the hello heights, so no end marker is
-        // needed, and every block goes through accept_block() — the same validation a block from disk gets.
+        // Block-by-block sync: the node that is ahead sends a bounded batch with an explicit count header.
+        // The count is needed because the 4 MiB byte budget can end a batch before the 200-block limit.
+        // Every received block goes through accept_block() — the same validation a block from disk gets.
         constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next conversation continues
         // F1: set by the last conversation when blocks were left over (either direction), together with the two
         // heights it started from. A --peer node uses them to carry on at once instead of waiting a whole poll
@@ -378,52 +378,86 @@ int main(int argc, char** argv) {
                 return true;
             }
             const std::uint64_t missing = announced - from_height;
-            const std::uint64_t send = std::min(missing, kMaxBlocksPerSync);
+            const std::uint64_t maximum = std::min(missing, kMaxBlocksPerSync);
+            constexpr std::size_t kSyncByteBudget = 4u * 1024u * 1024u;
             constexpr auto kSyncSendTimeBudget = std::chrono::seconds(60);
             const taz::Deadline deadline = std::chrono::steady_clock::now() + kSyncSendTimeBudget;
-            for (std::uint64_t n = 0; n < send; ++n) {
+            std::vector<std::string> batch;
+            std::size_t bytes = 0;
+            for (std::uint64_t n = 0; n < maximum; ++n) {
                 const std::uint64_t wanted = from_height + 1 + n;
                 const taz::Block* found = nullptr;
-                // v9.1: blocks are stored in height order from 0, so block `wanted` sits at index `wanted`
-                // (it used to walk the whole chain for every block it sent).
                 if (wanted < chain.blocks().size() && chain.blocks()[static_cast<std::size_t>(wanted)].height == wanted)
                     found = &chain.blocks()[static_cast<std::size_t>(wanted)];
                 if (found == nullptr) {
                     std::cerr << "taznode: our own chain is missing block " << wanted << "\n";
                     return false;
                 }
-                const std::string text = taz::block_to_json(*found);
-                if (text.size() > taz::kMaxPayloadBytes) {
+                std::string payload = taz::block_to_json(*found);
+                if (payload.size() > taz::kMaxPayloadBytes) {
                     std::cerr << "taznode: block " << wanted << " is larger than one message\n";
                     return false;
                 }
-                if (!taz::send_message(sock, taz::kMsgBlocks, text, &net_err, deadline)) {
+                // A single block larger than the batch budget is allowed by itself so it can never starve.
+                // Once a batch has one block, do not exceed the aggregate 4 MiB cap.
+                if (!batch.empty() && payload.size() > kSyncByteBudget - std::min(bytes, kSyncByteBudget))
+                    break;
+                bytes += payload.size();
+                batch.push_back(std::move(payload));
+                if (bytes >= kSyncByteBudget) break;
+            }
+            if (batch.empty()) {
+                std::cerr << "taznode: no blocks fit in the sync batch\n";
+                return false;
+            }
+            // The explicit count makes a short byte-bounded batch unambiguous to the receiver. Older peers
+            // reject this new message type instead of waiting for blocks that will never arrive.
+            if (!taz::send_message(sock, taz::kMsgBlockBatch, std::to_string(batch.size()), &net_err, deadline)) {
+                std::cerr << "taznode: " << net_err << "\n";
+                return false;
+            }
+            for (const std::string& payload : batch) {
+                if (!taz::send_message(sock, taz::kMsgBlocks, payload, &net_err, deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
             }
-            std::cout << "taznode: sent " << send << " block(s) from height " << (from_height + 1) << "\n";
-            if (missing > send) {
+            std::cout << "taznode: sent " << batch.size() << " block(s) from height " << (from_height + 1) << "\n";
+            if (missing > batch.size()) {
                 more_to_sync = true;
-                std::cout << "taznode: " << (missing - send) << " block(s) left for the next sync\n";
+                std::cout << "taznode: " << (missing - batch.size()) << " block(s) left for the next sync\n";
             }
             return true;
         };
         auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
             const std::uint64_t wanted = std::min(expected, kMaxBlocksPerSync);
-            // A count is not a budget: 200 messages, each allowed to stall for the receive timeout, is ten
-            // minutes of a node's life handed to one peer. Time and bytes are bounded too, and the next poll
-            // picks up where this one stopped.
             constexpr auto kSyncTimeBudget = std::chrono::seconds(60);
             constexpr std::size_t kSyncByteBudget = 4u * 1024u * 1024u;
-            const auto started = std::chrono::steady_clock::now();
-            // Passed into every read, so a peer that trickles bytes is cut off at the deadline itself rather
-            // than three seconds after each of its bytes.
-            const taz::Deadline deadline = started + kSyncTimeBudget;
+            const taz::Deadline deadline = std::chrono::steady_clock::now() + kSyncTimeBudget;
+            std::uint8_t batch_type = 0;
+            std::string batch_payload;
+            if (!taz::recv_message(sock, batch_type, batch_payload, &net_err, deadline) ||
+                batch_type != taz::kMsgBlockBatch || batch_payload.empty() || batch_payload.size() > 3) {
+                std::cerr << "taznode: missing or invalid sync batch header: " << net_err << "\n";
+                return false;
+            }
+            std::uint64_t batch_count = 0;
+            for (char c : batch_payload) {
+                if (c < '0' || c > '9' ||
+                    batch_count > (UINT64_MAX - static_cast<std::uint64_t>(c - '0')) / 10) {
+                    std::cerr << "taznode: invalid sync batch count\n";
+                    return false;
+                }
+                batch_count = batch_count * 10 + static_cast<std::uint64_t>(c - '0');
+            }
+            if (batch_count == 0 || batch_count > wanted || batch_count > kMaxBlocksPerSync) {
+                std::cerr << "taznode: sync batch count is outside the expected range\n";
+                return false;
+            }
             std::size_t bytes = 0;
             std::uint64_t added = 0;
             bool ok = true;
-            for (std::uint64_t n = 0; n < wanted && ok; ++n) {
+            for (std::uint64_t n = 0; n < batch_count && ok; ++n) {
                 std::uint8_t type = 0;
                 std::string payload;
                 if (!taz::recv_message(sock, type, payload, &net_err, deadline)) {
@@ -436,7 +470,17 @@ int main(int argc, char** argv) {
                     ok = false;
                     break;
                 }
+                if (added > 0 && payload.size() > kSyncByteBudget - std::min(bytes, kSyncByteBudget)) {
+                    std::cerr << "taznode: peer exceeded the 4 MiB sync batch budget; refusing the rest of this batch\\n";
+                    ok = false;
+                    break;
+                }
                 bytes += payload.size();
+                if (bytes > kSyncByteBudget && n + 1 < batch_count) {
+                    std::cerr << "taznode: oversized block must be the only block in a sync batch; refusing malformed batch\\n";
+                    ok = false;
+                    break;
+                }
                 taz::Block block;
                 std::string why;
                 if (!taz::parse_block_text(payload, block, &why)) {
@@ -444,9 +488,6 @@ int main(int argc, char** argv) {
                     ok = false;
                     break;
                 }
-                // A block with timestamp INT64_MAX is valid on its own and freezes the chain forever, because
-                // every honest block after it must be "strictly greater". A peer's block is therefore only
-                // accepted within the same clock slack this node allows itself when producing.
                 const taz::ChainResult result = chain.accept_block(block, now_seconds() + 120);
                 if (!result.ok) {
                     std::cerr << "taznode: the peer sent a block we cannot accept: " << result.error << "\n";
@@ -454,23 +495,14 @@ int main(int argc, char** argv) {
                     break;
                 }
                 ++added;
-                // v9.1: the byte budget is checked AFTER the block is accepted. Checked before accepting (as in
-                // v9.0), one block bigger than the budget was read, thrown away, and sent again every round
-                // without ever being added: such a block could never sync.
                 if (bytes > kSyncByteBudget) {
-                    std::cout << "taznode: sync budget reached after " << added
-                              << " block(s); the rest waits for the next round\n";
+                    std::cout << "taznode: accepted one oversized sync block; remaining blocks wait for the next round\n";
                     break;
                 }
             }
-            // Save whatever was accepted, even when the batch broke in the middle: a block that is in memory but
-            // not on disk is a chain that disagrees with its own file after a crash.
             if (added > 0) {
                 std::string save_err;
                 if (!taz::save_chain_json(chain, chain_file, &save_err)) {
-                    // Fail fast: this node's memory is now ahead of its own file. Continuing would mean serving
-                    // answers from a chain the file does not contain, and the next restart would silently roll
-                    // back work other nodes already saw.
                     std::cerr << "taznode: cannot write " << chain_file << ": " << save_err
                               << " - stopping rather than running ahead of the file\n";
                     std::exit(3);
@@ -478,7 +510,6 @@ int main(int argc, char** argv) {
             }
             if (added > 0)
                 std::cout << "taznode: accepted " << added << " block(s), height is now " << chain.height() << "\n";
-            // Progress (added > 0) is required, so a peer that stalls cannot keep the caller going.
             if (ok && added > 0 && chain.height() < sync_their_height) more_to_sync = true;
             return ok;
         };
