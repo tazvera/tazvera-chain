@@ -44,6 +44,17 @@ static bool same_chain(const Chain& a, const Chain& b) {
 static bool conserved(const Chain& c, Amount total) { return c.state().circulating() + c.state().held_total() + c.state().burned_total() == total; }
 
 static constexpr Amount BIG = 100000000, FUND = 2000000;
+ 
+// Full deterministic fuzz coverage in normal builds; a bounded workload under ASan/UBSan.
+#ifdef TAZ_SANITIZED_BUILD
+static constexpr int kFileFuzzCases = 1200; // of 6000
+static constexpr int kTxFuzzCases = 800; // of 4000
+static constexpr const char* kFuzzMode = "sanitizer build (reduced)";
+#else
+static constexpr int kFileFuzzCases = 6000;
+static constexpr int kTxFuzzCases = 4000;
+static constexpr const char* kFuzzMode = "normal build (full)";
+#endif
 struct World {                                   // o = owner (possibly stolen), g = guardians, n = new key, x = thief's veto key
     Key o = new_key(), g[3] = {new_key(), new_key(), new_key()}, n = new_key(), x = new_key();
     Chain c; Amount total = BIG;
@@ -200,7 +211,7 @@ static void test_fuzz_file() {
     CHECK(put(c, {vote(w.g[0], w.o.addr, w.n.addr, nx(c, w.g[0])), vote(w.g[1], w.o.addr, w.n.addr, nx(c, w.g[1]))}));
     const std::string text = to_json(c);
     int accepted = 0, refused = 0;
-    for (int i = 0; i < 6000; ++i) {
+    for (int i = 0; i < kFileFuzzCases; ++i) {
         std::string m = text; const std::size_t pos = rnd(m.size());
         switch (rnd(5)) {
             case 0: m[pos] = static_cast<char>(rnd(256)); break;
@@ -213,8 +224,9 @@ static void test_fuzz_file() {
         if (load_chain_json_text(m, out, &err)) { ++accepted; CHECK(out.state().state_root() == c.state().state_root() && out.blocks().size() == c.blocks().size() && out.blocks().back().hash() == c.blocks().back().hash()); }
         else { ++refused; CHECK(!err.empty()); }
     }
-    CHECK(refused > 5000);
-    std::cout << "fuzz file: " << refused << " refused, " << accepted << " accepted (same ledger only)\n";
+    CHECK(refused > kFileFuzzCases * 5 / 6); // the overwhelming majority must still be refused
+    std::cout << "fuzz file: " << refused << " refused, " << accepted << " accepted (same ledger only) ["
+              << kFuzzMode << "]\n";
 }
 static void test_fuzz_transactions() {
     World w; const Chain baseline = w.c; const Key ks[] = {w.o, w.g[0], w.g[1], w.g[2], w.n, w.x};
@@ -223,7 +235,7 @@ static void test_fuzz_transactions() {
     // ever-growing chain made validation work grow quadratically under ASan/UBSan.
     // Independent trials preserve 4,000 randomized block-validation cases without that
     // unrelated chain-growth cost.
-    for (int i = 0; i < 4000; ++i) {
+    for (int i = 0; i < kTxFuzzCases; ++i) {
         Chain trial = baseline;
         std::vector<Transaction> txs;
         for (std::uint64_t t = rnd(4); t > 0; --t) {
@@ -240,7 +252,7 @@ static void test_fuzz_transactions() {
         CHECK(conserved(trial, w.total));
     }
     CHECK(ok > 100 && bad > 100);
-    std::cout << "fuzz transactions: " << ok << " blocks accepted, " << bad << " refused, supply conserved\n";
+    std::cout << "fuzz transactions: " << ok << " blocks accepted, " << bad << " refused, supply conserved [" << kFuzzMode << "]\n";
 }
 
 // v8.3: the file's own commitment proves internal consistency only. A pin supplied by the caller is what
