@@ -255,6 +255,65 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
 
 // v9.2: --serve-timeout must end a node that is waiting for a peer that never comes. Without it the process
 // outlives the test on Windows, which is exactly why these tests were off there.
+// F2 process-level regression: if a sync block is accepted in memory but cannot be persisted,
+// the receiving node must stop with exit code 3 instead of continuing with a chain it cannot restart.
+// POSIX directory permissions make the save fail after startup while still allowing the chain file to be read.
+static void n7_persistence_failure_stops_node() {
+#ifndef _WIN32
+    Key a = new_key(), b = new_key();
+    Chain behind = two_account_chain(a, b, 1000000);
+    Chain ahead = behind;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    CHECK(ahead.append_block({}, now - 10).ok);
+
+    const fs::path dir = fs::temp_directory_path() / "taz-f2-n7";
+    const fs::path server_dir = dir / "server";
+    const fs::path receiver_dir = dir / "receiver";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(server_dir);
+    fs::create_directories(receiver_dir);
+    std::string err;
+    CHECK(save_chain_json(ahead, (server_dir / "chain.json").string(), &err));
+    const fs::path receiver_chain = receiver_dir / "chain.json";
+    CHECK(save_chain_json(behind, receiver_chain.string(), &err));
+    const std::string before = slurp(receiver_chain);
+
+    // Keep read/execute permission so taznode can load its chain, but deny creation of the
+    // temporary file that save_chain_json needs after it accepts the peer's block.
+    fs::permissions(receiver_dir, fs::perms::owner_read | fs::perms::owner_exec,
+                    fs::perm_options::replace, ec);
+    CHECK(!ec);
+
+    const std::uint16_t port = free_port();
+    const std::string server_out = (dir / "server.out").string();
+    const std::string server_cmd = node() + " --chain " + q((server_dir / "chain.json").string()) +
+        " --expect-genesis " + pin(ahead) + " --listen " + std::to_string(port) + " --serve-timeout 40";
+    CHECK(run_in_background(server_cmd, server_out));
+    CHECK(wait_for(server_out, "listening", 10));
+
+    const std::string receiver_out = (dir / "receiver.out").string();
+    const std::string receiver_cmd = node() + " --chain " + q(receiver_chain.string()) +
+        " --expect-genesis " + pin(behind) + " --peer " + std::to_string(port);
+    int rc = run_waiting(receiver_cmd, receiver_out);
+    if (rc >= 0 && WIFEXITED(rc)) rc = WEXITSTATUS(rc);
+    else rc = -1;
+
+    // Restore permissions before cleanup. The receiver must have exited specifically because it
+    // refused to run ahead of the durable chain file.
+    fs::permissions(receiver_dir, fs::perms::owner_all, fs::perm_options::replace, ec);
+    CHECK(!ec);
+    CHECK(rc == 3);
+    CHECK(slurp(receiver_out).find("stopping rather than running ahead of the file") != std::string::npos);
+    CHECK(slurp(receiver_chain) == before);   // failed save never damaged the last durable chain
+    std::cout << "  F2 process test: node stopped with exit code 3 after persistence failed\n";
+    fs::remove_all(dir, ec);
+#else
+    std::cout << "  F2 process test: skipped on Windows (POSIX directory permission fixture)\n";
+#endif
+}
+
 static void n6_serve_timeout_ends_the_node() {
     Key a = new_key(), b = new_key();
     Chain c = two_account_chain(a, b, 1000000);
@@ -293,9 +352,10 @@ int main() {
         n4_transfer_with_peer_is_an_error();
         n5_require_identity_refuses_anonymous_and_keeps_serving();
         n6_serve_timeout_ends_the_node();
+        n7_persistence_failure_stops_node();
     }
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6"}) fs::remove_all(fs::temp_directory_path() / d, ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6", "taz-f2-n7"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Hardening v9.1 tests passed. This is not a security audit.\n";
     return EXIT_SUCCESS;
