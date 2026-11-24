@@ -226,6 +226,74 @@ bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadlin
 
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error, Deadline deadline) {
     std::size_t sent = 0;
+#ifdef _WIN32
+    // Winsock's SO_SNDTIMEO is not a reliable absolute deadline for a blocking send:
+    // a large send can remain blocked well beyond the timeout while the peer drains slowly.
+    // For deadline-bound sends, use nonblocking mode plus select() so every wait is
+    // bounded by the same absolute deadline. Restore the socket's normal blocking mode
+    // before returning; sockets created by this transport are blocking by default.
+    if (deadline != no_deadline()) {
+        u_long nonblocking = 1;
+        if (ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &nonblocking) != 0) {
+            if (error) *error = "could not enable nonblocking mode for a deadline-bound send";
+            return false;
+        }
+
+        auto fail = [&](const char* reason) {
+            u_long blocking = 0;
+            const int restored = ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking);
+            if (error) {
+                *error = reason;
+                if (restored != 0) *error += "; could not restore blocking socket mode";
+            }
+            return false;
+        };
+
+        while (sent < bytes.size()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline)
+                return fail("the peer took longer than the time allowed for this exchange");
+
+            const auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+            timeval tv{};
+            tv.tv_sec = static_cast<long>(left / 1000000);
+            tv.tv_usec = static_cast<long>(left % 1000000);
+
+            fd_set writable;
+            FD_ZERO(&writable);
+            FD_SET(static_cast<SOCKET>(socket.raw()), &writable);
+            const int ready = ::select(0, nullptr, &writable, nullptr, &tv);
+            if (ready == 0)
+                return fail("timed out while waiting to send");
+            if (ready == SOCKET_ERROR) {
+                if (WSAGetLastError() == WSAEINTR) continue;
+                return fail("waiting for the socket to become writable failed");
+            }
+
+            // Re-check after select(): readiness can race with another writer or the deadline.
+            if (std::chrono::steady_clock::now() >= deadline)
+                return fail("the peer took longer than the time allowed for this exchange");
+
+            const std::size_t remaining = bytes.size() - sent;
+            const int amount = static_cast<int>(std::min<std::size_t>(remaining, 64u * 1024u));
+            const int chunk = ::send(static_cast<SOCKET>(socket.raw()), bytes.data() + sent, amount, 0);
+            if (chunk == SOCKET_ERROR) {
+                const int code = WSAGetLastError();
+                if (code == WSAEWOULDBLOCK || code == WSAEINTR) continue;
+                return fail("the connection closed while sending");
+            }
+            if (chunk == 0) return fail("the connection closed while sending");
+            sent += static_cast<std::size_t>(chunk);
+        }
+
+        u_long blocking = 0;
+        if (ioctlsocket(static_cast<SOCKET>(socket.raw()), FIONBIO, &blocking) != 0) {
+            if (error) *error = "send completed but could not restore blocking socket mode";
+            return false;
+        }
+        return true;
+    }
+#endif
     while (sent < bytes.size()) {
         // SO_SNDTIMEO limits one blocking send call, not the complete loop. Recompute the remaining time before
         // every partial write so a receiver that slowly drains its socket cannot extend the absolute deadline.
