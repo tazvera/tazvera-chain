@@ -200,7 +200,10 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --listen 1 --peer 2") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer abc") == 2);
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 0") == 2);
-    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 3);   // nothing listening
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1") == 2);   // identity is required by default
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1") == 3); // explicit anonymous mode reaches the absent peer
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --identity " + q(key_file) + " --peer 1") == 3); // identity alone enables strict authentication
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --require-identity --peer 1") == 2);
     // strict peer authentication must not start unless this node also has an identity key
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
               " --require-identity --peer 1") == 2);
@@ -224,7 +227,7 @@ int main() {
     const std::string server_log = tmpdir() + "/strict-server.log";
     const std::string server_cmd = exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
         " --serve " + std::to_string(strict_port) + " --max-peers 1 --serve-timeout 8 --identity " +
-        q(key_file) + " --require-identity > " + q(server_log) + " 2>&1";
+        q(key_file) + " > " + q(server_log) + " 2>&1";
     int server_rc = -1;
     std::thread server_thread([&] { server_rc = run(server_cmd); });
     bool server_ready = false;
@@ -253,7 +256,7 @@ int main() {
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --retries 3") == 2);              // needs --every
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries abc") == 2);
     // a peer that is not there is survived once and then given up on, without hanging
-    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --peer 1 --every 1 --retries 1") == 3);
+    CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --allow-anonymous --peer 1 --every 1 --retries 1") == 3);
     // --transfer does one thing and stops; combining it with a network mode used to do neither, silently
     CHECK(run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin + " --transfer 22" +
               std::string(38, '2') + ":1 --peer 1") == 2);

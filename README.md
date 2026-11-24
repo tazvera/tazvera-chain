@@ -2,13 +2,13 @@
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
-This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. Since v9.0 it also contains a node, `taznode`, which creates and loads a chain, produces signed blocks, and talks to other nodes **on 127.0.0.1 only**. It still does **not** implement consensus, finality, peer authentication, staking, smart contracts or a wallet.
+This package replaces the broken Phase-1 core with a small, buildable C++20 foundation. Since v9.0 it also contains a node, `taznode`, which creates and loads a chain, produces signed blocks, and talks to other nodes **on 127.0.0.1 only**. It still does **not** implement consensus, finality, peer allowlisting, transport encryption, staking, smart contracts or a wallet.
 
 ## What the node can and cannot do (v9.0)
 
-**Can:** create a chain with `--init-genesis`, load it with a genesis pin, produce a signed block with `--transfer` and a key file, serve several peers one at a time with `--serve`, sync both ways with `--peer`, poll on an interval with `--every`, survive a missing peer with `--retries`, and exchange only the blocks a peer is missing.
+**Can:** create a chain with `--init-genesis`, load it with a genesis pin, produce a signed block with `--transfer` and a key file, authenticate peer keys by default during `--listen`, `--serve` and `--peer`, sync both ways, poll on an interval with `--every`, survive a missing peer with `--retries`, and exchange bounded batches of missing blocks.
 
-**Cannot:** prove who a peer is (no authentication), decide between two chains of the same height beyond a fixed tie-break (no consensus), finalise anything, listen on anything except 127.0.0.1, or carry a block with thousands of transactions (one 64 KiB message per block).
+**Cannot:** decide whether an authenticated key belongs to an operator-approved peer (there is no peer allowlist), encrypt network traffic, provide consensus or finality, or listen on anything except 127.0.0.1. `--allow-anonymous` is an explicit unsafe compatibility option for isolated local testing only.
 
 ## What this package includes
 
@@ -22,6 +22,10 @@ This package replaces the broken Phase-1 core with a small, buildable C++20 foun
 - Block hash commits to block metadata, every transaction ID, and state root.
 - Block execution uses a temporary state copy; if any transaction fails, no partial state is committed.
 - CMake builds the library, demo, and tests; CTest runs the tests.
+
+## Peer authentication
+
+Network modes require `--identity <keyfile>` by default. The peer must prove control of its key during the connection handshake. `--allow-anonymous` is an explicit opt-out for isolated compatibility tests; do not use it beyond a trusted local test environment. A valid identity key is not an allowlist: any key can still identify itself, and this prototype does not yet restrict connections to operator-approved peers.
 
 ## Requirements
 
@@ -52,7 +56,7 @@ The test suite checks valid signatures, modified-signature rejection, wrong-chai
 ## Important limitations and next work
 
 1. This is a repaired local core only. A successful local build is not proof of blockchain security.
-2. Networking exists in the narrowest form that can be tested: a loopback TCP transport, a hello that proves two nodes are on the same chain, and block-by-block sync between two processes on one machine. There is no peer authentication, no consensus, no finality, no RPC, no validator registration, no staking, no slashing, no wallet and no smart contracts. Local file persistence exists (v8 / v8.1 / v8.2 below) and is still not a database.
+2. Networking is a loopback-only prototype. Peer identity proof is required by default and is bound to the handshake transcript, but identity is not authorization: there is no trusted-peer allowlist, transport encryption, consensus or finality. `--allow-anonymous` disables the identity requirement and must be used only for isolated local compatibility tests. There is no RPC, validator registration, staking, slashing, wallet or smart contracts. Local file persistence is still not a database.
 3. The prototype uses one fixed transfer fee. Congestion policy, fee governance, validator economics, and the long-term sustainability of a finite staking reserve still need formal design.
 4. The 100% fee-burn choice means transaction fees do not pay validators. Resolve validator rewards before public testnet/mainnet.
 5. The address derivation here is a prototype convention, not a finalized public address standard.

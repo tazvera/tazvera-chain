@@ -43,7 +43,7 @@ constexpr const char* kUsage =
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
-    "  --require-identity        refuse any peer that does not prove an identity (needs --identity)\n"
+    "  --require-identity        explicitly require a peer identity (default; needs --identity)\n  --allow-anonymous         allow peers without identity proof (unsafe; local testing only)\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -152,6 +152,7 @@ int main(int argc, char** argv) {
     std::string retries_text;
     std::string identity_file;
     bool require_identity = false;
+    bool allow_anonymous = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
     std::string new_key_file;
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
         if (a == "--require-identity") { require_identity = true; continue; }
+        if (a == "--allow-anonymous") { allow_anonymous = true; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
@@ -191,6 +193,11 @@ int main(int argc, char** argv) {
         }
         return usage_error("unknown argument \"" + a + "\"");
     }
+    if (allow_anonymous && require_identity)
+        return usage_error("--allow-anonymous and --require-identity cannot be used together");
+    // Identity is mandatory by default for every network mode. Anonymous compatibility must be an explicit opt-in.
+    require_identity = !allow_anonymous || require_identity;
+
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
         if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
@@ -297,8 +304,9 @@ int main(int argc, char** argv) {
     if (!every_text.empty() && peer_port.empty()) return usage_error("--every only means something with --peer");
     if (!retries_text.empty() && every_text.empty()) return usage_error("--retries only means something with --every");
     // A node that demands an identity while offering none would be asking for what it does not give.
-    if (require_identity && identity_file.empty())
-        return usage_error("--require-identity needs --identity: this node would demand what it does not offer");
+    const bool has_network_mode = !listen_port.empty() || !serve_port.empty() || !peer_port.empty();
+    if (require_identity && has_network_mode && identity_file.empty())
+        return usage_error("peer authentication is required by default: provide --identity, or use --allow-anonymous only for isolated local testing");
     if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty()) {
         const int given = (!listen_port.empty() ? 1 : 0) + (!serve_port.empty() ? 1 : 0) + (!peer_port.empty() ? 1 : 0);
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");

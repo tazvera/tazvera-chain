@@ -186,7 +186,7 @@ static void scenario(const std::string& title, const std::string& exe, const std
     std::error_code ec; fs::remove(log, ec);
     const std::string cmd = exe + " --chain " + q(chain_path) + " --expect-genesis " + pin +
         " --serve " + std::to_string(port) + " --max-peers " + std::to_string(expected_served) +
-        " --serve-timeout 30 --identity " + q(identity_path) + (strict ? " --require-identity" : "") +
+        " --serve-timeout 30 --identity " + q(identity_path) + (strict ? " --require-identity" : " --allow-anonymous") +
         " > " + q(log) + " 2>&1";
     int rc = -1;
     std::thread server([&] { rc = run(cmd); });
@@ -354,7 +354,7 @@ static ClientResult run_client(const ClientEnv& env, bool strict, const Script& 
     const std::string log = tmpdir() + "/client.log";
     const std::string cmd = env.exe + " --chain " + q(env.chain_path) + " --expect-genesis " + env.pin +
         " --peer " + std::to_string(listener.port) + " --identity " + q(env.identity_path) +
-        (strict ? " --require-identity" : "") + " > " + q(log) + " 2>&1";
+        (strict ? " --require-identity" : " --allow-anonymous") + " > " + q(log) + " 2>&1";
     const auto t0 = std::chrono::steady_clock::now();
     r.rc = run(cmd);
     r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
