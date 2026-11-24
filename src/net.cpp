@@ -1,4 +1,6 @@
 #include "taz/net.hpp"
+#include "taz/auth.hpp"
+#include "taz/crypto.hpp"
 #include <algorithm>
 #include <vector>
 
@@ -347,6 +349,50 @@ bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool
     };
     if (send_first) return send_ours() && recv_theirs();
     return recv_theirs() && send_ours();
+}
+
+bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivKey& private_seed,
+                                  Hello& theirs, bool send_first, std::string* error, Deadline deadline) {
+    auto fail = [&](const std::string& reason) {
+        if (error) *error = reason;
+        return false;
+    };
+
+    // Never trust a caller-supplied nonce here: a non-zero value may still be stale or reused.
+    // Generate a fresh unpredictable nonce for every authenticated connection before signing.
+    if (!random_bytes(ours.nonce)) return fail("could not generate a fresh local nonce");
+    if (std::all_of(private_seed.begin(), private_seed.end(), [](std::uint8_t b) { return b == 0; }))
+        return fail("local identity key is empty");
+    if (!sign_hello(ours, private_seed)) return fail("could not sign the local hello");
+
+    const std::string our_raw_hello = encode_hello(ours);
+    std::string their_raw_hello;
+    if (!exchange_hello(socket, ours, theirs, send_first, error, deadline, &their_raw_hello)) return false;
+
+    const HandshakeDecision decision = check_peer(ours, theirs);
+    if (!decision.ok) return fail("peer hello refused: " + decision.reason);
+    if (!hello_has_identity(theirs)) return fail("peer did not prove an identity");
+    if (!hello_signature_ok(theirs)) return fail("peer hello identity signature is invalid");
+
+    // The second signature binds both exact hello frames to this connection, not merely to a reusable key.
+    const std::string transcript = auth_transcript(ours, our_raw_hello, theirs, their_raw_hello);
+    if (transcript.empty()) return fail("could not build the authentication transcript");
+
+    AuthMessage our_auth;
+    if (!sign_auth(our_auth, private_seed, transcript)) return fail("could not sign the authentication transcript");
+    if (!send_message(socket, kMsgAuth, encode_auth(our_auth), error, deadline)) return false;
+
+    std::uint8_t type = 0;
+    std::string payload;
+    if (!recv_message(socket, type, payload, error, deadline)) return false;
+    if (type != kMsgAuth) return fail("the peer did not send an authentication proof");
+
+    AuthMessage their_auth;
+    std::string why;
+    if (!decode_auth(payload, their_auth, &why)) return fail("the peer sent an invalid authentication proof: " + why);
+    if (their_auth.pubkey != theirs.pubkey) return fail("the authentication key does not match the signed hello");
+    if (!auth_ok(their_auth, transcript)) return fail("the peer's connection-bound identity proof is invalid");
+    return true;
 }
 
 }  // namespace taz
