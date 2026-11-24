@@ -350,9 +350,9 @@ int main(int argc, char** argv) {
         // Built per peer, not once: after adopting a peer's chain our height changes, and telling the next peer
         // the old height would be a lie it acts on.
 
-        // Block-by-block sync: the node that is ahead sends only the blocks the other one is missing, one
-        // message each. The receiver knows how many to expect from the hello heights, so no end marker is
-        // needed, and every block goes through accept_block() — the same validation a block from disk gets.
+        // Block-by-block sync: the node that is ahead sends a bounded batch with an explicit count header.
+        // The count is needed because the 4 MiB byte budget can end a batch before the 200-block limit.
+        // Every received block goes through accept_block() — the same validation a block from disk gets.
         constexpr std::uint64_t kMaxBlocksPerSync = 200;   // keeps one conversation short; the next conversation continues
         // F1: set by the last conversation when blocks were left over (either direction), together with the two
         // heights it started from. A --peer node uses them to carry on at once instead of waiting a whole poll
