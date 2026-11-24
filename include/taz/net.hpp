@@ -39,6 +39,7 @@ inline constexpr std::uint8_t kMsgWant = 4;    // "give me your block at this he
 inline constexpr std::uint8_t kMsgNoBlock = 5; // "I do not have that block"
 inline constexpr std::uint8_t kMsgAuth = 6;    // an identity proof bound to this connection
 inline constexpr std::uint8_t kMsgAccept = 7;  // the accepter confirming it will talk to this peer
+inline constexpr std::uint8_t kMsgBlockBatch = 8; // sync batch header: decimal count of following kMsgBlocks frames
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.
