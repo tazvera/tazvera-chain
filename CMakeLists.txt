@@ -148,3 +148,11 @@ endif()
 # chains the C++ core itself produced (not only against the three shipped demos).
 add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
 target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
+
+# F1: syncing from far behind (real taznode processes; exact case count so a silent skip cannot pass)
+add_executable(taz_far_sync_tests tests/test_far_sync.cpp)
+target_link_libraries(taz_far_sync_tests PRIVATE tazcore Threads::Threads)
+target_compile_definitions(taz_far_sync_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
+add_dependencies(taz_far_sync_tests taznode)
+add_test(NAME taz_far_sync_tests COMMAND taz_far_sync_tests)
+set_tests_properties(taz_far_sync_tests PROPERTIES PASS_REGULAR_EXPRESSION "far-sync tests: all passed \\(4 cases\\)" TIMEOUT 300)
