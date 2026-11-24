@@ -43,7 +43,13 @@ struct LoadOptions {
 // Crash-safe: the data goes to a new temporary file next to the target, is flushed to disk and read back,
 // and only then renamed over the target (POSIX: the directory is flushed too). A crash or a failed write
 // leaves the old file untouched. Returns false and sets *error on any problem.
-bool save_chain_json(const Chain& chain, const std::string& path, std::string* error = nullptr);
+//
+// F2: save refuses to write what load would refuse. The same limits (file size, JSON values, block count) are
+// checked on the text about to be written, BEFORE anything on disk is touched, so a chain that has outgrown what
+// this build can read back leaves the last loadable file in place and returns false instead of silently producing
+// a file the node cannot restart from. `limits` defaults to the loader's defaults; pass the same LoadOptions you
+// load with if you changed them.
+bool save_chain_json(const Chain& chain, const std::string& path, std::string* error = nullptr, const LoadOptions& limits = {});
 
 // Reads a chain file and verifies it from genesis. On success `out` is replaced by the loaded chain; on any
 // failure `out` is not touched.

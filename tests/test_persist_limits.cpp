@@ -60,8 +60,39 @@ int main() {
     Chain over = grow_to(mid, 120000);                         // over it: about 2,050,000 values
     CHECK(!check_property(dir / "c.json", mid, over, "120000 blocks"));
 
+    // Exact boundaries with small limits: save succeeds exactly when load would, for every limit alone.
+    // (Added with the fix, which is what introduced the `limits` argument.)
+    for (int which = 0; which < 3; ++which) {
+        const char* name = which == 0 ? "max_blocks" : which == 1 ? "max_file_bytes" : "max_nodes";
+        bool saw_ok = false, saw_refused = false;
+        for (std::uint64_t h = 5; h <= 40; ++h) {
+            Chain c = grow_to(genesis, h);
+            LoadOptions lim;
+            // limit sits at the size of the 20-block chain, so some heights fit and some do not
+            const Chain ref = grow_to(genesis, 20);
+            std::string e; const fs::path f = dir / "lim.json";
+            LoadOptions loose; save_chain_json(ref, f.string(), &e, loose);
+            std::uint64_t bytes = fs::file_size(f);
+            lim.max_blocks = which == 0 ? 21 : lim.max_blocks;
+            lim.max_file_bytes = which == 1 ? bytes : lim.max_file_bytes;
+            if (which == 2) {                                     // smallest node limit that still lets the 20-block chain save
+                std::uint64_t n = 1;
+                for (;; ++n) { LoadOptions t; t.max_nodes = n; if (save_chain_json(ref, f.string(), &e, t)) break; }
+                lim.max_nodes = n;
+            }
+            const bool saved = save_chain_json(c, f.string(), &e, lim);
+            Chain back; LoadOptions load = lim; load.require_genesis_pin = true; load.expected_genesis_commitment = genesis.genesis_commitment();
+            std::string e2;
+            const bool loadable = saved ? load_chain_json(f.string(), back, &e2, load) : true;
+            if (saved && !loadable) std::cerr << name << " h=" << h << ": saved but not loadable: " << e2 << "\n";
+            CHECK(loadable);
+            (saved ? saw_ok : saw_refused) = true;
+        }
+        CHECK(saw_ok); CHECK(saw_refused);                    // the sweep really crossed the limit
+        std::cout << "  " << name << ": every saved file loads; limit crossed inside the sweep\n";
+    }
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(dir, ec);
     if (failures) { std::cerr << failures << " check(s) failed\n"; return EXIT_FAILURE; }
-    std::cout << "persist limit tests: all passed (3 cases)\n";
+    std::cout << "persist limit tests: all passed (6 cases)\n";
     return EXIT_SUCCESS;
 }
