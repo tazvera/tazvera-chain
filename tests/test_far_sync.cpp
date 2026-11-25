@@ -172,7 +172,7 @@ static void f5_node_exits_when_sync_save_fails() {
 
     int client_rc = -1;
     const std::string client_cmd = node() + " --chain " + q(client_file.string()) +
-        " --expect-genesis " + pin(fresh) + " --peer " + std::to_string(port) + " --every 1 --retries 6";
+        " --expect-genesis " + pin(fresh) + " --peer " + std::to_string(port) + " --every 1 --retries 6 --allow-anonymous";
     std::thread client([&] { client_rc = run_waiting(client_cmd, client_log.string()); });
 
     // Wait for the node to prove it loaded the valid file and made a first connection attempt.
@@ -188,7 +188,7 @@ static void f5_node_exits_when_sync_save_fails() {
 
     const std::string server_cmd = node() + " --chain " + q(server_file.string()) +
         " --expect-genesis " + pin(full) + " --serve " + std::to_string(port) +
-        " --max-peers 1 --serve-timeout 20";
+        " --max-peers 1 --serve-timeout 20 --allow-anonymous";
     CHECK(run_in_background(server_cmd, server_log.string()));
     CHECK(wait_for(server_log, "listening", 8));
     client.join();
