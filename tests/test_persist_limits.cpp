@@ -81,24 +81,26 @@ int main() {
 
     // Exact boundaries with small limits: save succeeds exactly when load would, for every limit alone.
     // (Added with the fix, which is what introduced the `limits` argument.)
+    // The limits are found once per limit (they used to be recomputed for every height, which was ~12,000 saves
+    // and dominated the run time under ASan/UBSan).
+    const Chain ref = grow_to(genesis, 20);
+    std::string e0; const fs::path lf = dir / "lim.json";
+    { LoadOptions loose; if (!save_chain_json(ref, lf.string(), &e0, loose)) return 2; }
+    const std::uint64_t ref_bytes = fs::file_size(lf);
+    std::uint64_t ref_nodes = 1;                              // smallest node limit that still lets the 20-block chain save
+    { std::uint64_t lo = 1, hi = 2000000;
+      while (lo < hi) { LoadOptions t; t.max_nodes = lo + (hi - lo) / 2; if (save_chain_json(ref, lf.string(), &e0, t)) hi = t.max_nodes; else lo = t.max_nodes + 1; }
+      ref_nodes = lo; }
     for (int which = 0; which < 3; ++which) {
         const char* name = which == 0 ? "max_blocks" : which == 1 ? "max_file_bytes" : "max_nodes";
+        LoadOptions lim;
+        if (which == 0) lim.max_blocks = 21;                  // genesis + 20
+        if (which == 1) lim.max_file_bytes = ref_bytes;
+        if (which == 2) lim.max_nodes = ref_nodes;
         bool saw_ok = false, saw_refused = false;
         for (std::uint64_t h = 5; h <= 40; ++h) {
             Chain c = grow_to(genesis, h);
-            LoadOptions lim;
-            // limit sits at the size of the 20-block chain, so some heights fit and some do not
-            const Chain ref = grow_to(genesis, 20);
             std::string e; const fs::path f = dir / "lim.json";
-            LoadOptions loose; save_chain_json(ref, f.string(), &e, loose);
-            std::uint64_t bytes = fs::file_size(f);
-            lim.max_blocks = which == 0 ? 21 : lim.max_blocks;
-            lim.max_file_bytes = which == 1 ? bytes : lim.max_file_bytes;
-            if (which == 2) {                                     // smallest node limit that still lets the 20-block chain save
-                std::uint64_t n = 1;
-                for (;; ++n) { LoadOptions t; t.max_nodes = n; if (save_chain_json(ref, f.string(), &e, t)) break; }
-                lim.max_nodes = n;
-            }
             const bool saved = save_chain_json(c, f.string(), &e, lim);
             Chain back; LoadOptions load = lim; load.require_genesis_pin = true; load.expected_genesis_commitment = genesis.genesis_commitment();
             std::string e2;
