@@ -1,14 +1,13 @@
 """Deterministic educational model of a 4-validator BFT round.
 
 This is a simulator, not production consensus or cryptographic code.
-It models proposal, prevote, >2/3 precommit quorum, and commit.
+It models prevote quorum, precommit quorum, and commit.
 """
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Set
 
 Validator = str
 Block = str
-Vote = Tuple[int, int, Block]  # height, round, block hash
 
 
 @dataclass
@@ -26,14 +25,16 @@ class Round:
         self.quorum = (2 * len(self.validators)) // 3 + 1
 
     def vote(self, phase: str, validator: Validator, block: Block) -> bool:
-        """Record one vote; reject unknown validators and duplicate phase votes."""
+        """Record a vote; enforce validator uniqueness and prevote-before-precommit."""
         if validator not in self.validators:
             raise ValueError("unknown validator")
         if self.committed is not None:
             raise ValueError("height already committed")
-        target = self.prevotes if phase == "prevote" else self.precommits if phase == "precommit" else None
-        if target is None:
+        if phase not in ("prevote", "precommit"):
             raise ValueError("phase must be prevote or precommit")
+        if phase == "precommit" and not self.has_prevote_quorum(block):
+            raise ValueError("precommit requires prevote quorum for this block")
+        target = self.prevotes if phase == "prevote" else self.precommits
         if any(validator in voters for voters in target.values()):
             raise ValueError("validator already voted in this phase")
         target.setdefault(block, set()).add(validator)
