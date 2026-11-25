@@ -87,11 +87,20 @@ static void test_expiry() {
     CHECK(chain.height() == 2);
 }
 
+// F11: this test used to build a genesis whose two balances overflowed a uint64 together, to reach the "receiver would
+// overflow" guard in State. Such a genesis is now refused outright, and with a supply that fits in a uint64 a credit
+// can no longer overflow through the public API (supply is conserved), so the guard in State is defence in depth only.
 static void test_receiver_overflow() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100)); taztest::use(chain);
-    CHECK(!chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
-    CHECK(chain.state().balance(alice.addr) == INITIAL); CHECK(chain.height() == 0);
+    {   // the old scenario cannot be created any more
+        Chain chain; CHECK(!chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
+    }
+    {   // the nearest legal one: the whole supply is exactly 2^64-1, and a transfer into the near-full account works
+        Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - INITIAL)); taztest::use(chain);
+        CHECK(chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
+        CHECK(chain.state().balance(bob.addr) == std::numeric_limits<Amount>::max() - INITIAL + 5000);
+        CHECK(chain.state().circulating() <= std::numeric_limits<Amount>::max());
+    }
 }
 
 static void test_atomic_block() {
