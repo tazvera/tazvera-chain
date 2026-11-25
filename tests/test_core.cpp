@@ -85,11 +85,45 @@ static void test_expiry() {
     CHECK(chain.height() == 2);
 }
 
+// F11: an overflowing genesis cannot be created; the exact uint64 maximum remains legal.
 static void test_receiver_overflow() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
-    CHECK(!chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
-    CHECK(chain.state().balance(alice.addr) == INITIAL); CHECK(chain.height() == 0);
+    {
+        Chain rejected;
+        CHECK(!rejected.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
+        CHECK(rejected.state().account_count() == 0);
+    }
+    {
+        Chain chain;
+        CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - INITIAL));
+        CHECK(chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
+        CHECK(chain.state().balance(bob.addr) == std::numeric_limits<Amount>::max() - INITIAL + 5000);
+        CHECK(chain.state().circulating() + chain.state().burned_total() == std::numeric_limits<Amount>::max());
+    }
+}
+
+static void test_genesis_supply_overflow() {
+    Key alice = new_key(), bob = new_key();
+    constexpr Amount MAX = std::numeric_limits<Amount>::max();
+
+    // The two balances must fit together in uint64, not merely each fit separately.
+    Chain overflow;
+    CHECK(!overflow.init_genesis(alice.addr, MAX, bob.addr, 1));
+    CHECK(overflow.height() == 0);
+    CHECK(overflow.state().account_count() == 0);
+    // A rejected genesis must leave the object reusable and unchanged.
+    CHECK(overflow.init_genesis(alice.addr, MAX - 1, bob.addr, 1));
+    Chain exact;
+    CHECK(exact.init_genesis(alice.addr, MAX - 17, bob.addr, 17));
+    CHECK(exact.state().circulating() == MAX);
+
+    // The producer-enabled overload must reject the same overflow before changing producer state.
+    Chain producer_overflow;
+    CHECK(!producer_overflow.init_genesis(alice.addr, MAX, bob.addr, 1, {alice.addr}));
+    CHECK(producer_overflow.height() == 0);
+    CHECK(producer_overflow.producers().empty());
+    CHECK(producer_overflow.init_genesis(alice.addr, MAX - 1, bob.addr, 1, {alice.addr}));
+    CHECK(producer_overflow.state().circulating() == MAX);
 }
 
 static void test_atomic_block() {
@@ -226,6 +260,7 @@ int main() {
     test_rejections();
     test_expiry();
     test_receiver_overflow();
+    test_genesis_supply_overflow();
     test_atomic_block();
     test_timestamps();
     test_block_size_limit();
