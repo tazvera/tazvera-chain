@@ -224,6 +224,16 @@ int main(int argc, char** argv) {
     // Creating a chain: no pin is needed, because there is nothing to trust yet. The commitment this prints is
     // what an operator hands to everyone else, and what this node will demand on every later start.
     if (!init_specs.empty()) {
+        // F10: genesis creation must serialize with every other writer of this chain file.
+        // Acquire before checking existence: the lock makes the check-and-create sequence exclusive.
+        taz::ChainFileLock genesis_lock;
+        {
+            std::string lock_err;
+            if (!genesis_lock.acquire(chain_file, &lock_err)) {
+                std::cerr << "taznode: " << lock_err << "\n";
+                return 3;
+            }
+        }
         if (init_specs.size() != 2) return usage_error("--init-genesis must be given exactly twice");
         taz::Address a0{}, a1{};
         taz::Amount n0 = 0, n1 = 0;
@@ -236,8 +246,7 @@ int main(int argc, char** argv) {
             return usage_error("a genesis amount must be a decimal number");
         // Never replace an existing chain. A bootstrap command that quietly overwrites is a way to destroy the
         // only copy of a chain, and the operator would find out afterwards. Check first, say why, exit non-zero.
-        // (This is a check-then-write, so it is not atomic against another process writing the same path at the
-        // same instant; that is acceptable for a one-off bootstrap command, and it is not a security boundary.)
+        // The chain-file lock above makes this existence check and initial write exclusive among taznode processes.
         std::error_code exists_ec;
         if (std::filesystem::exists(chain_file, exists_ec)) {
             std::cerr << "taznode: refusing to create " << chain_file
