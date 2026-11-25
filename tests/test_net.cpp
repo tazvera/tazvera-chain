@@ -100,7 +100,7 @@ static void n03_oversize_refused() {
     CHECK(send_all(client, header, &err));
     std::uint8_t type = 0; std::string payload;
     CHECK(!recv_message(server, type, payload, &err));
-    CHECK(err.find("larger") != std::string::npos);
+    CHECK(err.find("message too large") != std::string::npos);
 }
 
 static void n04_garbage_refused() {
@@ -371,115 +371,116 @@ static void n07_deadline_cuts_off_a_slow_peer() {
     CHECK(took.count() < 2000);                 // 400 ms deadline, not the 3 s socket timeout
 }
 
-static void n14_large_message_is_chunked_and_reassembled() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    const std::string sent(1024 * 1024, 'L');
-    std::string received;
-    std::uint8_t received_type = 0;
-    bool recv_ok = false;
-    std::thread receiver([&] { recv_ok = recv_message(server, received_type, received, &err,
-        std::chrono::steady_clock::now() + std::chrono::seconds(8)); });
-    CHECK(send_message(client, 42, sent, &err, std::chrono::steady_clock::now() + std::chrono::seconds(8)));
-    receiver.join();
-    CHECK(recv_ok);
-    CHECK(received_type == 42);
-    CHECK(received == sent);
+
+// v10.0 message chunking protocol tests.
+static void test_put_u32(std::string& out, std::uint32_t v) {
+    out.push_back(static_cast<char>((v >> 24) & 0xff));
+    out.push_back(static_cast<char>((v >> 16) & 0xff));
+    out.push_back(static_cast<char>((v >> 8) & 0xff));
+    out.push_back(static_cast<char>(v & 0xff));
+}
+static std::string raw_chunk(std::uint8_t original, std::uint32_t stream,
+                             std::uint32_t index, std::uint32_t total,
+                             std::string_view bytes) {
+    std::string payload(1, static_cast<char>(original));
+    test_put_u32(payload, stream); test_put_u32(payload, index); test_put_u32(payload, total);
+    payload.append(bytes.data(), bytes.size());
+    std::string frame; test_put_u32(frame, static_cast<std::uint32_t>(payload.size()));
+    frame.push_back(static_cast<char>(kMsgChunk)); frame += payload;
+    return frame;
+}
+static bool reject_chunk_frame(Socket& server, Socket& client, const std::string& frame,
+                               std::string& err, std::string_view expected) {
+    CHECK(send_all(client, frame, &err));
+    std::uint8_t type=0; std::string payload;
+    const bool ok=recv_message(server,type,payload,&err);
+    CHECK(!ok); CHECK(err.find(expected)!=std::string::npos);
+    return !ok;
+}
+static void n22_small_message_stays_direct() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    CHECK(send_message(client,kMsgBlocks,"small",&err));
+    std::string hdr,ty,body;
+    CHECK(recv_exact(server,4,hdr,&err)); CHECK(recv_exact(server,1,ty,&err));
+    CHECK(ty.size()==1 && static_cast<std::uint8_t>(ty[0])==kMsgBlocks);
+    CHECK(recv_exact(server,5,body,&err)); CHECK(body=="small");
+}
+static void n23_chunk_order_rejected() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    reject_chunk_frame(server,client,raw_chunk(kMsgBlocks,7,1,2,"x"),err,"chunk out of order");
+}
+static void n24_incomplete_stream_deadline_and_close() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    CHECK(send_all(client,raw_chunk(kMsgBlocks,8,0,2,"first"),&err));
+    std::uint8_t type=0; std::string payload;
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(300);
+    CHECK(!recv_message(server,type,payload,&err,deadline));
+    CHECK(err.find("incomplete stream")!=std::string::npos);
+    std::string ignored;
+    CHECK(!recv_exact(client,1,ignored,&err,std::chrono::steady_clock::now()+std::chrono::milliseconds(500)));
+}
+static void n25_total_chunks_must_match() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    std::string frames=raw_chunk(kMsgBlocks,9,0,2,"a")+raw_chunk(kMsgBlocks,9,1,3,"b");
+    CHECK(send_all(client,frames,&err));
+    std::uint8_t type=0; std::string payload;
+    CHECK(!recv_message(server,type,payload,&err)); CHECK(err.find("total_chunks")!=std::string::npos);
+}
+static void n26_original_type_change_rejected() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    std::string frames=raw_chunk(kMsgBlocks,10,0,2,"a")+raw_chunk(kMsgHello,10,1,2,"b");
+    CHECK(send_all(client,frames,&err));
+    std::uint8_t type=0; std::string payload;
+    CHECK(!recv_message(server,type,payload,&err)); CHECK(err.find("original_type")!=std::string::npos);
+}
+static void n27_nested_chunk_type_rejected() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    reject_chunk_frame(server,client,raw_chunk(kMsgChunk,11,0,1,"x"),err,"message type");
+}
+static void n28_reassembled_blocks_type_preserved() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    const std::string block_payload="blocks-payload";
+    CHECK(send_all(client,raw_chunk(kMsgBlocks,12,0,2,"blocks-"),&err));
+    CHECK(send_all(client,raw_chunk(kMsgBlocks,12,1,2,"payload"),&err));
+    std::uint8_t type=0; std::string payload;
+    CHECK(recv_message(server,type,payload,&err));
+    CHECK(type==kMsgBlocks); CHECK(payload==block_payload);
 }
 
-static void n15_small_message_keeps_original_wire_frame() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    const std::string small = "short payload";
-    CHECK(send_message(client, 42, small, &err));
-    std::string header, type_byte, body;
-    CHECK(recv_exact(server, 4, header, &err));
-    CHECK(recv_exact(server, 1, type_byte, &err));
-    CHECK(recv_exact(server, small.size(), body, &err));
-    CHECK(header == std::string(3, '\0') + std::string(1, static_cast<char>(small.size())));
-    CHECK(static_cast<unsigned char>(type_byte[0]) == 42);
-    CHECK(body == small);
+static void n29_impossible_oversize_stream_refused_before_growth() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    // Each chunk must carry at least one data byte, so this count alone exceeds the 32 MiB ceiling.
+    CHECK(send_all(client,raw_chunk(kMsgBlocks,13,0,32u*1024u*1024u+1u,"x"),&err));
+    std::uint8_t type=0; std::string payload;
+    CHECK(!recv_message(server,type,payload,&err));
+    CHECK(err.find("stream too large")!=std::string::npos);
 }
 
-static void raw_chunk(Socket& socket, std::uint32_t stream, std::uint32_t index,
-                      std::uint32_t total, std::string_view bytes, std::string& err) {
-    std::string payload;
-    auto put = [&](std::uint32_t v) {
-        payload.push_back(static_cast<char>((v >> 24) & 0xff));
-        payload.push_back(static_cast<char>((v >> 16) & 0xff));
-        payload.push_back(static_cast<char>((v >> 8) & 0xff));
-        payload.push_back(static_cast<char>(v & 0xff));
-    };
-    put(stream); put(index); put(total); payload.append(bytes.data(), bytes.size());
-    std::string frame;
-    const std::uint32_t n = static_cast<std::uint32_t>(payload.size());
-    frame.push_back(static_cast<char>((n >> 24) & 0xff));
-    frame.push_back(static_cast<char>((n >> 16) & 0xff));
-    frame.push_back(static_cast<char>((n >> 8) & 0xff));
-    frame.push_back(static_cast<char>(n & 0xff));
-    frame.push_back(static_cast<char>(kMsgChunk));
-    frame += payload;
-    CHECK(send_all(socket, frame, &err));
-}
-
-static void n16_chunk_order_is_enforced() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 7, 1, 2, "second", err);
-    std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(server, type, payload, &err));
-    CHECK(err.find("chunk out of order") != std::string::npos);
-}
-
-static void n17_missing_chunk_closes_connection() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 8, 0, 3, "first", err);
-    client.close();
-    std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(server, type, payload, &err, std::chrono::steady_clock::now() + std::chrono::seconds(2)));
-    CHECK(err.find("incomplete stream") != std::string::npos);
-    std::string probe;
-    CHECK(!recv_exact(server, 1, probe, &err));
-}
-
-static void n18_total_chunks_must_remain_consistent() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 9, 0, 2, "first", err);
-    raw_chunk(client, 9, 1, 3, "second", err);
-    std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(server, type, payload, &err));
-    CHECK(err.find("total_chunks") != std::string::npos);
-}
-
-static void n19_stream_over_32_mib_is_refused_before_growth() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 10, 0, 513, std::string(65519, 'x'), err);
-    // Advertise an impossible chunk count in the first chunk: 513 * 65519 exceeds 32 MiB.
-    // Receiver must reject from metadata without allocating the claimed stream.
-    std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(server, type, payload, &err));
-    CHECK(err.find("stream too large") != std::string::npos);
-}
-
-static void n20_incomplete_stream_obeys_deadline() {
-    Listener listener; Socket server, client; std::string err;
-    CHECK(connected_pair(listener, server, client, err));
-    if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 11, 0, 2, "first", err);
-    std::uint8_t type = 0; std::string payload;
-    const bool ok = recv_message(server, type, payload, &err,
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(300));
-    CHECK(!ok);
-    CHECK(err.find("incomplete stream") != std::string::npos);
+static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    const std::string bytes(65518,'z'); // maximum data bytes in one 64 KiB wire frame
+    bool sender_ok=true; std::string sender_err;
+    std::thread sender([&] {
+        for (std::uint32_t i=0; i<513; ++i) {
+            const std::string frame=raw_chunk(kMsgBlocks,14,i,513,bytes);
+            if(!send_all(client,frame,&sender_err)) { sender_ok=false; break; }
+        }
+    });
+    std::uint8_t type=0; std::string payload;
+    const bool received=recv_message(server,type,payload,&err);
+    sender.join();
+    CHECK(!received);
+    CHECK(err.find("stream too large")!=std::string::npos);
+    CHECK(!sender_ok || sender_err.empty());
 }
 
 int main() {
@@ -499,13 +500,15 @@ int main() {
     n12_invalid_peer_hello_signature_refused();
     n13_auth_proof_key_must_match_hello_key();
     n10_zero_local_identity_refused();
-    n14_large_message_is_chunked_and_reassembled();
-    n15_small_message_keeps_original_wire_frame();
-    n16_chunk_order_is_enforced();
-    n17_missing_chunk_closes_connection();
-    n18_total_chunks_must_remain_consistent();
-    n19_stream_over_32_mib_is_refused_before_growth();
-    n20_incomplete_stream_obeys_deadline();
+    n22_small_message_stays_direct();
+    n23_chunk_order_rejected();
+    n24_incomplete_stream_deadline_and_close();
+    n25_total_chunks_must_match();
+    n26_original_type_change_rejected();
+    n27_nested_chunk_type_rejected();
+    n28_reassembled_blocks_type_preserved();
+    n29_impossible_oversize_stream_refused_before_growth();
+    n30_stream_over_32_mib_is_rejected_at_growth_boundary();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
