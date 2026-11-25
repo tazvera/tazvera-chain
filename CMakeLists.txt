@@ -32,7 +32,7 @@ if(TAZVERA_SANITIZED)
     message(STATUS "TAZVERA: reduced fuzz workload (sanitizer build)")
 endif()
 
-find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
 
 add_library(tazcore
     src/crypto.cpp
@@ -51,7 +51,7 @@ add_library(tazcore
     src/tls.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
+target_link_libraries(tazcore PUBLIC OpenSSL::Crypto OpenSSL::SSL)
 if(WIN32)
     target_link_libraries(tazcore PUBLIC ws2_32)   # v9.0: sockets on Windows
 endif()
