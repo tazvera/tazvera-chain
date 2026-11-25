@@ -207,3 +207,11 @@ target_compile_definitions(taz_fork_depth_tests PRIVATE TAZ_NODE_BINARY="$<TARGE
 add_dependencies(taz_fork_depth_tests taznode)
 add_test(NAME taz_fork_depth_tests COMMAND taz_fork_depth_tests)
 set_tests_properties(taz_fork_depth_tests PROPERTIES PASS_REGULAR_EXPRESSION "fork depth tests: all passed \\(2 cases\\)" TIMEOUT 120)
+
+# F10: two nodes on one chain file (real taznode processes; exact case count)
+add_executable(taz_chain_lock_tests tests/test_chain_lock.cpp)
+target_link_libraries(taz_chain_lock_tests PRIVATE tazcore Threads::Threads)
+target_compile_definitions(taz_chain_lock_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
+add_dependencies(taz_chain_lock_tests taznode)
+add_test(NAME taz_chain_lock_tests COMMAND taz_chain_lock_tests)
+set_tests_properties(taz_chain_lock_tests PROPERTIES PASS_REGULAR_EXPRESSION "chain lock tests: all passed \\(3 cases\\)" TIMEOUT 120)
