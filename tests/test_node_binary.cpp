@@ -246,9 +246,9 @@ int main() {
     const std::string allow_file = tmpdir() + "/allow-peers.txt";
     const std::string empty_allow_file = tmpdir() + "/empty-allow-peers.txt";
     const std::string bad_allow_file = tmpdir() + "/bad-allow-peers.txt";
-    write_text(allow_file, taz::to_hex(taz::address_from_pubkey(pk2)) + "\\n");
+    write_text(allow_file, taz::to_hex(taz::address_from_pubkey(pk2)) + "\n");
     write_text(empty_allow_file, "");
-    write_text(bad_allow_file, std::string(39, 'a') + "\\n");
+    write_text(bad_allow_file, std::string(39, 'a') + "\n");
     const std::string base_args = " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin;
     CHECK(run(exe + base_args + " --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk2)) + " --peer 1") == 2);
     CHECK(run(exe + base_args + " --allow-peer " + std::string(40, 'z') +
@@ -267,7 +267,9 @@ int main() {
     const std::string allow_log = tmpdir() + "/allow-server.log";
     const std::string allow_cmd = exe + base_args + " --serve " + std::to_string(allow_port) +
         " --max-peers 1 --serve-timeout 8 --identity " + q(key_file) +
-        " --require-identity --allow-peer-file " + q(allow_file) + " > " + q(allow_log) + " 2>&1";
+        " --require-identity --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk)) +
+        " --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk2)) +
+        " --allow-peer-file " + q(allow_file) + " > " + q(allow_log) + " 2>&1";
     int allow_server_rc = -1;
     std::thread allow_server_thread([&] { allow_server_rc = run(allow_cmd); });
     bool allow_ready = false;
