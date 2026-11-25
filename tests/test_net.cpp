@@ -483,6 +483,41 @@ static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
     CHECK(!sender_ok || sender_err.empty());
 }
 
+static void n21_sender_chunks_one_mib_and_receiver_restores_type() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    const std::string source(1024*1024,'B');
+    bool sent=false; std::string send_err;
+    std::thread sender([&] { sent=send_message(client,kMsgBlocks,source,&send_err); });
+    std::uint8_t type=0; std::string got;
+    const bool received=recv_message(server,type,got,&err);
+    sender.join();
+    CHECK(sent); CHECK(received); CHECK(type==kMsgBlocks); CHECK(got==source);
+    if(!send_err.empty()) std::cerr<<"  sender: "<<send_err<<"\n";
+}
+static void n31_sender_wire_frames_do_not_exceed_64_kib() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    const std::string source(1024*1024,'W');
+    bool sent=false; std::string send_err;
+    std::thread sender([&] { sent=send_message(client,kMsgBlocks,source,&send_err); });
+    for(std::size_t received=0; received<source.size();) {
+        std::string header, type_byte, payload;
+        CHECK(recv_exact(server,4,header,&err));
+        const auto length=(static_cast<std::uint32_t>(static_cast<unsigned char>(header[0]))<<24)|
+                          (static_cast<std::uint32_t>(static_cast<unsigned char>(header[1]))<<16)|
+                          (static_cast<std::uint32_t>(static_cast<unsigned char>(header[2]))<<8)|
+                           static_cast<std::uint32_t>(static_cast<unsigned char>(header[3]));
+        CHECK(length+4<=kMaxWireMessageBytes);
+        CHECK(recv_exact(server,1,type_byte,&err));
+        CHECK(static_cast<std::uint8_t>(type_byte[0])==kMsgChunk);
+        CHECK(recv_exact(server,length,payload,&err));
+        CHECK(payload.size()>=13);
+        received += payload.size()-13;
+    }
+    sender.join(); CHECK(sent);
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -500,6 +535,8 @@ int main() {
     n12_invalid_peer_hello_signature_refused();
     n13_auth_proof_key_must_match_hello_key();
     n10_zero_local_identity_refused();
+    n21_sender_chunks_one_mib_and_receiver_restores_type();
+    n31_sender_wire_frames_do_not_exceed_64_kib();
     n22_small_message_stays_direct();
     n23_chunk_order_rejected();
     n24_incomplete_stream_deadline_and_close();
