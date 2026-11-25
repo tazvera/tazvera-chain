@@ -233,8 +233,11 @@ int main() {
         if (!server_ready) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     CHECK(server_ready);
+    // F10: a node holds a lock on its chain file, so the client is a second node with its own copy of the file.
+    const std::string client_chain = tmpdir() + "/prod-chain-client.json";
+    fs::copy_file(prod_chain, client_chain, fs::copy_options::overwrite_existing, ec);
     const int client_rc = server_ready
-        ? run(exe + " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin +
+        ? run(exe + " --chain " + q(client_chain) + " --expect-genesis " + prod_pin +
               " --peer " + std::to_string(strict_port) + " --identity " + q(client_identity) +
               " --require-identity")
         : -1;

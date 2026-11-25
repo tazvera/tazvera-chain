@@ -238,14 +238,18 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
 
     const std::uint16_t port = free_port();
     const std::string out = (dir / "a.out").string();
+    // F10: the server holds a lock on c.json, so the clients below are other nodes with their own copy of the file.
+    std::error_code copy_ec; fs::copy_file(dir / "c.json", dir / "client.json", fs::copy_options::overwrite_existing, copy_ec);
+    CHECK(!copy_ec);
     const std::string chain_arg = " --chain \"" + (dir / "c.json").string() + "\" --expect-genesis " + pin(c);
+    const std::string client_arg = " --chain \"" + (dir / "client.json").string() + "\" --expect-genesis " + pin(c);
     const std::string server = node() + chain_arg + " --listen " + std::to_string(port) +
                                " --require-identity --identity \"" + (dir / "id.txt").string() + "\" --serve-timeout 40";
     CHECK(run_in_background(server, out));
     CHECK(wait_for(out, "listening", 10));
 
     // an anonymous peer is refused, and the node does not exit
-    const std::string anon = node() + chain_arg + " --peer " + std::to_string(port);
+    const std::string anon = node() + client_arg + " --peer " + std::to_string(port);
     // Now that the accepter confirms before syncing, a refused peer must notice and fail.
     CHECK(run_waiting(anon, (dir / "anon.out").string()) != 0);
     if (!wait_for(out, "did not prove an identity", 10)) std::cerr << "  server output:\n" << slurp(out) << "\n";
@@ -253,7 +257,7 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
     CHECK(wait_for(out, "still waiting for", 10));
 
     // a peer that proves its key is accepted
-    const std::string signed_peer = node() + chain_arg + " --peer " + std::to_string(port) +
+    const std::string signed_peer = node() + client_arg + " --peer " + std::to_string(port) +
                                     " --identity \"" + (dir / "id.txt").string() + "\"";
     if (run_waiting(signed_peer, (dir / "ok.out").string()) != 0) std::cerr << "  (the proving node exited non-zero)\n";
     CHECK(wait_for(out, "served 1 of 1", 20));
@@ -286,6 +290,10 @@ static void n7_persistence_failure_stops_node() {
     const fs::path receiver_chain = receiver_dir / "chain.json";
     CHECK(save_chain_json(behind, receiver_chain.string(), &err));
     const std::string before = slurp(receiver_chain);
+
+    // F10: the node locks "<chain>.lock". Opening an existing file does not need write access to the directory, so
+    // create it first; only the creation of NEW files (the temporary file a save needs) is then denied.
+    { std::ofstream(receiver_chain.string() + ".lock").put('\n'); }
 
     // Keep read/execute permission so taznode can load its chain, but deny creation of the
     // temporary file that save_chain_json needs after it accepts the peer's block.
