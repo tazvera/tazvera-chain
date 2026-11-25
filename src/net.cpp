@@ -2,6 +2,7 @@
 #include "taz/auth.hpp"
 #include "taz/crypto.hpp"
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 #ifdef _WIN32
@@ -316,8 +317,7 @@ bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
 
 bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error,
                   Deadline deadline) {
-    // The send side gets the same treatment as the receive side: if the connection has a deadline, the time left
-    // becomes the socket timeout, so a peer that stops reading cannot hold a send past it.
+    // A logical message may span multiple bounded wire frames. Apply the same absolute deadline to every chunk.
     if (deadline != no_deadline()) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
@@ -331,16 +331,55 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
             return false;
         }
     }
-    if (payload.size() > kMaxPayloadBytes) {
-        if (error) *error = "the message is larger than this transport allows";
+    if (type == kMsgChunk || payload.size() > kMaxStreamBytes) {
+        if (error) *error = "message too large";
         return false;
     }
-    std::string frame;
-    frame.reserve(payload.size() + 5);
-    put_u32(frame, static_cast<std::uint32_t>(payload.size()));
-    frame.push_back(static_cast<char>(type));
-    frame.append(payload.data(), payload.size());
-    return send_all(socket, frame, error);
+
+    constexpr std::size_t kWireOverhead = 5; // u32 length + u8 type
+    constexpr std::size_t kChunkMetadata = 13; // u8 original_type + three u32 values
+    constexpr std::size_t kChunkData = kMaxWireMessageBytes - kWireOverhead - kChunkMetadata;
+    auto send_frame = [&](std::uint8_t wire_type, std::string_view wire_payload) {
+        if (wire_payload.size() + kWireOverhead > kMaxWireMessageBytes) {
+            if (error) *error = "message too large";
+            return false;
+        }
+        std::string frame;
+        frame.reserve(wire_payload.size() + kWireOverhead);
+        put_u32(frame, static_cast<std::uint32_t>(wire_payload.size()));
+        frame.push_back(static_cast<char>(wire_type));
+        frame.append(wire_payload.data(), wire_payload.size());
+        return send_all(socket, frame, error);
+    };
+
+    // Keep the legacy frame exactly as-is when it fits the wire ceiling.
+    if (payload.size() + kWireOverhead <= kMaxWireMessageBytes)
+        return send_frame(type, payload);
+
+    const std::size_t chunks_size = (payload.size() + kChunkData - 1) / kChunkData;
+    if (chunks_size == 0 || chunks_size > UINT32_MAX) {
+        if (error) *error = "message too large";
+        return false;
+    }
+    static std::atomic<std::uint32_t> next_stream_id{1};
+    std::uint32_t stream_id = next_stream_id.fetch_add(1, std::memory_order_relaxed);
+    if (stream_id == 0) stream_id = next_stream_id.fetch_add(1, std::memory_order_relaxed);
+    const auto total_chunks = static_cast<std::uint32_t>(chunks_size);
+
+    std::size_t offset = 0;
+    for (std::uint32_t index = 0; index < total_chunks; ++index) {
+        const std::size_t count = std::min(kChunkData, payload.size() - offset);
+        std::string chunk;
+        chunk.reserve(kChunkMetadata + count);
+        chunk.push_back(static_cast<char>(type));
+        put_u32(chunk, stream_id);
+        put_u32(chunk, index);
+        put_u32(chunk, total_chunks);
+        chunk.append(payload.data() + offset, count);
+        if (!send_frame(kMsgChunk, chunk)) return false;
+        offset += count;
+    }
+    return true;
 }
 
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
