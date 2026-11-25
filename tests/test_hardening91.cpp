@@ -182,7 +182,7 @@ static void f1_syncs_when_peer_is_more_than_1000_blocks_ahead() {
     for (std::uint64_t i = 0; i < 1001; ++i) {
         const Transaction tx = transfer(a, b.addr, 1, i);
         const ChainResult r = ahead.append_block({tx}, first_stamp + static_cast<std::int64_t>(i));
-        if (!r.ok) { std::cerr << "F1 setup failed at block " << (i + 1) << ": " << r.error << "\\n"; std::exit(2); }
+        if (!r.ok) { std::cerr << "F1 setup failed at block " << (i + 1) << ": " << r.error << "\n"; std::exit(2); }
     }
     CHECK(ahead.height() == 1001);
     const fs::path dir = fs::temp_directory_path() / "taz-f1-over-1000";
@@ -192,20 +192,20 @@ static void f1_syncs_when_peer_is_more_than_1000_blocks_ahead() {
     CHECK(save_chain_json(ahead, (dir / "ahead.json").string(), &err));
     const std::uint16_t port = free_port();
     const std::string server_out = (dir / "server.out").string();
-    const std::string chain_arg = " --chain \\"" + (dir / "behind.json").string() + "\\" --expect-genesis " + pin(behind);
+    const std::string chain_arg = " --chain \"" + (dir / "behind.json").string() + "\" --expect-genesis " + pin(behind);
     const std::string server = node() + chain_arg + " --serve " + std::to_string(port) +
                                " --max-peers 6 --serve-timeout 60";
     CHECK(run_in_background(server, server_out));
     CHECK(wait_for(server_out, "listening", 10));
     // Six successful connections are needed: five batches of 200 and one batch of 1.
     // The seventh attempt sees the server stop after its six-peer quota; retries=1 makes the poller exit.
-    const std::string client = node() + " --chain \\"" + (dir / "ahead.json").string() +
-                               "\\" --expect-genesis " + pin(ahead) + " --peer " + std::to_string(port) +
+    const std::string client = node() + " --chain \"" + (dir / "ahead.json").string() +
+                               "\" --expect-genesis " + pin(ahead) + " --peer " + std::to_string(port) +
                                " --every 1 --retries 1";
     (void)run_waiting(client, (dir / "client.out").string());
     if (!wait_for(server_out, "served 6 of 6", 60)) {
-        std::cerr << "  F1 server output:\\n" << slurp(server_out) << "\\n";
-        std::cerr << "  F1 client output:\\n" << slurp(dir / "client.out") << "\\n";
+        std::cerr << "  F1 server output:\\n" << slurp(server_out) << "\n";
+        std::cerr << "  F1 client output:\\n" << slurp(dir / "client.out") << "\n";
     }
     CHECK(wait_for(server_out, "served 6 of 6", 1));
     CHECK(height_of(dir / "behind.json", behind) == 1001);
