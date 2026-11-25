@@ -145,12 +145,62 @@ static void l1_l2_l3() {
     CHECK(rc_after == 0);
 }
 
+static void genesis_creation_race() {
+    Key a = new_key(), b = new_key(), c = new_key(), d = new_key();
+    const fs::path dir = fs::temp_directory_path() / "taz-f10-genesis-race";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    const fs::path chain = dir / "genesis.json";
+    const std::string cmd_a = node() + " --chain \"" + chain.string() + "\" --init-genesis " +
+        to_hex(a.addr) + ":1000 --init-genesis " + to_hex(b.addr) + ":0";
+    const std::string cmd_b = node() + " --chain \"" + chain.string() + "\" --init-genesis " +
+        to_hex(c.addr) + ":2000 --init-genesis " + to_hex(d.addr) + ":0";
+    const fs::path out_a = dir / "genesis-a.out", out_b = dir / "genesis-b.out";
+    CHECK(run_in_background(cmd_a, out_a.string()));
+    CHECK(run_in_background(cmd_b, out_b.string()));
+
+    // Both attempts must finish with an explicit outcome. Exactly one may create the file;
+    // the other must observe the lock or the already-created file and must never overwrite it.
+    auto has_outcome = [](const fs::path& p) {
+        const std::string s = slurp(p);
+        return s.find("created chain=") != std::string::npos ||
+               s.find("is in use by another taznode process") != std::string::npos ||
+               s.find("file already exists and will not be replaced") != std::string::npos;
+    };
+    bool done_a = false, done_b = false;
+    for (int i = 0; i < 400 && !(done_a && done_b); ++i) {
+        done_a = done_a || has_outcome(out_a);
+        done_b = done_b || has_outcome(out_b);
+        if (!(done_a && done_b)) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    CHECK(done_a);
+    CHECK(done_b);
+    const std::string a_out = slurp(out_a), b_out = slurp(out_b);
+    const bool a_created = a_out.find("created chain=") != std::string::npos;
+    const bool b_created = b_out.find("created chain=") != std::string::npos;
+    CHECK(a_created != b_created);
+    if (!a_created) CHECK(a_out.find("is in use by another taznode process") != std::string::npos ||
+                          a_out.find("file already exists and will not be replaced") != std::string::npos);
+    if (!b_created) CHECK(b_out.find("is in use by another taznode process") != std::string::npos ||
+                          b_out.find("file already exists and will not be replaced") != std::string::npos);
+
+    Chain loaded;
+    std::string load_err;
+    CHECK(load_chain_json(chain.string(), loaded, &load_err));
+    CHECK(loaded.height() == 0);
+    if (a_created) CHECK(loaded.genesis_balances().size() == 2 &&
+                         loaded.genesis_balances()[0].first == a.addr);
+    if (b_created) CHECK(loaded.genesis_balances().size() == 2 &&
+                         loaded.genesis_balances()[0].first == c.addr);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(dir, ec);
+}
+
 int main() {
     { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }
     l1_l2_l3();
+    genesis_creation_race();
     std::error_code ec;
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(fs::temp_directory_path() / "taz-f10", ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
-    std::cout << "chain lock tests: all passed (3 cases)\n";
+    std::cout << "chain lock tests: all passed (4 cases)\n";
     return EXIT_SUCCESS;
 }
