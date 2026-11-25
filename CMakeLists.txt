@@ -12,27 +12,11 @@ message(STATUS "TAZVERA core version ${TAZ_CORE_VERSION}")
 
 project(tazvera_chain_core VERSION ${TAZ_CORE_VERSION} LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# C++26 is this project's standard. Fail early when the compiler is too old.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
-    message(FATAL_ERROR "TAZVERA Chain requires GCC 16 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
-    message(FATAL_ERROR "TAZVERA Chain requires Clang 22 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.50)
-    message(FATAL_ERROR "TAZVERA Chain requires Visual Studio 2022 17.14 or newer for C++26; found ${CMAKE_CXX_COMPILER_VERSION}")
-endif()
-
-# Sanitizer instrumentation makes each deterministic fuzz case substantially slower.
-option(TAZVERA_SANITIZED "Build with a reduced fuzz workload (for ASan/UBSan runs)" OFF)
-if(TAZVERA_SANITIZED)
-    add_compile_definitions(TAZ_SANITIZED_BUILD=1)
-    message(STATUS "TAZVERA: reduced fuzz workload (sanitizer build)")
-endif()
-
-find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
 
 add_library(tazcore
     src/crypto.cpp
@@ -48,9 +32,10 @@ add_library(tazcore
     src/net.cpp
     src/fork.cpp
     src/auth.cpp
+    src/tls.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
+target_link_libraries(tazcore PUBLIC OpenSSL::Crypto OpenSSL::SSL)
 if(WIN32)
     target_link_libraries(tazcore PUBLIC ws2_32)   # v9.0: sockets on Windows
 endif()
@@ -128,6 +113,10 @@ add_test(NAME taz_producer_tests COMMAND taz_producer_tests)
 # v9.1: regression tests for the network problems found in v9.0 (a legal block too big for one message, a block over the
 # sync budget that never syncs, a future-dated block that jams a chain, a silently ignored --transfer).
 find_package(Threads REQUIRED)
+add_executable(taz_tls_tests tests/test_tls.cpp)
+target_link_libraries(taz_tls_tests PRIVATE tazcore)
+add_test(NAME taz_tls_tests COMMAND taz_tls_tests)
+
 add_executable(taz_auth_tests tests/test_auth.cpp)
 target_link_libraries(taz_auth_tests PRIVATE tazcore)
 add_test(NAME taz_auth_tests COMMAND taz_auth_tests)
