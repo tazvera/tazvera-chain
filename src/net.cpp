@@ -24,6 +24,13 @@ bool would_block() { return WSAGetLastError() == WSAETIMEDOUT; }
 bool would_block() { return errno == EAGAIN || errno == EWOULDBLOCK; }
 #endif
 
+void put_u32(std::string& out, std::uint32_t v) {
+    out.push_back(static_cast<char>((v >> 24) & 0xff));
+    out.push_back(static_cast<char>((v >> 16) & 0xff));
+    out.push_back(static_cast<char>((v >> 8) & 0xff));
+    out.push_back(static_cast<char>(v & 0xff));
+}
+
 std::uint32_t get_u32(const std::string& in) {
     return (static_cast<std::uint32_t>(static_cast<unsigned char>(in[0])) << 24) |
            (static_cast<std::uint32_t>(static_cast<unsigned char>(in[1])) << 16) |
@@ -291,9 +298,9 @@ bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
     std::string header;
     if (!recv_exact(socket, 4, header, error, deadline)) return false;
     const std::uint32_t length = get_u32(header);
-    // Length includes the one-byte outer message type. Four more bytes are the length prefix.
-    if (length < 1 || static_cast<std::uint64_t>(length) + 4 > kMaxWireMessageBytes) {
-        if (error) *error = "message too large (larger than this transport allows)";
+    // The legacy length field counts payload bytes only; the type byte and prefix also consume wire space.
+    if (static_cast<std::uint64_t>(length) + 5 > kMaxWireMessageBytes) {
+        if (error) *error = "message too large";
         shutdown_connection(socket);
         return false;
     }
@@ -301,8 +308,8 @@ bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
     if (!recv_exact(socket, 1, type_byte, error, deadline)) return false;
     type = static_cast<std::uint8_t>(type_byte[0]);
     payload.clear();
-    if (length == 1) return true;
-    if (!recv_exact(socket, length - 1, payload, error, deadline)) return false;
+    if (length == 0) return true;
+    if (!recv_exact(socket, length, payload, error, deadline)) return false;
     return true;
 }
 } // namespace
