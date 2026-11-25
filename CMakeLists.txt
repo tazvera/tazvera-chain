@@ -43,6 +43,7 @@ add_library(tazcore
     src/export.cpp
     src/mempool.cpp
     src/persist.cpp
+    src/filelock.cpp
     src/startup.cpp
     src/hello.cpp
     src/net.cpp

@@ -9,6 +9,7 @@
 #include "taz/startup.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
+#include "taz/filelock.hpp"
 #include "taz/persist.hpp"
 #include "taz/net.hpp"
 #include "taz/fork.hpp"
@@ -262,6 +263,16 @@ int main(int argc, char** argv) {
     taz::Hash32 pin{};
     if (raw.size() != pin.size()) return usage_error("--expect-genesis must be 64 hex characters");
     for (std::size_t i = 0; i < pin.size(); ++i) pin[i] = raw[i];
+
+    // F10: one node per chain file. Held until this process ends; the operating system releases it, even on a crash.
+    taz::ChainFileLock chain_lock;
+    {
+        std::string lock_err;
+        if (!chain_lock.acquire(chain_file, &lock_err)) {
+            std::cerr << "taznode: " << lock_err << "\n";
+            return 3;
+        }
+    }
 
     taz::StartupConfig cfg;
     cfg.chain_file = chain_file;
