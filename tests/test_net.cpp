@@ -371,6 +371,117 @@ static void n07_deadline_cuts_off_a_slow_peer() {
     CHECK(took.count() < 2000);                 // 400 ms deadline, not the 3 s socket timeout
 }
 
+static void n14_large_message_is_chunked_and_reassembled() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    const std::string sent(1024 * 1024, 'L');
+    std::string received;
+    std::uint8_t received_type = 0;
+    bool recv_ok = false;
+    std::thread receiver([&] { recv_ok = recv_message(server, received_type, received, &err,
+        std::chrono::steady_clock::now() + std::chrono::seconds(8)); });
+    CHECK(send_message(client, 42, sent, &err, std::chrono::steady_clock::now() + std::chrono::seconds(8)));
+    receiver.join();
+    CHECK(recv_ok);
+    CHECK(received_type == 42);
+    CHECK(received == sent);
+}
+
+static void n15_small_message_keeps_original_wire_frame() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    const std::string small = "short payload";
+    CHECK(send_message(client, 42, small, &err));
+    std::string header, type_byte, body;
+    CHECK(recv_exact(server, 4, header, &err));
+    CHECK(recv_exact(server, 1, type_byte, &err));
+    CHECK(recv_exact(server, small.size(), body, &err));
+    CHECK(header == std::string(3, '\0') + std::string(1, static_cast<char>(small.size())));
+    CHECK(static_cast<unsigned char>(type_byte[0]) == 42);
+    CHECK(body == small);
+}
+
+static void raw_chunk(Socket& socket, std::uint32_t stream, std::uint32_t index,
+                      std::uint32_t total, std::string_view bytes, std::string& err) {
+    std::string payload;
+    auto put = [&](std::uint32_t v) {
+        payload.push_back(static_cast<char>((v >> 24) & 0xff));
+        payload.push_back(static_cast<char>((v >> 16) & 0xff));
+        payload.push_back(static_cast<char>((v >> 8) & 0xff));
+        payload.push_back(static_cast<char>(v & 0xff));
+    };
+    put(stream); put(index); put(total); payload.append(bytes.data(), bytes.size());
+    std::string frame;
+    const std::uint32_t n = static_cast<std::uint32_t>(payload.size());
+    frame.push_back(static_cast<char>((n >> 24) & 0xff));
+    frame.push_back(static_cast<char>((n >> 16) & 0xff));
+    frame.push_back(static_cast<char>((n >> 8) & 0xff));
+    frame.push_back(static_cast<char>(n & 0xff));
+    frame.push_back(static_cast<char>(kMsgChunk));
+    frame += payload;
+    CHECK(send_all(socket, frame, &err));
+}
+
+static void n16_chunk_order_is_enforced() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    raw_chunk(client, 7, 1, 2, "second", err);
+    std::uint8_t type = 0; std::string payload;
+    CHECK(!recv_message(server, type, payload, &err));
+    CHECK(err.find("chunk out of order") != std::string::npos);
+}
+
+static void n17_missing_chunk_closes_connection() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    raw_chunk(client, 8, 0, 3, "first", err);
+    client.close();
+    std::uint8_t type = 0; std::string payload;
+    CHECK(!recv_message(server, type, payload, &err, std::chrono::steady_clock::now() + std::chrono::seconds(2)));
+    CHECK(err.find("incomplete stream") != std::string::npos);
+    std::string probe;
+    CHECK(!recv_exact(server, 1, probe, &err));
+}
+
+static void n18_total_chunks_must_remain_consistent() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    raw_chunk(client, 9, 0, 2, "first", err);
+    raw_chunk(client, 9, 1, 3, "second", err);
+    std::uint8_t type = 0; std::string payload;
+    CHECK(!recv_message(server, type, payload, &err));
+    CHECK(err.find("total_chunks") != std::string::npos);
+}
+
+static void n19_stream_over_32_mib_is_refused_before_growth() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    raw_chunk(client, 10, 0, 1, std::string(65519, 'x'), err);
+    // Advertise an impossible chunk count in the first chunk: 513 * 65519 exceeds 32 MiB.
+    // Receiver must reject from metadata without allocating the claimed stream.
+    std::uint8_t type = 0; std::string payload;
+    CHECK(!recv_message(server, type, payload, &err));
+    CHECK(err.find("stream too large") != std::string::npos);
+}
+
+static void n20_incomplete_stream_obeys_deadline() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+    raw_chunk(client, 11, 0, 2, "first", err);
+    std::uint8_t type = 0; std::string payload;
+    const bool ok = recv_message(server, type, payload, &err,
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(300));
+    CHECK(!ok);
+    CHECK(err.find("incomplete stream") != std::string::npos);
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -388,6 +499,13 @@ int main() {
     n12_invalid_peer_hello_signature_refused();
     n13_auth_proof_key_must_match_hello_key();
     n10_zero_local_identity_refused();
+    n14_large_message_is_chunked_and_reassembled();
+    n15_small_message_keeps_original_wire_frame();
+    n16_chunk_order_is_enforced();
+    n17_missing_chunk_closes_connection();
+    n18_total_chunks_must_remain_consistent();
+    n19_stream_over_32_mib_is_refused_before_growth();
+    n20_incomplete_stream_obeys_deadline();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
