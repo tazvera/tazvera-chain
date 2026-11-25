@@ -366,6 +366,8 @@ int main(int argc, char** argv) {
             }
             const std::uint64_t missing = announced - from_height;
             const std::uint64_t send = std::min(missing, kMaxBlocksPerSync);
+            constexpr auto kSyncSendTimeBudget = std::chrono::seconds(60);
+            const taz::Deadline deadline = std::chrono::steady_clock::now() + kSyncSendTimeBudget;
             for (std::uint64_t n = 0; n < send; ++n) {
                 const std::uint64_t wanted = from_height + 1 + n;
                 const taz::Block* found = nullptr;
@@ -382,7 +384,7 @@ int main(int argc, char** argv) {
                     std::cerr << "taznode: block " << wanted << " is larger than one message\n";
                     return false;
                 }
-                if (!taz::send_message(sock, taz::kMsgBlocks, text, &net_err)) {
+                if (!taz::send_message(sock, taz::kMsgBlocks, text, &net_err, deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
@@ -629,14 +631,19 @@ int main(int argc, char** argv) {
                 return false;
             }
             {
+                // Bound the complete fork conversation, not each individual message. Both peers run these
+                // four steps in the same order, and neither may be held indefinitely by a slow reader/writer.
+                constexpr auto kForkExchangeTimeBudget = std::chrono::seconds(60);
+                const taz::Deadline fork_deadline =
+                    std::chrono::steady_clock::now() + kForkExchangeTimeBudget;
                 const std::string want = std::to_string(chain.height());
-                if (!taz::send_message(sock, taz::kMsgWant, want, &net_err)) {
+                if (!taz::send_message(sock, taz::kMsgWant, want, &net_err, fork_deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
                 std::uint8_t type = 0;
                 std::string payload;
-                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                if (!taz::recv_message(sock, type, payload, &net_err, fork_deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
@@ -645,11 +652,11 @@ int main(int argc, char** argv) {
                               << static_cast<int>(type) << "\n";
                     return false;
                 }
-                if (!taz::send_message(sock, taz::kMsgBlocks, taz::block_to_json(chain.blocks().back()), &net_err)) {
+                if (!taz::send_message(sock, taz::kMsgBlocks, taz::block_to_json(chain.blocks().back()), &net_err, fork_deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
-                if (!taz::recv_message(sock, type, payload, &net_err)) {
+                if (!taz::recv_message(sock, type, payload, &net_err, fork_deadline)) {
                     std::cerr << "taznode: " << net_err << "\n";
                     return false;
                 }
@@ -819,6 +826,7 @@ int main(int argc, char** argv) {
         tx.amount = amount;
         tx.fee = taz::FEE_TRANSFER_V1;
         tx.nonce = chain.state().nonce(from);
+        tx.network_id = chain.network_id();   // protocol 4: the signature is for THIS network only
         tx.pubkey = pk;
         const std::vector<std::uint8_t> signable = tx.signable_bytes();
         if (!taz::sign(sk, signable, tx.signature)) return usage_error("the key cannot sign (is the key file right?)");

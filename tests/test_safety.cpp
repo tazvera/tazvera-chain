@@ -1,3 +1,4 @@
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -11,7 +12,7 @@ static int failures = 0;
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
 static Transaction base(const Key& f, std::uint64_t nonce) {
     Transaction tx; tx.from = f.addr; tx.nonce = nonce; tx.pubkey = f.pk; return tx;
 }
@@ -36,7 +37,7 @@ static constexpr Amount BIG = 100000000;
 
 static void test_shape_rules() {
     Key a = new_key(), b = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c);
     CHECK(put(c, {safety(a, 0, 0, 0, 0)})); // a no-op setting is a valid transaction
     auto bad = [&](Transaction tx) { resign(tx, a); return !c.append_block({tx}, g_ts++).ok; };
     { auto t = safety(a, 0, 0, 5, 1); CHECK(bad(t)); }                       // hold time but nothing to hold
@@ -57,7 +58,7 @@ static void test_shape_rules() {
 
 static void test_daily_limit() {
     Key a = new_key(), b = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c);
     CHECK(put(c, {safety(a, 1000000, 0, 0, 0)}));
     CHECK(put(c, {transfer(a, b.addr, 600000, 1)}));
     CHECK(put(c, {transfer(a, b.addr, 400000, 2)}));          // exactly at the limit
@@ -69,7 +70,7 @@ static void test_daily_limit() {
     CHECK(put(c, {transfer(a, b.addr, 1000000, 3)}));         // first block of the next window: allowance is fresh
     CHECK(!c.append_block({transfer(a, b.addr, 1, 4)}, g_ts++).ok);
     // several transfers inside ONE block share the same allowance
-    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(d);
     CHECK(put(d, {safety(a, 1000, 0, 0, 0)}));
     CHECK(!d.append_block({transfer(a, b.addr, 600, 1), transfer(a, b.addr, 600, 2)}, g_ts++).ok);
     CHECK(d.state().nonce(a.addr) == 1);                       // whole block rejected
@@ -82,7 +83,7 @@ static void test_daily_limit() {
 
 static void test_hold_and_release() {
     Key a = new_key(), b = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c);
     CHECK(put(c, {safety(a, 0, 500000, 5, 0)}));                  // h1: hold transfers >= 500000 for 5 blocks
     CHECK(put(c, {transfer(a, b.addr, 600000, 1)}));              // h2: held until height 7
     CHECK(c.state().balance(a.addr) == BIG - 2 * F - 600000);
@@ -95,7 +96,7 @@ static void test_hold_and_release() {
     CHECK(c.state().balance(b.addr) == 700000); CHECK(c.state().held_total() == 0); conserved(c, BIG);
     // the receiver can already spend it in the block where it is released
     Key z = new_key();
-    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(d);
     CHECK(put(d, {safety(a, 0, 500000, 2, 0)})); CHECK(put(d, {transfer(a, b.addr, 600000, 1)})); // released at h4
     CHECK(put(d, {})); // h3
     CHECK(d.state().balance(b.addr) == 0);                   // not yet: released at the start of block 4
@@ -105,7 +106,7 @@ static void test_hold_and_release() {
 
 static void test_cancel() {
     Key a = new_key(), b = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 50000));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 50000)); taztest::use(c);
     CHECK(put(c, {safety(a, 0, 500000, 10, 0)}));
     const auto held = transfer(a, b.addr, 700000, 1); const Hash32 id = held.txid();
     CHECK(put(c, {held}));
@@ -120,7 +121,7 @@ static void test_cancel() {
     CHECK(!c.append_block({cancel(a, id, 3)}, g_ts++).ok);                    // cannot cancel twice
     empty_until(c, 30); CHECK(c.state().balance(b.addr) == 50000);           // and nothing arrives later
     // too late once it has been released
-    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(d);
     CHECK(put(d, {safety(a, 0, 500000, 3, 0)}));
     const auto h2 = transfer(a, b.addr, 700000, 1); CHECK(put(d, {h2}));
     empty_until(d, 6); CHECK(d.state().balance(b.addr) == 700000);
@@ -129,7 +130,7 @@ static void test_cancel() {
 
 static void test_loosening_is_delayed() {
     Key a = new_key(), b = new_key();
-    auto fresh = [&](Chain& c) { CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(put(c, {safety(a, 1000000, 0, 0, 0)})); };
+    auto fresh = [&](Chain& c) { CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c); CHECK(put(c, {safety(a, 1000000, 0, 0, 0)})); };
     { // a raised limit only works after SAFETY_DELAY_BLOCKS
         Chain c; fresh(c);
         CHECK(put(c, {safety(a, 5000000, 0, 0, 1)}));                       // h2: loosening -> waits until h2+DELAY
@@ -159,7 +160,7 @@ static void test_loosening_is_delayed() {
         CHECK(!c.append_block({transfer(a, b.addr, 2000000, 3)}, g_ts++).ok); // limit is still on
     }
     { // each way of loosening is recognised, including turning a rule off and a shorter hold
-        Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0));
+        Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c);
         CHECK(put(c, {safety(a, 1000, 5000, 10, 0)}));
         CHECK(put(c, {safety(a, 1000, 0, 0, 1)}));       CHECK(c.state().find(a.addr)->pending.active); // hold switched off
         CHECK(put(c, {safety(a, 1000, 5000, 10, 2)}));   CHECK(!c.state().find(a.addr)->pending.active);
@@ -171,7 +172,7 @@ static void test_loosening_is_delayed() {
 
 static void test_atomic_block() {
     Key a = new_key(), b = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c);
     const auto before = c.state().state_root();
     CHECK(!c.append_block({safety(a, 1000, 0, 0, 0), transfer(a, b.addr, 999999999, 1)}, g_ts++).ok);
     CHECK(c.state().state_root() == before); CHECK(c.state().nonce(a.addr) == 0); CHECK(c.state().find(a.addr)->safety.is_default());
@@ -179,17 +180,17 @@ static void test_atomic_block() {
 
 static void test_state_roots() {
     Key a = new_key(), b = new_key();
-    Chain plain; CHECK(plain.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(put(plain, {transfer(a, b.addr, 5, 0)}));
+    Chain plain; CHECK(plain.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(plain); CHECK(put(plain, {transfer(a, b.addr, 5, 0)}));
     CHECK(to_json(plain).find("tazvera-chain-export-v1") != std::string::npos);
-    Chain safe; CHECK(safe.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(put(safe, {safety(a, 0, 0, 0, 0)}));
+    Chain safe; CHECK(safe.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(safe); CHECK(put(safe, {safety(a, 0, 0, 0, 0)}));
     CHECK(to_json(safe).find("tazvera-chain-export-v2") != std::string::npos);
     // different rules give different roots, same rules give the same root
     State s1, s2; s1.set_balance(a.addr, 5); s2.set_balance(a.addr, 5); CHECK(s1.state_root() == s2.state_root());
-    Chain x, y; CHECK(x.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(y.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain x, y; CHECK(x.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(x); CHECK(y.init_genesis(a.addr, BIG, b.addr, 0));
     CHECK(put(x, {safety(a, 1000, 0, 0, 0)})); CHECK(put(y, {safety(a, 2000, 0, 0, 0)}));
     CHECK(x.state().state_root() != y.state().state_root());
     // a held transfer is part of the root
-    Chain h1, h2; CHECK(h1.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(h2.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain h1, h2; CHECK(h1.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(h1); CHECK(h2.init_genesis(a.addr, BIG, b.addr, 0));
     CHECK(put(h1, {safety(a, 0, 100, 5, 0)})); CHECK(put(h2, {safety(a, 0, 100, 5, 0)}));
     CHECK(put(h1, {transfer(a, b.addr, 500, 1)})); CHECK(put(h2, {}));
     CHECK(h1.state().state_root() != h2.state().state_root());
@@ -197,7 +198,7 @@ static void test_state_roots() {
 
 static void test_statement_matches_state() {
     Key a = new_key(), b = new_key(), c3 = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 40000));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 40000)); taztest::use(c);
     CHECK(put(c, {safety(a, 0, 500000, 4, 0)}));
     const auto t1 = transfer(a, b.addr, 700000, 1); CHECK(put(c, {t1}));             // held
     CHECK(put(c, {transfer(a, c3.addr, 1000, 2)}));                                    // immediate
@@ -214,7 +215,7 @@ static void test_statement_matches_state() {
     const auto sb = wallet_statement(c, b.addr);
     CHECK(sb.total_received == 700000); CHECK(sb.entries.size() == 1 && sb.entries[0].kind == EntryKind::ReleasedIn);
     // while still held, the receiver sees it as "incoming", not as balance
-    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0));
+    Chain d; CHECK(d.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(d);
     CHECK(put(d, {safety(a, 0, 500000, 50, 0)})); CHECK(put(d, {transfer(a, b.addr, 700000, 1)}));
     CHECK(wallet_statement(d, b.addr).held_incoming == 700000); CHECK(wallet_statement(d, b.addr).balance == 0);
     CHECK(wallet_statement(d, a.addr).held_outgoing == 700000);
@@ -228,7 +229,7 @@ static void test_random_run() {
     Key k[3] = {new_key(), new_key(), new_key()};
     Chain prod, foll;
     const Amount total = 3 * BIG;
-    for (Chain* c : {&prod, &foll}) { CHECK(c->init_genesis(k[0].addr, BIG * 2, k[1].addr, BIG)); }
+    for (Chain* c : {&prod, &foll}) { CHECK(c->init_genesis(k[0].addr, BIG * 2, k[1].addr, BIG)); taztest::use(*c); }
     std::uint64_t seed = 12345; auto rnd = [&seed](std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; };
     const Amount limits[] = {0, 3000000, 30000000}, thrs[] = {0, 50000, 2000000}, amounts[] = {10000, 120000, 2500000};
     int blocks_ok = 0, held_seen = 0, cancels_ok = 0, releases = 0, pending_seen = 0;

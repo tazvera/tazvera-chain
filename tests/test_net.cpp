@@ -9,6 +9,7 @@
 #include "taz/auth.hpp"
 #include "taz/net.hpp"
 #include <chrono>
+#include <atomic>
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include <cstdlib>
@@ -309,6 +310,62 @@ static void n13_auth_proof_key_must_match_hello_key() {
     CHECK(server_err.find("authentication key does not match") != std::string::npos);
 }
 
+// Omitting the deadline from the public authenticated-handshake API must still impose an absolute limit.
+// The peer sends a valid frame header, then trickles an incomplete auth body faster than the 3-second
+// per-call socket timeout. Without the API's finite default deadline this can hold the handshake indefinitely.
+static void n14_authenticated_handshake_has_default_deadline() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    const Chain chain = make_chain(1000);
+    PrivKey server_key{}, peer_key{}; PubKey server_pub{}, peer_pub{};
+    CHECK(generate_keypair(server_key, server_pub));
+    CHECK(generate_keypair(peer_key, peer_pub));
+
+    Hello local = hello_for(chain), peer = hello_for(chain), got;
+    CHECK(sign_hello(peer, peer_key));
+    CHECK(send_message(client, kMsgHello, encode_hello(peer), &err));
+
+    std::string server_err;
+    bool server_ok = true;
+    std::atomic<bool> finished{false};
+    const auto started = std::chrono::steady_clock::now();
+    std::thread server_thread([&] {
+        // Deliberately omit the deadline argument: the API default must be safe.
+        server_ok = exchange_authenticated_hello(server, local, server_key, got, false, &server_err);
+        finished.store(true);
+    });
+
+    std::thread dribbler([&] {
+        // 4-byte length (200), auth message type, then 200 bytes. One byte every 100 ms
+        // keeps each individual recv alive but takes longer than the 10-second absolute deadline.
+        std::string prefix;
+        prefix.push_back('\0'); prefix.push_back('\0'); prefix.push_back('\0');
+        prefix.push_back(static_cast<char>(200)); prefix.push_back(static_cast<char>(kMsgAuth));
+        for (char byte : prefix) {
+            if (finished.load()) return;
+            if (!send_all(client, std::string(1, byte), nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        for (int i = 0; i < 200 && !finished.load(); ++i) {
+            if (!send_all(client, std::string(1, 'x'), nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+
+    server_thread.join();
+    finished.store(true);
+    dribbler.join();
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    CHECK(!server_ok);
+    CHECK(took.count() >= 8000);
+    CHECK(took.count() < 14000);
+    std::cout << "  default authenticated-handshake deadline stopped trickle after "
+              << took.count() << " ms\n";
+}
+
 // A zero-filled seed is not an identity and must be rejected before any hello is sent.
 static void n10_zero_local_identity_refused() {
     Listener listener; Socket server, client; std::string err;
@@ -349,6 +406,36 @@ static void n06_send_to_closed_peer_is_an_error() {
     CHECK(!err.empty());
 }
 
+// A peer that never reads must not extend a large send by allowing repeated partial writes to make progress.
+static void n07_send_deadline_cuts_off_a_slow_receiver() {
+    Listener listener; Socket server, client; std::string err;
+    CHECK(connected_pair(listener, server, client, err));
+    if (!server.valid() || !client.valid()) return;
+
+    // The receiver drains chunks slowly. Each successful partial write must NOT restart the 500 ms
+    // total deadline; a simple "no reader" test would only exercise the per-call socket timeout.
+    std::thread slow_reader([&] {
+        std::string chunk;
+        for (;;) {
+            if (!recv_exact(client, 512u * 1024u, chunk, nullptr)) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+    const std::string payload(kMaxPayloadBytes, 'x'); // maximum legal frame payload; far above socket buffers
+    const auto started = std::chrono::steady_clock::now();
+    const bool sent = send_message(server, kMsgBlocks, payload, &err,
+                                   started + std::chrono::milliseconds(500));
+    const auto took =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+    server.close(); // unblock the reader before joining it
+
+    CHECK(!sent);
+    CHECK(!err.empty());
+    CHECK(took.count() >= 300);
+    CHECK(took.count() < 2500);
+    slow_reader.join();
+}
+
 // v9.0: the deadline must cut off a peer that trickles bytes, not wait three seconds after each one.
 // The client announces a body and then goes quiet; the receive has to give up at the deadline, not at the
 // per-call socket timeout.
@@ -381,12 +468,14 @@ int main() {
     n05_closed_port_is_an_error();
     n06_slow_peer_is_cut_at_the_deadline();
     n06_send_to_closed_peer_is_an_error();
+    n07_send_deadline_cuts_off_a_slow_receiver();
     n07_deadline_cuts_off_a_slow_peer();
     n08_authenticated_handshake_ok();
     n11_authenticated_handshake_refreshes_reused_nonce();
     n09_unsigned_peer_refused();
     n12_invalid_peer_hello_signature_refused();
     n13_auth_proof_key_must_match_hello_key();
+    n14_authenticated_handshake_has_default_deadline();
     n10_zero_local_identity_refused();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }

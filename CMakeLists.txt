@@ -113,6 +113,22 @@ add_executable(taz_net_tests tests/test_net.cpp)
 target_link_libraries(taz_net_tests PRIVATE tazcore)
 add_test(NAME taz_net_tests COMMAND taz_net_tests)
 
+add_executable(taz_handshake_adversarial_tests tests/test_handshake_adversarial.cpp)
+target_link_libraries(taz_handshake_adversarial_tests PRIVATE tazcore Threads::Threads)
+add_test(NAME taz_handshake_adversarial_tests COMMAND taz_handshake_adversarial_tests)
+# PASS_REGULAR_EXPRESSION makes the exit code irrelevant and requires the final line with the exact number of cases
+# that ran: a test that is skipped, cut short or silently loses cases (on any platform) cannot pass.
+set_tests_properties(taz_handshake_adversarial_tests PROPERTIES TIMEOUT 120
+    PASS_REGULAR_EXPRESSION "handshake adversarial tests: all passed \\(20 cases\\)")
+
+add_executable(taz_node_adversarial_tests tests/test_node_adversarial.cpp)
+target_link_libraries(taz_node_adversarial_tests PRIVATE tazcore Threads::Threads)
+target_compile_definitions(taz_node_adversarial_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_FILE:taznode>")
+add_dependencies(taz_node_adversarial_tests taznode)
+add_test(NAME taz_node_adversarial_tests COMMAND taz_node_adversarial_tests)
+set_tests_properties(taz_node_adversarial_tests PROPERTIES TIMEOUT 180
+    PASS_REGULAR_EXPRESSION "node adversarial tests: all passed \\(27 cases\\)")
+
 add_executable(taz_hello_tests tests/test_hello.cpp)
 target_link_libraries(taz_hello_tests PRIVATE tazcore)
 add_test(NAME taz_hello_tests COMMAND taz_hello_tests)
@@ -162,5 +178,18 @@ endif()
 
 # v8.10: writes chain files that exercise the veto rules, so the explorer cross-check can be run against
 # chains the C++ core itself produced (not only against the three shipped demos).
+add_executable(taz_network_binding_tests tests/test_network_binding.cpp)
+target_link_libraries(taz_network_binding_tests PRIVATE tazcore)
+add_test(NAME taz_network_binding_tests COMMAND taz_network_binding_tests)
+# The exact case count must be printed: a test that is skipped or cut short cannot pass on any platform.
+set_tests_properties(taz_network_binding_tests PROPERTIES TIMEOUT 120
+    PASS_REGULAR_EXPRESSION "network binding tests: all passed \\(9 cases\\)")
+
 add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
 target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
+
+# F2: a chain the node saved must always load again (exact case count so a silent skip cannot pass)
+add_executable(taz_persist_limit_tests tests/test_persist_limits.cpp)
+target_link_libraries(taz_persist_limit_tests PRIVATE tazcore)
+add_test(NAME taz_persist_limit_tests COMMAND taz_persist_limit_tests)
+set_tests_properties(taz_persist_limit_tests PROPERTIES PASS_REGULAR_EXPRESSION "persist limit tests: all passed \\(6 cases\\)" TIMEOUT 600)

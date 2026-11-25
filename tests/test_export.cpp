@@ -1,3 +1,4 @@
+#include "net_ctx.hpp"
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
 #include "taz/crypto.hpp"
@@ -11,6 +12,7 @@ struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
 static Transaction tx_of(const Key& f, const Address& to, Amount a, std::uint64_t n) {
     Transaction tx; tx.from = f.addr; tx.to = to; tx.amount = a; tx.nonce = n; tx.pubkey = f.pk;
+    tx.network_id = taztest::g_net;
     CHECK(sign(f.sk, tx.signable_bytes(), tx.signature)); return tx;
 }
 static std::size_t count(const std::string& s, const std::string& needle) {
@@ -18,7 +20,7 @@ static std::size_t count(const std::string& s, const std::string& needle) {
 }
 int main() {
     Key a = new_key(), b = new_key(), c = new_key();
-    Chain chain; CHECK(chain.init_genesis(a.addr, 50000000, b.addr, 0));
+    Chain chain; CHECK(chain.init_genesis(a.addr, 50000000, b.addr, 0)); taztest::use(chain);
     CHECK(chain.genesis_balances().size() == 2); // v8: both genesis accounts recorded (incl. zero)
     CHECK(chain.append_block({tx_of(a, b.addr, 1000000, 0), tx_of(a, c.addr, 20, 1)}, 1).ok);
     CHECK(chain.append_block({}, 2).ok);
@@ -66,7 +68,7 @@ int main() {
     CHECK(j.find("tazvera-chain-export-v1") != std::string::npos);
     CHECK(j.find(to_hex(chain.blocks().back().hash())) != std::string::npos);
     // numbers that exceed 2^53 stay exact because they are strings
-    Chain big; CHECK(big.init_genesis(a.addr, 18446744073709551000ULL, b.addr, 0));
+    Chain big; CHECK(big.init_genesis(a.addr, 18446744073709551000ULL, b.addr, 0)); taztest::use(big);
     CHECK(to_json(big).find("\"18446744073709551000\"") != std::string::npos);
     // output is brace/bracket balanced (cheap well-formedness check; no raw control chars)
     long depth = 0; for (char ch : j) { if (ch=='{'||ch=='[') ++depth; if (ch=='}'||ch==']') --depth; CHECK(static_cast<unsigned char>(ch) >= 0x20 || ch=='\n'); }

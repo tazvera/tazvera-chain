@@ -15,7 +15,8 @@ using namespace taz;
 namespace {
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 bool new_key(Key& k) { if (!generate_keypair(k.sk, k.pk)) return false; k.addr = address_from_pubkey(k.pk); return true; }
-bool signit(const Key& k, Transaction& tx) { tx.pubkey = k.pk; tx.from = k.addr; return sign(k.sk, tx.signable_bytes(), tx.signature); }
+Hash32 g_net{};   // protocol 4: every demo transaction is signed for the demo chain
+bool signit(const Key& k, Transaction& tx) { tx.network_id = g_net; tx.pubkey = k.pk; tx.from = k.addr; return sign(k.sk, tx.signable_bytes(), tx.signature); }
 Transaction transfer(const Key& from, const Address& to, Amount amount, std::uint64_t nonce) {
     Transaction tx; tx.to = to; tx.amount = amount; tx.nonce = nonce; tx.pubkey = from.pk; tx.from = from.addr;
     signit(from, tx); return tx;
@@ -52,6 +53,7 @@ int main(int argc, char** argv) {
     if (!new_key(alice) || !new_key(bob) || !new_key(charlie) || !new_key(dave) || !new_key(alice2) || !new_key(eve) || !new_key(vault)) { std::cerr << "key generation failed\n"; return 1; }
     Chain chain;
     if (!chain.init_genesis(alice.addr, 100000000, bob.addr, 0)) return 1;
+    g_net = chain.network_id();
     std::int64_t ts = 1700000000; auto next = [&ts]() { return ts += 100; };
     bool ok = true;
     if (with_recovery) {

@@ -48,7 +48,7 @@ std::string block_to_json(const Block& b) {
         j += std::string(t ? "," : "") + "\n        {";
         j += "\"txid\": " + hex(tx.txid()) + ", ";
         j += "\"protocol_version\": " + num(tx.protocol_version) + ", ";
-        j += "\"chain_id\": " + q(tx.chain_id) + ", ";
+        j += "\"chain_id\": " + q(tx.chain_id) + ", \"network_id\": " + hex(tx.network_id) + ", ";
         j += "\"kind\": " + num(static_cast<std::uint8_t>(tx.kind)) + ", ";
         j += "\"from\": " + hex(tx.from) + ", \"to\": " + hex(tx.to) + ", ";
         j += "\"amount\": " + num(tx.amount) + ", \"fee\": " + num(tx.fee) + ", ";
@@ -119,6 +119,7 @@ std::string to_json(const Chain& chain) {
 WalletStatement wallet_statement(const Chain& chain, const Address& address) {
     WalletStatement s;
     State st;
+    st.bind_network(chain.network_id());
     for (const auto& [addr, bal] : chain.genesis_balances()) st.set_balance(addr, bal);
     auto add = [&s](std::uint64_t h, const Hash32& id, const Address& other, EntryKind k, Amount amount, Amount fee) {
         s.entries.push_back(StatementEntry{h, id, other, k, amount, fee});

@@ -117,6 +117,9 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
     ApplyResult result;
     auto fail = [&result](std::string msg) { result.error = std::move(msg); return result; };
     if (auto error = validate_tx_shape(tx)) return fail(*error);
+    // Protocol 4: before any signature work, and before anything else about the transaction matters.
+    if (network_id_ == Hash32{}) return fail("this state is not bound to a network, so it cannot apply a transaction");
+    if (tx.network_id != network_id_) return fail("transaction is signed for a different network");
     if (tx.expiry_height != 0 && height > tx.expiry_height) return fail("transaction expired");
     if (!verify(tx.pubkey, tx.signable_bytes(), tx.signature)) return fail("invalid Ed25519 signature");
 

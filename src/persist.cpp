@@ -245,15 +245,16 @@ constexpr std::string_view FORMAT_PREFIX = "tazvera-chain-export-";
 
 Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     const JVal& o = obj_of(jv, where);
-    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "network_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                                   "hold_threshold", "hold_blocks", "ref", "new_owner", "veto", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
-    else exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+    else exact_keys(o, {"txid", "protocol_version", "chain_id", "network_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                         "hold_threshold", "hold_blocks", "ref", "new_owner", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
     Transaction tx;
     const std::uint64_t pv = dec_u64(field(o, "protocol_version"), where + ".protocol_version");
     if (pv != PROTOCOL_VERSION) fail(where + " has an unsupported protocol version");
     tx.protocol_version = static_cast<std::uint32_t>(pv);
     tx.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
+    tx.network_id = hex_of<Hash32>(field(o, "network_id"), where + ".network_id");
     const std::uint64_t kind = dec_u64(field(o, "kind"), where + ".kind");
     if (kind > static_cast<std::uint64_t>(TxKind::RecoveryCancel)) fail(where + " has an unknown transaction kind");
     tx.kind = static_cast<TxKind>(kind);
@@ -486,7 +487,7 @@ bool load_chain_json(const std::string& path, Chain& out, std::string* error, co
     }
 }
 
-bool save_chain_json(const Chain& chain, const std::string& path, std::string* error) {
+bool save_chain_json(const Chain& chain, const std::string& path, std::string* error, const LoadOptions& limits) {
     auto set_err = [&](const std::string& m) { if (error) *error = m; };
     if (chain.blocks().empty()) { set_err("the chain has no genesis; nothing to save"); return false; }
     static std::atomic<unsigned long> counter{0};
@@ -495,6 +496,23 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         // v8.9: inside the try, and the helper is noexcept, so no filesystem error can escape save_chain_json.
         sweep_stale_temp_files(path);   // housekeeping only, never fatal
         const std::string body = to_json(chain);
+        // F2: the file must be one load_chain_json() accepts. Checked on the exact text, before any file is touched.
+        // A parse alone (no signature or state replay) is enough: the loader's limits are all syntactic.
+        if (chain.blocks().size() > limits.max_blocks) {
+            set_err("not saved: the chain has " + std::to_string(chain.blocks().size()) + " blocks and this build loads at most " +
+                    std::to_string(limits.max_blocks) + "; the previous file was kept");
+            return false;
+        }
+        if (body.size() > limits.max_file_bytes) {
+            set_err("not saved: the chain file would be " + std::to_string(body.size()) + " bytes and this build loads at most " +
+                    std::to_string(limits.max_file_bytes) + "; the previous file was kept");
+            return false;
+        }
+        try { Parser(body, limits.max_nodes).parse_document(); }
+        catch (const std::exception& e) {
+            set_err(std::string("not saved: this build could not load the file it would write (") + e.what() + "); the previous file was kept");
+            return false;
+        }
         namespace fs = std::filesystem;
 #ifndef _WIN32
         const std::string id = std::to_string(static_cast<long>(::getpid())) + "." + std::to_string(counter.fetch_add(1));

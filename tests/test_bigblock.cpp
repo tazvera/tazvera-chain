@@ -4,6 +4,7 @@
 // bytes the writer and parser can handle. That proves the limits, not that a valid multi-transaction block can be
 // built, sent, parsed and accepted — which is what a node actually has to do. This test uses nothing but valid
 // transactions: correct nonces, correct fees, real signatures, and a balance that covers all of them.
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -30,6 +31,7 @@ static Transaction transfer(const Key& from, const Address& to, Amount amount, s
     Transaction tx;
     tx.from = from.addr; tx.to = to; tx.amount = amount; tx.nonce = nonce;
     tx.fee = FEE_TRANSFER_V1; tx.pubkey = from.pk;
+    tx.network_id = taztest::g_net;
     if (!sign(from.sk, tx.signable_bytes(), tx.signature)) std::exit(2);
     return tx;
 }
@@ -43,7 +45,7 @@ int main() {
     Key owner = new_key(), receiver = new_key();
     const Amount needed = static_cast<Amount>(kCount) * (1 + FEE_TRANSFER_V1);
     Chain chain;
-    CHECK(chain.init_genesis(owner.addr, needed + 1000, receiver.addr, 0));
+    CHECK(chain.init_genesis(owner.addr, needed + 1000, receiver.addr, 0)); taztest::use(chain);
 
     std::vector<Transaction> txs;
     txs.reserve(kCount);
@@ -71,7 +73,7 @@ int main() {
     CHECK(back.transactions.size() == kCount);
 
     Chain peer;
-    CHECK(peer.init_genesis(owner.addr, needed + 1000, receiver.addr, 0));
+    CHECK(peer.init_genesis(owner.addr, needed + 1000, receiver.addr, 0)); taztest::use(peer);
     const ChainResult accepted = peer.accept_block(back);
     if (!accepted.ok) std::cerr << "  accept refused: " << accepted.error << "\n";
     CHECK(accepted.ok);
