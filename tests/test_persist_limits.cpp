@@ -30,12 +30,12 @@ static Chain grow_to(Chain c, std::uint64_t height) {
 }
 
 // Returns whether the save was accepted. Checks the property either way.
-static bool check_property(const fs::path& file, const Chain& base, const Chain& bigger, const char* label) {
+static bool check_property(const fs::path& file, const Chain& base, const Chain& bigger, const char* label, const LoadOptions& lim = {}) {
     std::string err;
-    if (!save_chain_json(base, file.string(), &err)) { std::cerr << label << ": cannot save the base chain: " << err << "\n"; ++failures; return false; }
-    LoadOptions pin; pin.require_genesis_pin = true; pin.expected_genesis_commitment = base.genesis_commitment();
+    if (!save_chain_json(base, file.string(), &err, lim)) { std::cerr << label << ": cannot save the base chain: " << err << "\n"; ++failures; return false; }
+    LoadOptions pin = lim; pin.require_genesis_pin = true; pin.expected_genesis_commitment = base.genesis_commitment();
     Chain back;
-    const bool saved = save_chain_json(bigger, file.string(), &err);
+    const bool saved = save_chain_json(bigger, file.string(), &err, lim);
     const Chain& expected = saved ? bigger : base;
     const bool loaded = load_chain_json(file.string(), back, &err, pin);
     if (!loaded) std::cerr << label << ": saved=" << saved << " but the file does not load: " << err << "\n";
@@ -53,12 +53,31 @@ int main() {
     if (!generate_keypair(ska, pka) || !generate_keypair(skb, pkb)) return 2;
     Chain genesis; if (!genesis.init_genesis(address_from_pubkey(pka), 1000, address_from_pubkey(pkb), 0)) return 2;
 
-    Chain at = grow_to(genesis, 100000);                       // well under every limit
-    CHECK(check_property(dir / "a.json", genesis, at, "100000 blocks"));
-    Chain mid = grow_to(at, 116000);                           // just under the 2,000,000-value limit
-    CHECK(check_property(dir / "b.json", genesis, mid, "116000 blocks"));
-    Chain over = grow_to(mid, 120000);                         // over it: about 2,050,000 values
-    CHECK(!check_property(dir / "c.json", mid, over, "120000 blocks"));
+#ifdef TAZ_SANITIZED_BUILD
+    // ASan/UBSan make 120,000 blocks take far longer than the CI timeout, so a sanitized build runs the same three
+    // cases at a smaller scale: the node limit is set to what a 3,000-block chain needs (found by search), which
+    // puts the three chains at about 67%, 97% and 110% of it. The default-limit run is covered by the plain builds.
+    LoadOptions lim;
+    {
+        const Chain probe = grow_to(genesis, 3000);
+        std::uint64_t lo = 1, hi = 2000000; std::string e; const fs::path f = dir / "probe.json";
+        while (lo < hi) {
+            LoadOptions t; t.max_nodes = lo + (hi - lo) / 2;
+            if (save_chain_json(probe, f.string(), &e, t)) hi = t.max_nodes; else lo = t.max_nodes + 1;
+        }
+        lim.max_nodes = lo;
+    }
+    const std::uint64_t h1 = 2000, h2 = 3000, h3 = 3300;
+#else
+    const LoadOptions lim;                                      // the real defaults
+    const std::uint64_t h1 = 100000, h2 = 116000, h3 = 120000;  // 116,000 is just under the 2,000,000-value limit
+#endif
+    Chain at = grow_to(genesis, h1);
+    CHECK(check_property(dir / "a.json", genesis, at, "well under the limit", lim));
+    Chain mid = grow_to(at, h2);
+    CHECK(check_property(dir / "b.json", genesis, mid, "just under the limit", lim));
+    Chain over = grow_to(mid, h3);
+    CHECK(!check_property(dir / "c.json", mid, over, "over the limit", lim));
 
     // Exact boundaries with small limits: save succeeds exactly when load would, for every limit alone.
     // (Added with the fix, which is what introduced the `limits` argument.)
