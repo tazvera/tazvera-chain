@@ -114,3 +114,20 @@ class ValidatorLifecycleTests(unittest.TestCase):
     def test_status_change_cannot_be_replayed_for_current_epoch(self):
         with self.assertRaises(ValueError):
             self.registry.schedule_status("A", False, effective_epoch=0)
+
+    def test_withdraw_before_unlock_is_rejected(self):
+        self.registry.schedule_status("D", False, effective_epoch=1)
+        self.registry.advance_epoch(1)
+        self.registry.request_unbond("D", 2, 3)
+        with self.assertRaises(ValueError):
+            self.registry.withdraw("D")
+
+    def test_withdraw_is_one_time_and_removes_stake(self):
+        self.registry.schedule_status("D", False, effective_epoch=1)
+        self.registry.advance_epoch(1)
+        self.registry.request_unbond("D", 1, 2)
+        self.registry.advance_epoch(2)
+        self.assertEqual(self.registry.withdraw("D"), 100)
+        self.assertNotIn("D", self.registry.stakes)
+        with self.assertRaises(ValueError):
+            self.registry.withdraw("D")
