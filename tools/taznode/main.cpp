@@ -45,6 +45,8 @@ constexpr const char* kUsage =
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
     "  --require-identity        refuse any peer that does not prove an identity (needs --identity)\n"
+    "  --allow-peer <address>    allow this 40-hex peer address (repeatable; needs --require-identity)\n"
+    "  --allow-peer-file <path>  read allowed 40-hex peer addresses, one per line\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
