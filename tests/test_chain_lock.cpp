@@ -6,6 +6,7 @@
 //   l2  once the first has stopped, the file can be used again
 //   l3  a node on a different chain file is not affected
 #include "taz/chain.hpp"
+#include "taz/filelock.hpp"
 #include "taz/crypto.hpp"
 #include "taz/net.hpp"
 #include "taz/persist.hpp"
@@ -146,6 +147,27 @@ static void l1_l2_l3() {
 }
 
 static void genesis_creation_race() {
+    // A separately held lock must stop --init-genesis before it can create a file.
+    {
+        Key held_a = new_key(), held_b = new_key();
+        const fs::path held_file = fs::temp_directory_path() / "taz-f10-genesis-held.json";
+        std::error_code held_ec; fs::remove(held_file, held_ec); fs::remove(held_file.string() + ".lock", held_ec);
+        ChainFileLock held_lock;
+        std::string lock_err;
+        CHECK(held_lock.acquire(held_file.string(), &lock_err));
+        const std::string held_cmd = node() + " --chain \"" + held_file.string() +
+            "\" --init-genesis " + to_hex(held_a.addr) + ":1000 --init-genesis " +
+            to_hex(held_b.addr) + ":0";
+        const fs::path held_out = fs::temp_directory_path() / "taz-f10-genesis-held.out";
+        const int held_rc = run_waiting(held_cmd, held_out.string());
+        const std::string held_text = slurp(held_out);
+        CHECK(held_rc == 3);
+        CHECK(held_text.find("is in use by another taznode process") != std::string::npos);
+        CHECK(!fs::exists(held_file));
+        held_lock = ChainFileLock{};
+        fs::remove(held_out, held_ec);
+        fs::remove(held_file.string() + ".lock", held_ec);
+    }
     Key a = new_key(), b = new_key(), c = new_key(), d = new_key();
     const fs::path dir = fs::temp_directory_path() / "taz-f10-genesis-race";
     std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
@@ -201,6 +223,6 @@ int main() {
     std::error_code ec;
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(fs::temp_directory_path() / "taz-f10", ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
-    std::cout << "chain lock tests: all passed (4 cases)\n";
+    std::cout << "chain lock tests: all passed (5 cases)\n";
     return EXIT_SUCCESS;
 }
