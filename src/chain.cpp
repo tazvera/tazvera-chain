@@ -21,6 +21,8 @@ std::vector<std::uint8_t> block_signable(const std::string& chain_id, std::uint6
 
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
     if (!blocks_.empty() || first == second) return false;
+    constexpr Amount MAX_AMOUNT = std::numeric_limits<Amount>::max();
+    if (second_balance > MAX_AMOUNT - first_balance) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
     Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
     // v8.2: the commitment over BOTH genesis accounts (zero balances included) sits in block 0's previous_hash field
@@ -227,8 +229,10 @@ Hash32 Chain::genesis_commitment() const {
 bool Chain::init_genesis(const Address& first, Amount first_balance,
                          const Address& second, Amount second_balance, std::vector<Address> producers) {
     if (producers.empty()) return init_genesis(first, first_balance, second, second_balance);
-    // The set is validated exactly as set_producers() validates it, before anything is committed.
+    // Validate the complete genesis before mutating the producer set or chain state.
     if (!blocks_.empty() || first == second) return false;
+    constexpr Amount MAX_AMOUNT = std::numeric_limits<Amount>::max();
+    if (second_balance > MAX_AMOUNT - first_balance) return false;
     const ChainResult pr = set_producers(std::move(producers));
     if (!pr.ok) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
