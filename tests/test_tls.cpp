@@ -131,18 +131,17 @@ static void t04_a_stalled_handshake_is_cut_off() {
 
     bool refused = false;
     std::string why;
-    std::chrono::milliseconds handshake_wait{0};
-    std::string server_err;          // the server thread writes only here
+    std::string server_err;                 // the server thread writes only here
+    long long server_ms = -1;               // how long the server itself waited, not the client
     std::thread server([&] {
         Socket raw;
         const Deadline accept_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         if (!accept_one(listener.socket, raw, &server_err, accept_deadline)) return;
-        // This peer connects and then says nothing. One second is all it gets.
         const Deadline deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-        const auto handshake_started = std::chrono::steady_clock::now();
+        const auto started = std::chrono::steady_clock::now();
         auto conn = server_ctx->accept(raw, &server_err, deadline);
-        handshake_wait = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - handshake_started);
+        server_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
         refused = (conn == nullptr);
         why = server_err;
     });
@@ -156,8 +155,8 @@ static void t04_a_stalled_handshake_is_cut_off() {
 
     CHECK(refused);
     CHECK(why.find("deadline") != std::string::npos);
-    // Measure only the server handshake: the client deliberately stays connected for four seconds.
-    CHECK(handshake_wait < std::chrono::milliseconds(3000));
+    CHECK(server_ms >= 0);
+    CHECK(server_ms < 2000);
 }
 
 int main() {
