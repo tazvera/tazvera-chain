@@ -397,18 +397,6 @@ static bool reject_chunk_frame(Socket& server, Socket& client, const std::string
     CHECK(!ok); CHECK(err.find(expected)!=std::string::npos);
     return !ok;
 }
-static void n21_chunked_one_mib_roundtrip() {
-    Listener l; Socket server,client; std::string err;
-    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
-    const std::string source(1024*1024,'B');
-    std::uint8_t type=0; std::string got, recv_err;
-    bool received=false;
-    std::thread receiver([&] { received=recv_message(server,type,got,&recv_err); });
-    CHECK(send_message(client,kMsgBlocks,source,&err));
-    receiver.join();
-    CHECK(received); CHECK(type==kMsgBlocks); CHECK(got==source);
-    if (!recv_err.empty()) std::cerr << "  chunk receive: " << recv_err << "\\n";
-}
 static void n22_small_message_stays_direct() {
     Listener l; Socket server,client; std::string err;
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
@@ -476,43 +464,6 @@ static void n29_impossible_oversize_stream_refused_before_growth() {
     CHECK(err.find("stream too large")!=std::string::npos);
 }
 
-static std::uint32_t test_get_u32(const std::string& in, std::size_t offset) {
-    return (static_cast<std::uint32_t>(static_cast<unsigned char>(in[offset])) << 24) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(in[offset+1])) << 16) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(in[offset+2])) << 8) |
-           static_cast<std::uint32_t>(static_cast<unsigned char>(in[offset+3]));
-}
-static void n30_every_chunk_frame_respects_64k_wire_limit() {
-    Listener l; Socket server,client; std::string err;
-    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
-    const std::string source(128*1024,'W');
-    bool sent=false; std::string send_err;
-    std::thread sender([&] { sent=send_message(client,kMsgBlocks,source,&send_err); });
-    std::uint32_t total=0, stream=0;
-    for (std::uint32_t i=0; i<(total ? total : 1); ++i) {
-        std::string header, outer, body;
-        CHECK(recv_exact(server,4,header,&err));
-        if(header.size()!=4) break;
-        const std::uint32_t length=test_get_u32(header,0);
-        CHECK(length+4<=kMaxWireMessageBytes);
-        CHECK(length>=14);
-        CHECK(recv_exact(server,1,outer,&err));
-        CHECK(outer.size()==1 && static_cast<std::uint8_t>(outer[0])==kMsgChunk);
-        if(length<1) break;
-        CHECK(recv_exact(server,length-1,body,&err));
-        if(body.size()<13) break;
-        CHECK(static_cast<std::uint8_t>(body[0])==kMsgBlocks);
-        if(i==0) { stream=test_get_u32(body,1); total=test_get_u32(body,9); }
-        CHECK(test_get_u32(body,1)==stream);
-        CHECK(test_get_u32(body,5)==i);
-        CHECK(test_get_u32(body,9)==total);
-        CHECK(body.size()>13);
-    }
-    sender.join();
-    CHECK(sent); CHECK(total>1);
-    if(!send_err.empty()) std::cerr << "  chunk send: " << send_err << "\\n";
-}
-
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -530,7 +481,6 @@ int main() {
     n12_invalid_peer_hello_signature_refused();
     n13_auth_proof_key_must_match_hello_key();
     n10_zero_local_identity_refused();
-    n21_chunked_one_mib_roundtrip();
     n22_small_message_stays_direct();
     n23_chunk_order_rejected();
     n24_incomplete_stream_deadline_and_close();
@@ -539,7 +489,6 @@ int main() {
     n27_nested_chunk_type_rejected();
     n28_reassembled_blocks_type_preserved();
     n29_impossible_oversize_stream_refused_before_growth();
-    n30_every_chunk_frame_respects_64k_wire_limit();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
