@@ -385,7 +385,7 @@ static std::string raw_chunk(std::uint8_t original, std::uint32_t stream,
     std::string payload(1, static_cast<char>(original));
     test_put_u32(payload, stream); test_put_u32(payload, index); test_put_u32(payload, total);
     payload.append(bytes.data(), bytes.size());
-    std::string frame; test_put_u32(frame, static_cast<std::uint32_t>(payload.size() + 1));
+    std::string frame; test_put_u32(frame, static_cast<std::uint32_t>(payload.size()));
     frame.push_back(static_cast<char>(kMsgChunk)); frame += payload;
     return frame;
 }
