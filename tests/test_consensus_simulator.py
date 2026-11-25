@@ -145,3 +145,35 @@ class ValidatorLifecycleTests(unittest.TestCase):
         self.assertNotIn("D", self.registry.stakes)
         with self.assertRaises(ValueError):
             self.registry.withdraw("D")
+
+
+class WeightedConsensusSimulatorTests(unittest.TestCase):
+    def setUp(self):
+        from tools.consensus_simulator import WeightedRound
+        self.sim = WeightedRound({"A": 2, "B": 2, "C": 2, "D": 3})
+
+    def test_exactly_two_thirds_is_not_quorum(self):
+        for validator in ("A", "B", "C"):
+            self.sim.vote("prevote", validator, "block")
+        self.assertEqual(self.sim._power(self.sim.prevotes, "block"), 6)
+        self.assertEqual(self.sim.quorum, 7)
+        self.assertFalse(self.sim.has_prevote_quorum("block"))
+
+    def test_greater_than_two_thirds_commits(self):
+        for validator in ("A", "B", "D"):
+            self.sim.vote("prevote", validator, "block")
+        self.assertTrue(self.sim.has_prevote_quorum("block"))
+        for validator in ("A", "B", "D"):
+            self.sim.vote("precommit", validator, "block")
+        self.assertEqual(self.sim.committed, "block")
+        self.assertTrue(self.sim.has_commit_quorum("block"))
+
+    def test_invalid_stake_is_rejected(self):
+        from tools.consensus_simulator import WeightedRound
+        with self.assertRaises(ValueError):
+            WeightedRound({"A": 1, "B": 1, "C": 1, "D": 0})
+
+    def test_duplicate_vote_across_blocks_is_rejected(self):
+        self.sim.vote("prevote", "A", "block-1")
+        with self.assertRaises(ValueError):
+            self.sim.vote("prevote", "A", "block-2")
