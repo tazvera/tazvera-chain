@@ -17,6 +17,15 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
+#ifdef _WIN32
+#  define NOMINMAX
+#  include <windows.h>
+#else
+#  include <fcntl.h>
+#  include <sys/file.h>
+#  include <unistd.h>
+#endif
 #ifndef _WIN32
 #include <sys/wait.h>
 #endif
@@ -145,12 +154,111 @@ static void l1_l2_l3() {
     CHECK(rc_after == 0);
 }
 
+
+// ---- helpers for the cases below -------------------------------------------------------------------------------------
+// Holds the lock the way a running node does, without being a node, so the test controls exactly when it is held.
+// (Implementation detail on purpose: the lock file is "<chain file>.lock", an flock / a no-sharing CreateFile.)
+struct RawLock {
+#ifdef _WIN32
+    HANDLE h = INVALID_HANDLE_VALUE;
+    bool take(const std::string& path) { h = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr); return h != INVALID_HANDLE_VALUE; }
+    ~RawLock() { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
+#else
+    int fd = -1;
+    bool take(const std::string& path) { fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600); return fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) == 0; }
+    ~RawLock() { if (fd >= 0) ::close(fd); }
+#endif
+};
+static std::string in_dir(const fs::path& dir, const std::string& command) {
+#ifdef _WIN32
+    return "cd /d \"" + dir.string() + "\" && " + command;
+#else
+    return "cd \"" + dir.string() + "\" && " + command;
+#endif
+}
+static std::string init_cmd(const std::string& chain_arg, const Key& a, const Key& b) {
+    return node() + " --chain " + chain_arg + " --init-genesis " + to_hex(a.addr) + ":1000 --init-genesis " + to_hex(b.addr) + ":0";
+}
+
+// l4: the lock comes BEFORE genesis creation. While another process holds the lock on a path, --init-genesis for that
+// path must be refused and must not create the file (it used to check and write first, with no lock at all).
+static void l4_init_genesis_needs_the_lock() {
+    Key a = new_key(), b = new_key();
+    const fs::path dir = fs::temp_directory_path() / "taz-f10-init";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    const fs::path chain = dir / "new.json";
+    RawLock held; CHECK(held.take(chain.string() + ".lock"));
+    const int rc = run_waiting(init_cmd("\"" + chain.string() + "\"", a, b), (dir / "init.out").string());
+    CHECK(rc == 3);
+    CHECK(!fs::exists(chain));                                       // nothing was written while someone else held the lock
+    CHECK(slurp(dir / "init.out").find("in use by another") != std::string::npos);
+}
+
+// l5: the same chain file under another spelling must hit the same lock. Each spelling below used to get its own lock
+// file and so evade the lock: relative path, "./" and "../" detours, a symlinked directory, a symlink to the file.
+static void l5_other_spellings_of_the_path_are_still_locked() {
+    Key a = new_key(), b = new_key();
+    const Chain c = make_chain(2, a, b);
+    const fs::path dir = fs::temp_directory_path() / "taz-f10-spell";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir / "sub");
+    save(c, dir / "one.json");
+    const std::uint16_t port = free_port();
+    const std::string a_out = (dir / "a.out").string();
+    CHECK(run_in_background(base_cmd(dir / "one.json", c) + " --listen " + std::to_string(port) + " --serve-timeout 40" + anon(), a_out));
+    CHECK(wait_for(a_out, "listening", 10));
+
+    auto refused = [&](const std::string& label, const std::string& command) {
+        const int rc = run_waiting(command, (dir / "sp.out").string());
+        const bool ok = rc == 3 && slurp(dir / "sp.out").find("in use by another") != std::string::npos;
+        if (!ok) std::cerr << "  spelling \"" << label << "\" got past the lock (exit " << rc << "):\n" << slurp(dir / "sp.out") << "\n";
+        CHECK(ok);
+    };
+    const std::string pin_arg = " --expect-genesis " + pin(c);
+    refused("relative", in_dir(dir, node() + " --chain one.json" + pin_arg));
+    refused("./sub/../", node() + " --chain \"" + (dir / "sub" / ".." / "one.json").string() + "\"" + pin_arg);
+    refused("./", node() + " --chain \"" + (dir / "." / "one.json").string() + "\"" + pin_arg);
+#ifndef _WIN32
+    fs::create_directory_symlink(dir, fs::temp_directory_path() / "taz-f10-spell-link", ec);
+    CHECK(!ec);
+    refused("symlinked directory", node() + " --chain \"" + (fs::temp_directory_path() / "taz-f10-spell-link" / "one.json").string() + "\"" + pin_arg);
+    fs::create_symlink(dir / "one.json", dir / "alias.json", ec);
+    CHECK(!ec);
+    refused("symlink to the file", node() + " --chain \"" + (dir / "alias.json").string() + "\"" + pin_arg);
+    fs::remove(fs::temp_directory_path() / "taz-f10-spell-link", ec);
+#endif
+}
+
+// l6: many pairs of --init-genesis started at the same moment: for every pair exactly one may succeed, and the file
+// that is left must load. (Without the lock both could pass the "does it exist" check.)
+static void l6_simultaneous_init_genesis_has_one_winner() {
+    Key a = new_key(), b = new_key();
+    const fs::path dir = fs::temp_directory_path() / "taz-f10-race";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    int bad_pairs = 0;
+    for (int round = 0; round < 12; ++round) {
+        const fs::path chain = dir / ("c" + std::to_string(round) + ".json");
+        const std::string cmd = init_cmd("\"" + chain.string() + "\"", a, b);
+        int rc1 = -1, rc2 = -1;
+        std::thread t1([&] { rc1 = run_waiting(cmd, (dir / ("r" + std::to_string(round) + "a.out")).string()); });
+        std::thread t2([&] { rc2 = run_waiting(cmd, (dir / ("r" + std::to_string(round) + "b.out")).string()); });
+        t1.join(); t2.join();
+        const int winners = (rc1 == 0) + (rc2 == 0);
+        Chain back; std::string err;
+        const bool loads = load_chain_json(chain.string(), back, &err);
+        if (winners != 1 || !loads) { ++bad_pairs; std::cerr << "  round " << round << ": exit codes " << rc1 << " and " << rc2 << ", file loads: " << loads << "\n"; }
+    }
+    CHECK(bad_pairs == 0);
+}
+
 int main() {
     { std::string e; if (!net_startup(&e)) { std::cerr << "net_startup failed: " << e << "\n"; return 1; } }
     l1_l2_l3();
+    l4_init_genesis_needs_the_lock();
+    l5_other_spellings_of_the_path_are_still_locked();
+    l6_simultaneous_init_genesis_has_one_winner();
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) fs::remove_all(fs::temp_directory_path() / "taz-f10", ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz-f10", "taz-f10-init", "taz-f10-spell", "taz-f10-race"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
-    std::cout << "chain lock tests: all passed (3 cases)\n";
+    std::cout << "chain lock tests: all passed (6 cases)\n";
     return EXIT_SUCCESS;
 }
