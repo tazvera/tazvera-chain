@@ -676,9 +676,12 @@ int main(int argc, char** argv) {
                 }
                 const taz::ChainResult took = candidate.accept_block(theirs_tip, now_seconds() + 120);
                 if (!took.ok) {
-                    std::cerr << "taznode: the peer's tip block is not valid on our history: " << took.error
-                              << "; keeping our chain\n";
-                    return true;
+                    // This peer's tip does not attach to our local history. A deeper fork needs a
+                    // common-ancestor reorganization, which this node does not implement yet. Refuse
+                    // the sync explicitly: reporting success here would leave peers on divergent chains.
+                    std::cerr << "taznode: refusing unrepaired deep fork: cannot attach peer tip to our history: "
+                              << took.error << "\n";
+                    return false;
                 }
                 const taz::ForkDecision fork = taz::choose_chain(chain, candidate);
                 if (fork.choice != taz::ForkChoice::TakeTheirs) {
