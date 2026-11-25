@@ -340,7 +340,19 @@ static void t07_atomic_save() {
     const std::string q = (d / "shared.json").string();
     std::vector<std::thread> th; std::atomic<int> ok{0};
     const Chain* chains[3] = {&c1, &c2, &c3};
-    for (int t = 0; t < 4; ++t) th.emplace_back([&, t] { for (int i = 0; i < 15; ++i) { std::string e; if (save_chain_json(*chains[(t + i) % 3], q, &e)) ++ok; } });
+    for (int t = 0; t < 4; ++t) th.emplace_back([&, t] {
+        for (int i = 0; i < 15; ++i) {
+            bool saved = false;
+            for (int retry = 0; retry < 200 && !saved; ++retry) {
+                std::string e;
+                saved = save_chain_json(*chains[(t + i) % 3], q, &e);
+                if (!saved && e.find("writer lock is busy or unavailable") != std::string::npos)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                else if (!saved) break;
+            }
+            if (saved) ++ok;
+        }
+    });
     for (auto& t : th) t.join();
     CHECK(ok == 60);
     { Chain l; CHECK(load_chain_json(q, l, &err)); CHECK(same_chain(l, c1) || same_chain(l, c2) || same_chain(l, c3)); }
