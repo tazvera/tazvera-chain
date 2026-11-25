@@ -464,6 +464,25 @@ static void n29_impossible_oversize_stream_refused_before_growth() {
     CHECK(err.find("stream too large")!=std::string::npos);
 }
 
+static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    const std::string bytes(65518,'z'); // maximum data bytes in one 64 KiB wire frame
+    bool sender_ok=true; std::string sender_err;
+    std::thread sender([&] {
+        for (std::uint32_t i=0; i<513; ++i) {
+            const std::string frame=raw_chunk(kMsgBlocks,14,i,513,bytes);
+            if(!send_all(client,frame,&sender_err)) { sender_ok=false; break; }
+        }
+    });
+    std::uint8_t type=0; std::string payload;
+    const bool received=recv_message(server,type,payload,&err);
+    sender.join();
+    CHECK(!received);
+    CHECK(err.find("stream too large")!=std::string::npos);
+    CHECK(!sender_ok || sender_err.empty());
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -489,6 +508,7 @@ int main() {
     n27_nested_chunk_type_rejected();
     n28_reassembled_blocks_type_preserved();
     n29_impossible_oversize_stream_refused_before_growth();
+    n30_stream_over_32_mib_is_rejected_at_growth_boundary();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
