@@ -373,6 +373,19 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
         put_u32(chunk, index);
         put_u32(chunk, total_chunks);
         chunk.append(payload.data() + offset, count);
+        if (deadline != no_deadline()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                if (error) *error = "the peer took longer than the time allowed for this exchange";
+                return false;
+            }
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+            const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+            if (!set_timeout_ms(socket, ms, nullptr)) {
+                if (error) *error = "could not set the socket timeouts";
+                return false;
+            }
+        }
         if (!send_frame(socket, kMsgChunk, chunk, error)) return false;
         offset += count;
     }
