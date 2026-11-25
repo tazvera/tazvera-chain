@@ -154,7 +154,7 @@ CertPtr make_self_signed(KeyPtr& key, std::string* error) {
         if (error) *error = "could not build TLS certificate: " + last_error();
         return nullptr;
     }
-    X509_NAME* name = X509_get_subject_name(cert.get());
+    X509_NAME* name = const_cast<X509_NAME*>(X509_get_subject_name(cert.get()));
     const char* common_name = "tazvera-node";
     if (!name || X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
                                             reinterpret_cast<const unsigned char*>(common_name), -1, -1, 0) == 0 ||
