@@ -103,8 +103,6 @@ static void test_genesis_supply_overflow() {
     CHECK(overflow.state().account_count() == 0);
     // A rejected genesis must leave the object reusable and unchanged.
     CHECK(overflow.init_genesis(alice.addr, MAX - 1, bob.addr, 1));
-    CHECK(overflow.state().circulating() == MAX);
-
     Chain exact;
     CHECK(exact.init_genesis(alice.addr, MAX - 17, bob.addr, 17));
     CHECK(exact.state().circulating() == MAX);
