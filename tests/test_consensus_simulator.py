@@ -1,6 +1,8 @@
 import unittest
 
-from tools.consensus_simulator import (\n    Round, ValidatorLifecycle, four_validator_demo,\n)
+from tools.consensus_simulator import (
+    Round, ValidatorLifecycle, four_validator_demo,
+)
 
 
 class ConsensusSimulatorTests(unittest.TestCase):
