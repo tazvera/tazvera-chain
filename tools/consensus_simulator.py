@@ -69,3 +69,69 @@ def four_validator_demo() -> bool:
 
 if __name__ == "__main__":
     print("COMMITTED" if four_validator_demo() else "NOT COMMITTED")
+
+
+
+@dataclass
+class ValidatorLifecycle:
+    """Educational model for epoch-bound ON/OFF and delayed stake unlock.
+
+    This is not production staking code. It intentionally has no money,
+    signatures, slashing, persistence, or network integration.
+    """
+    stakes: Dict[Validator, int]
+    active: Set[Validator] = field(default_factory=set)
+    epoch: int = 0
+    status_changes: Dict[Validator, tuple] = field(default_factory=dict)
+    unbonding: Dict[Validator, tuple] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.stakes or any(amount <= 0 for amount in self.stakes.values()):
+            raise ValueError("every validator must have positive stake")
+        if not self.active:
+            self.active = set(self.stakes)
+        if not self.active.issubset(self.stakes):
+            raise ValueError("active set contains unknown validator")
+
+    def schedule_status(self, validator: Validator, enabled: bool,
+                        effective_epoch: int) -> None:
+        if validator not in self.stakes:
+            raise ValueError("unknown validator")
+        if effective_epoch <= self.epoch:
+            raise ValueError("status change must target a future epoch")
+        if validator in self.status_changes:
+            raise ValueError("validator already has a pending status change")
+        self.status_changes[validator] = (enabled, effective_epoch)
+
+    def advance_epoch(self, new_epoch: int) -> None:
+        if new_epoch != self.epoch + 1:
+            raise ValueError("epochs must advance one at a time")
+        self.epoch = new_epoch
+        for validator, (enabled, target_epoch) in list(self.status_changes.items()):
+            if target_epoch == self.epoch:
+                if enabled:
+                    self.active.add(validator)
+                else:
+                    self.active.discard(validator)
+                del self.status_changes[validator]
+
+    def request_unbond(self, validator: Validator, delay_epochs: int,
+                       evidence_until_epoch: int) -> None:
+        if validator not in self.stakes:
+            raise ValueError("unknown validator")
+        if validator in self.active:
+            raise ValueError("validator must be OFF before unbonding")
+        if validator in self.unbonding:
+            raise ValueError("unbonding already requested")
+        if delay_epochs <= 0 or evidence_until_epoch < self.epoch:
+            raise ValueError("invalid unbonding or evidence window")
+        self.unbonding[validator] = (
+            self.epoch + delay_epochs, evidence_until_epoch
+        )
+
+    def withdrawable(self, validator: Validator) -> bool:
+        request = self.unbonding.get(validator)
+        if request is None:
+            return False
+        unlock_epoch, evidence_until_epoch = request
+        return self.epoch >= unlock_epoch and self.epoch >= evidence_until_epoch
