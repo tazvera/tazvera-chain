@@ -16,6 +16,7 @@
 
 #ifndef _WIN32
 #include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #else
 #ifndef NOMINMAX
@@ -61,6 +62,74 @@ void remove_file_utf8(const std::string& path) noexcept {
     } catch (...) {
     }
 }
+
+
+// F10: the sidecar lock is deliberately separate from the replaceable chain file.
+// Never unlink or rename it: doing so could let two writers lock different inodes.
+class WriterLock {
+public:
+    WriterLock() = default;
+    WriterLock(const WriterLock&) = delete;
+    WriterLock& operator=(const WriterLock&) = delete;
+    ~WriterLock() { release(); }
+
+    bool acquire(const std::string& lock_path, std::string* error) {
+        const std::string warning =
+            "; warning: NFS/SMB and other network filesystems may not provide reliable OS file locking; "
+            "use a local filesystem for a shared chain file";
+#ifndef _WIN32
+        fd_ = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0644);
+        if (fd_ < 0) {
+            if (error) *error = std::string("could not open permanent writer lock: ") + std::strerror(errno) + warning;
+            return false;
+        }
+        if (::flock(fd_, LOCK_EX | LOCK_NB) != 0) {
+            const int saved = errno;
+            ::close(fd_); fd_ = -1;
+            if (error) *error = std::string("writer lock is busy or unavailable: ") + std::strerror(saved) + warning;
+            return false;
+        }
+#else
+        const std::wstring wide = path_from_utf8(lock_path).wstring();
+        handle_ = ::CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle_ == INVALID_HANDLE_VALUE) {
+            const DWORD code = ::GetLastError();
+            if (error) *error = "could not open permanent writer lock (Windows error " + std::to_string(code) + ")" + warning;
+            return false;
+        }
+        OVERLAPPED overlapped{};
+        if (!::LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                          0, MAXDWORD, MAXDWORD, &overlapped)) {
+            const DWORD code = ::GetLastError();
+            ::CloseHandle(handle_); handle_ = INVALID_HANDLE_VALUE;
+            if (error) *error = "writer lock is busy or unavailable (Windows error " + std::to_string(code) + ")" + warning;
+            return false;
+        }
+        overlapped_ = overlapped;
+#endif
+        return true;
+    }
+
+private:
+    void release() noexcept {
+#ifndef _WIN32
+        if (fd_ >= 0) { (void)::flock(fd_, LOCK_UN); (void)::close(fd_); fd_ = -1; }
+#else
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            (void)::UnlockFileEx(handle_, 0, MAXDWORD, MAXDWORD, &overlapped_);
+            (void)::CloseHandle(handle_); handle_ = INVALID_HANDLE_VALUE;
+        }
+#endif
+    }
+#ifndef _WIN32
+    int fd_{-1};
+#else
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+    OVERLAPPED overlapped_{};
+#endif
+};
 
 
 // v8.7: a crash between writing the temporary file and renaming it leaves <path>.tmp.<pid>.<n> behind for
@@ -492,6 +561,11 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
     static std::atomic<unsigned long> counter{0};
     std::string tmp;
     try {
+        // F10: only writers take this non-blocking exclusive lock. Readers continue to open the
+        // previous complete file while a new temporary file is prepared and atomically renamed.
+        // The sidecar is permanent and is never cleaned up by the stale-temp sweep.
+        WriterLock writer_lock;
+        if (!writer_lock.acquire(path + ".lock", error)) return false;
         // v8.9: inside the try, and the helper is noexcept, so no filesystem error can escape save_chain_json.
         sweep_stale_temp_files(path);   // housekeeping only, never fatal
         const std::string body = to_json(chain);
