@@ -85,11 +85,21 @@ static void test_expiry() {
     CHECK(chain.height() == 2);
 }
 
+// F11: an overflowing genesis cannot be created; the exact uint64 maximum remains legal.
 static void test_receiver_overflow() {
     Key alice = new_key(), bob = new_key();
-    Chain chain; CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
-    CHECK(!chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
-    CHECK(chain.state().balance(alice.addr) == INITIAL); CHECK(chain.height() == 0);
+    {
+        Chain rejected;
+        CHECK(!rejected.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - 100));
+        CHECK(rejected.state().account_count() == 0);
+    }
+    {
+        Chain chain;
+        CHECK(chain.init_genesis(alice.addr, INITIAL, bob.addr, std::numeric_limits<Amount>::max() - INITIAL));
+        CHECK(chain.append_block({make_tx(alice, bob.addr, 5000, 0)}, 1).ok);
+        CHECK(chain.state().balance(bob.addr) == std::numeric_limits<Amount>::max() - INITIAL + 5000);
+        CHECK(chain.state().circulating() + chain.state().burned_total() == std::numeric_limits<Amount>::max());
+    }
 }
 
 static void test_genesis_supply_overflow() {
