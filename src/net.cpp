@@ -2,7 +2,6 @@
 #include "taz/auth.hpp"
 #include "taz/crypto.hpp"
 #include <algorithm>
-#include <atomic>
 #include <vector>
 
 #ifdef _WIN32
@@ -24,13 +23,6 @@ bool would_block() { return WSAGetLastError() == WSAETIMEDOUT; }
 #else
 bool would_block() { return errno == EAGAIN || errno == EWOULDBLOCK; }
 #endif
-
-void put_u32(std::string& out, std::uint32_t v) {
-    out.push_back(static_cast<char>((v >> 24) & 0xff));
-    out.push_back(static_cast<char>((v >> 16) & 0xff));
-    out.push_back(static_cast<char>((v >> 8) & 0xff));
-    out.push_back(static_cast<char>(v & 0xff));
-}
 
 std::uint32_t get_u32(const std::string& in) {
     return (static_cast<std::uint32_t>(static_cast<unsigned char>(in[0])) << 24) |
@@ -284,10 +276,7 @@ bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::
 }
 
 namespace {
-std::atomic<std::uint32_t> next_stream_id{1};
-constexpr std::size_t kFrameOverhead = 5; // length prefix + outer type
 constexpr std::size_t kChunkMetadataBytes = 13; // original type + three u32 values
-constexpr std::size_t kChunkDataBytes = kMaxWireMessageBytes - kFrameOverhead - kChunkMetadataBytes;
 
 void shutdown_connection(const Socket& socket) {
 #ifdef _WIN32
@@ -295,20 +284,6 @@ void shutdown_connection(const Socket& socket) {
 #else
     ::shutdown(socket.raw(), SHUT_RDWR);
 #endif
-}
-
-bool send_frame(const Socket& socket, std::uint8_t type, std::string_view payload,
-                std::string* error) {
-    if (payload.size() + kFrameOverhead > kMaxWireMessageBytes) {
-        if (error) *error = "message too large";
-        return false;
-    }
-    std::string frame;
-    frame.reserve(payload.size() + kFrameOverhead);
-    put_u32(frame, static_cast<std::uint32_t>(payload.size() + 1));
-    frame.push_back(static_cast<char>(type));
-    frame.append(payload.data(), payload.size());
-    return send_all(socket, frame, error);
 }
 
 bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
@@ -334,6 +309,8 @@ bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
 
 bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error,
                   Deadline deadline) {
+    // The send side gets the same treatment as the receive side: if the connection has a deadline, the time left
+    // becomes the socket timeout, so a peer that stops reading cannot hold a send past it.
     if (deadline != no_deadline()) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
@@ -347,49 +324,16 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
             return false;
         }
     }
-    if (type == kMsgChunk || payload.size() > kMaxStreamBytes) {
-        if (error) *error = "message too large";
+    if (payload.size() > kMaxPayloadBytes) {
+        if (error) *error = "the message is larger than this transport allows";
         return false;
     }
-    if (payload.size() + kFrameOverhead <= kMaxWireMessageBytes)
-        return send_frame(socket, type, payload, error);
-
-    const std::size_t total_chunks_size = (payload.size() + kChunkDataBytes - 1) / kChunkDataBytes;
-    if (total_chunks_size == 0 || total_chunks_size > UINT32_MAX) {
-        if (error) *error = "message too large";
-        return false;
-    }
-    const auto total_chunks = static_cast<std::uint32_t>(total_chunks_size);
-    std::uint32_t stream_id = next_stream_id.fetch_add(1, std::memory_order_relaxed);
-    if (stream_id == 0) stream_id = next_stream_id.fetch_add(1, std::memory_order_relaxed);
-
-    std::size_t offset = 0;
-    for (std::uint32_t index = 0; index < total_chunks; ++index) {
-        const std::size_t count = std::min(kChunkDataBytes, payload.size() - offset);
-        std::string chunk;
-        chunk.reserve(kChunkMetadataBytes + count);
-        chunk.push_back(static_cast<char>(type));
-        put_u32(chunk, stream_id);
-        put_u32(chunk, index);
-        put_u32(chunk, total_chunks);
-        chunk.append(payload.data() + offset, count);
-        if (deadline != no_deadline()) {
-            const auto now = std::chrono::steady_clock::now();
-            if (now >= deadline) {
-                if (error) *error = "the peer took longer than the time allowed for this exchange";
-                return false;
-            }
-            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
-            const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
-            if (!set_timeout_ms(socket, ms, nullptr)) {
-                if (error) *error = "could not set the socket timeouts";
-                return false;
-            }
-        }
-        if (!send_frame(socket, kMsgChunk, chunk, error)) return false;
-        offset += count;
-    }
-    return true;
+    std::string frame;
+    frame.reserve(payload.size() + 5);
+    put_u32(frame, static_cast<std::uint32_t>(payload.size()));
+    frame.push_back(static_cast<char>(type));
+    frame.append(payload.data(), payload.size());
+    return send_all(socket, frame, error);
 }
 
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
