@@ -282,6 +282,38 @@ bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::
     return true;
 }
 
+namespace {
+constexpr std::size_t kChunkMetadataBytes = 13; // original type + three u32 values
+
+void shutdown_connection(const Socket& socket) {
+#ifdef _WIN32
+    ::shutdown(static_cast<SOCKET>(socket.raw()), SD_BOTH);
+#else
+    ::shutdown(socket.raw(), SHUT_RDWR);
+#endif
+}
+
+bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
+                std::string* error, Deadline deadline) {
+    std::string header;
+    if (!recv_exact(socket, 4, header, error, deadline)) return false;
+    const std::uint32_t length = get_u32(header);
+    // The legacy length field counts payload bytes only; the type byte and prefix also consume wire space.
+    if (static_cast<std::uint64_t>(length) + 5 > kMaxWireMessageBytes) {
+        if (error) *error = "message too large";
+        shutdown_connection(socket);
+        return false;
+    }
+    std::string type_byte;
+    if (!recv_exact(socket, 1, type_byte, error, deadline)) return false;
+    type = static_cast<std::uint8_t>(type_byte[0]);
+    payload.clear();
+    if (length == 0) return true;
+    if (!recv_exact(socket, length, payload, error, deadline)) return false;
+    return true;
+}
+} // namespace
+
 bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error,
                   Deadline deadline) {
     // The send side gets the same treatment as the receive side: if the connection has a deadline, the time left
@@ -313,18 +345,76 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
 
 bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
                   Deadline deadline) {
-    std::string header;
-    if (!recv_exact(socket, 4, header, error, deadline)) return false;
-    const std::uint32_t length = get_u32(header);
-    if (length > kMaxPayloadBytes) {                 // refuse before allocating anything
-        if (error) *error = "the peer announced a message larger than this transport allows";
-        return false;
+    std::uint8_t wire_type = 0;
+    std::string wire_payload;
+    if (!read_frame(socket, wire_type, wire_payload, error, deadline)) return false;
+    if (wire_type != kMsgChunk) {
+        if (wire_payload.size() > kMaxStreamBytes) {
+            if (error) *error = "message too large";
+            shutdown_connection(socket);
+            return false;
+        }
+        type = wire_type;
+        payload = std::move(wire_payload);
+        return true;
     }
-    std::string type_byte;
-    if (!recv_exact(socket, 1, type_byte, error, deadline)) return false;
-    type = static_cast<std::uint8_t>(type_byte[0]);
-    if (length == 0) { payload.clear(); return true; }
-    return recv_exact(socket, length, payload, error, deadline);
+
+    auto reject = [&](const char* reason) {
+        if (error) *error = reason;
+        shutdown_connection(socket);
+        return false;
+    };
+    auto incomplete = [&]() {
+        if (error) *error = "incomplete stream";
+        shutdown_connection(socket);
+        return false;
+    };
+    if (wire_payload.size() < kChunkMetadataBytes) return reject("message too large");
+
+    const std::uint8_t original_type = static_cast<std::uint8_t>(wire_payload[0]);
+    if (original_type == kMsgChunk) return reject("invalid original message type");
+    const std::uint32_t stream_id = get_u32(wire_payload.substr(1, 4));
+    const std::uint32_t first_index = get_u32(wire_payload.substr(5, 4));
+    const std::uint32_t total_chunks = get_u32(wire_payload.substr(9, 4));
+    if (total_chunks == 0 || total_chunks > kMaxStreamBytes)
+        return reject("stream too large");
+    if (first_index != 0) return reject("chunk out of order");
+    if (wire_payload.size() == kChunkMetadataBytes) return reject("message too large");
+
+    std::string assembled;
+    const std::size_t first_data = wire_payload.size() - kChunkMetadataBytes;
+    if (first_data > kMaxStreamBytes) return reject("stream too large");
+    assembled.append(wire_payload.data() + kChunkMetadataBytes, first_data);
+
+    for (std::uint32_t expected = 1; expected < total_chunks; ++expected) {
+        std::uint8_t next_type = 0;
+        std::string next_payload;
+        if (!read_frame(socket, next_type, next_payload, error, deadline)) {
+            if (error && error->find("message too large") == 0) {
+                shutdown_connection(socket);
+                return false;
+            }
+            return incomplete();
+        }
+        if (next_type != kMsgChunk) return reject("incomplete stream");
+        if (next_payload.size() < kChunkMetadataBytes) return reject("message too large");
+        const std::uint8_t next_original = static_cast<std::uint8_t>(next_payload[0]);
+        if (next_original == kMsgChunk) return reject("invalid original message type");
+        if (next_original != original_type) return reject("original_type changed");
+        const std::uint32_t next_stream = get_u32(next_payload.substr(1, 4));
+        const std::uint32_t next_index = get_u32(next_payload.substr(5, 4));
+        const std::uint32_t next_total = get_u32(next_payload.substr(9, 4));
+        if (next_total != total_chunks) return reject("total_chunks changed");
+        if (next_stream != stream_id || next_index != expected) return reject("chunk out of order");
+        const std::size_t data_size = next_payload.size() - kChunkMetadataBytes;
+        if (data_size == 0) return reject("message too large");
+        if (data_size > kMaxStreamBytes - assembled.size()) return reject("stream too large");
+        assembled.append(next_payload.data() + kChunkMetadataBytes, data_size);
+    }
+    if (assembled.size() > kMaxStreamBytes) return reject("stream too large");
+    type = original_type;
+    payload = std::move(assembled);
+    return true;
 }
 
 bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error,
