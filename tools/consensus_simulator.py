@@ -98,6 +98,8 @@ class ValidatorLifecycle:
                         effective_epoch: int) -> None:
         if validator not in self.stakes:
             raise ValueError("unknown validator")
+        if validator in self.unbonding:
+            raise ValueError("cannot change status while unbonding")
         if effective_epoch <= self.epoch:
             raise ValueError("status change must target a future epoch")
         if validator in self.status_changes:
@@ -126,6 +128,8 @@ class ValidatorLifecycle:
             raise ValueError("validator must be OFF before unbonding")
         if validator in self.unbonding:
             raise ValueError("unbonding already requested")
+        if validator in self.status_changes:
+            raise ValueError("pending status change must settle before unbonding")
         if delay_epochs <= 0 or evidence_until_epoch < self.epoch:
             raise ValueError("invalid unbonding or evidence window")
         self.unbonding[validator] = (
