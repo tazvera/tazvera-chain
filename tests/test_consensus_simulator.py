@@ -102,6 +102,18 @@ class ValidatorLifecycleTests(unittest.TestCase):
         self.registry.advance_epoch(4)
         self.assertTrue(self.registry.withdrawable("D"))
 
+    def test_unbond_rejected_while_activation_is_pending(self):
+        self.registry.schedule_status("D", True, effective_epoch=2)
+        with self.assertRaises(ValueError):
+            self.registry.request_unbond("D", 2, 3)
+
+    def test_status_change_rejected_during_unbonding(self):
+        self.registry.schedule_status("D", False, effective_epoch=1)
+        self.registry.advance_epoch(1)
+        self.registry.request_unbond("D", 2, 3)
+        with self.assertRaises(ValueError):
+            self.registry.schedule_status("D", True, effective_epoch=2)
+
     def test_unbond_cannot_be_requested_twice(self):
         self.registry.schedule_status("D", False, effective_epoch=1)
         self.registry.advance_epoch(1)
