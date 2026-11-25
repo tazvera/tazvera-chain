@@ -462,7 +462,7 @@ static void n19_stream_over_32_mib_is_refused_before_growth() {
     Listener listener; Socket server, client; std::string err;
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
-    raw_chunk(client, 10, 0, 1, std::string(65519, 'x'), err);
+    raw_chunk(client, 10, 0, 513, std::string(65519, 'x'), err);
     // Advertise an impossible chunk count in the first chunk: 513 * 65519 exceeds 32 MiB.
     // Receiver must reject from metadata without allocating the claimed stream.
     std::uint8_t type = 0; std::string payload;
