@@ -109,3 +109,13 @@ These are two separate operations and must never be treated as the same switch.
 - The voting-power denominator for a height is the validator set committed for that height; all honest nodes must calculate the same threshold.
 - Tests must cover OFF/ON requests, replayed requests, requests during a partition, epoch-boundary activation, validator restart, unbonding delay, pending equivocation evidence, and attempts at early withdrawal.
 - This section is a design requirement only. It does not implement validator controls or enable staking withdrawals.
+
+
+## 10. Simulator coverage added (transport only)
+
+The educational network simulator models deterministic message delay, duplicate
+delivery, FIFO/LIFO reordering, message drops across configured partitions, and
+partition healing. These tests validate the transport fault harness only.
+They do **not** demonstrate BFT safety or liveness: validator locks,
+cryptographic signatures, voting-power quorum, equivocation evidence,
+persistent restart recovery, and conflicting-commit proofs remain unimplemented.
