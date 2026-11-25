@@ -31,7 +31,9 @@ inline constexpr socket_t kInvalidSocket = -1;
 // (or by a producer), could never be synced to any other node. test_hardening91 measures the worst-case block and
 // requires it to fit. The bound is still checked BEFORE anything is allocated, and recv_exact no longer reserves
 // what the peer announced, so a four-byte header cannot buy a 32 MiB allocation.
-inline constexpr std::uint32_t kMaxPayloadBytes = 32u * 1024u * 1024u;   // one message, not a stream
+inline constexpr std::uint32_t kMaxPayloadBytes = 32u * 1024u * 1024u;   // maximum reassembled logical payload
+inline constexpr std::uint32_t kMaxWireMessageBytes = 64u * 1024u;       // complete frame, including 4-byte length
+inline constexpr std::uint32_t kMaxStreamBytes = 32u * 1024u * 1024u;   // maximum reassembled stream
 inline constexpr std::uint8_t kMsgHello = 1;
 inline constexpr std::uint8_t kMsgChain = 2;   // a whole chain, as the export format writes it
 inline constexpr std::uint8_t kMsgBlocks = 3;  // one block, as the export format writes it
@@ -39,6 +41,7 @@ inline constexpr std::uint8_t kMsgWant = 4;    // "give me your block at this he
 inline constexpr std::uint8_t kMsgNoBlock = 5; // "I do not have that block"
 inline constexpr std::uint8_t kMsgAuth = 6;    // an identity proof bound to this connection
 inline constexpr std::uint8_t kMsgAccept = 7;  // the accepter confirming it will talk to this peer
+inline constexpr std::uint8_t kMsgChunk = 8;   // transport chunk carrying an original message type
 inline constexpr int kTimeoutMs = 3000;
 
 // WSAStartup on Windows, nothing elsewhere. Call once before any socket work.

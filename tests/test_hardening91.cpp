@@ -73,7 +73,7 @@ static void h3_worst_case_block_fits() {
     CHECK(send_all(server, header, &err));
     std::uint8_t type = 0; std::string payload;
     CHECK(!recv_message(client, type, payload, &err));
-    CHECK(err.find("larger than this transport allows") != std::string::npos);
+    CHECK(err.find("message too large") != std::string::npos);
     // a big (3 MiB) message still arrives intact (on a fresh connection: the refused one is dropped, as a real node does)
     Listener l2; Socket server2, client2;
     CHECK(connected_pair(l2, server2, client2, err));
