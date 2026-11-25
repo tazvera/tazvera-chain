@@ -7,6 +7,10 @@ class ConsensusSimulatorTests(unittest.TestCase):
     def setUp(self):
         self.sim = Round({"A", "B", "C", "D"})
 
+    def establish_prevote_quorum(self, block="x"):
+        for validator in ("A", "B", "C"):
+            self.sim.vote("prevote", validator, block)
+
     def test_three_of_four_prevotes_and_precommits_commit(self):
         self.assertTrue(four_validator_demo())
 
@@ -15,7 +19,12 @@ class ConsensusSimulatorTests(unittest.TestCase):
         self.sim.vote("prevote", "B", "x")
         self.assertFalse(self.sim.has_prevote_quorum("x"))
 
+    def test_precommit_requires_prevote_quorum(self):
+        with self.assertRaises(ValueError):
+            self.sim.vote("precommit", "A", "x")
+
     def test_two_precommits_do_not_commit(self):
+        self.establish_prevote_quorum()
         self.sim.vote("precommit", "A", "x")
         self.sim.vote("precommit", "B", "x")
         self.assertIsNone(self.sim.committed)
@@ -33,7 +42,8 @@ class ConsensusSimulatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.sim.vote("proposal", "A", "x")
 
-    def test_no_committing_two_blocks_with_same_votes(self):
+    def test_commit_freezes_height(self):
+        self.establish_prevote_quorum()
         for validator in ("A", "B", "C"):
             self.sim.vote("precommit", validator, "x")
         self.assertEqual(self.sim.committed, "x")
