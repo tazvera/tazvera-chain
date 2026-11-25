@@ -438,7 +438,13 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
     for (std::uint32_t expected = 1; expected < total_chunks; ++expected) {
         std::uint8_t next_type = 0;
         std::string next_payload;
-        if (!read_frame(socket, next_type, next_payload, error, deadline)) return incomplete();
+        if (!read_frame(socket, next_type, next_payload, error, deadline)) {
+            if (error && *error == "message too large") {
+                shutdown_connection(socket);
+                return false;
+            }
+            return incomplete();
+        }
         if (next_type != kMsgChunk) return reject("incomplete stream");
         if (next_payload.size() < kChunkMetadataBytes) return reject("message too large");
         const std::uint8_t next_original = static_cast<std::uint8_t>(next_payload[0]);
