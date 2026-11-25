@@ -401,10 +401,13 @@ static void n21_chunked_one_mib_roundtrip() {
     Listener l; Socket server,client; std::string err;
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     const std::string source(1024*1024,'B');
+    std::uint8_t type=0; std::string got, recv_err;
+    bool received=false;
+    std::thread receiver([&] { received=recv_message(server,type,got,&recv_err); });
     CHECK(send_message(client,kMsgBlocks,source,&err));
-    std::uint8_t type=0; std::string got;
-    CHECK(recv_message(server,type,got,&err));
-    CHECK(type==kMsgBlocks); CHECK(got==source);
+    receiver.join();
+    CHECK(received); CHECK(type==kMsgBlocks); CHECK(got==source);
+    if (!recv_err.empty()) std::cerr << "  chunk receive: " << recv_err << "\\n";
 }
 static void n22_small_message_stays_direct() {
     Listener l; Socket server,client; std::string err;
