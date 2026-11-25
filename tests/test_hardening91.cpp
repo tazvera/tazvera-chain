@@ -170,6 +170,47 @@ static void add_transfers(Chain& c, const Key& from, const Key& to, std::uint64_
     if (!r.ok) { std::cerr << "setup failed: " << r.error << "\n"; std::exit(2); }
 }
 
+// ---- F1: a node more than 1000 blocks behind catches up over bounded polling rounds ----------------------------
+static void f1_syncs_when_peer_is_more_than_1000_blocks_ahead() {
+    Key a = new_key(), b = new_key();
+    Chain behind = two_account_chain(a, b, 4000000000000ULL);
+    Chain ahead = behind;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    // Keep every block timestamp inside the receiver's +120s clock allowance while creating a 1001-block gap.
+    const std::int64_t first_stamp = now - 1100;
+    for (std::uint64_t i = 0; i < 1001; ++i) {
+        const Transaction tx = transfer(a, b.addr, 1, i);
+        const ChainResult r = ahead.append_block({tx}, first_stamp + static_cast<std::int64_t>(i));
+        if (!r.ok) { std::cerr << "F1 setup failed at block " << (i + 1) << ": " << r.error << "\n"; std::exit(2); }
+    }
+    CHECK(ahead.height() == 1001);
+    const fs::path dir = fs::temp_directory_path() / "taz-f1-over-1000";
+    std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+    std::string err;
+    CHECK(save_chain_json(behind, (dir / "behind.json").string(), &err));
+    CHECK(save_chain_json(ahead, (dir / "ahead.json").string(), &err));
+    const std::uint16_t port = free_port();
+    const std::string server_out = (dir / "server.out").string();
+    const std::string chain_arg = " --chain \"" + (dir / "behind.json").string() + "\" --expect-genesis " + pin(behind);
+    const std::string server = node() + chain_arg + " --serve " + std::to_string(port) +
+                               " --max-peers 6 --serve-timeout 60";
+    CHECK(run_in_background(server, server_out));
+    CHECK(wait_for(server_out, "listening", 10));
+    // Six successful connections are needed: five batches of 200 and one batch of 1.
+    // The seventh attempt sees the server stop after its six-peer quota; retries=1 makes the poller exit.
+    const std::string client = node() + " --chain \"" + (dir / "ahead.json").string() +
+                               "\" --expect-genesis " + pin(ahead) + " --peer " + std::to_string(port) +
+                               " --every 1 --retries 1";
+    (void)run_waiting(client, (dir / "client.out").string());
+    if (!wait_for(server_out, "served 6 of 6", 60)) {
+        std::cerr << "  F1 server output:\\n" << slurp(server_out) << "\n";
+        std::cerr << "  F1 client output:\\n" << slurp(dir / "client.out") << "\n";
+    }
+    CHECK(wait_for(server_out, "served 6 of 6", 1));
+    CHECK(height_of(dir / "behind.json", behind) == 1001);
+}
+
 static void n1_future_block_cannot_jam_the_chain() {
     Key a = new_key(), b = new_key();
     Chain good = two_account_chain(a, b, 1000000000);
@@ -287,6 +328,7 @@ int main() {
     // that, and the launcher is checked by waiting for the node's own "listening" line rather than by trusting
     // that it started.
     {
+        f1_syncs_when_peer_is_more_than_1000_blocks_ahead();
         n1_future_block_cannot_jam_the_chain();
         n2_a_150_transfer_block_syncs();
         n3_block_over_the_byte_budget_still_syncs();
@@ -295,7 +337,7 @@ int main() {
         n6_serve_timeout_ends_the_node();
     }
     std::error_code ec;
-    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6"}) fs::remove_all(fs::temp_directory_path() / d, ec);
+    if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz-f1-over-1000", "taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6"}) fs::remove_all(fs::temp_directory_path() / d, ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Hardening v9.1 tests passed. This is not a security audit.\n";
     return EXIT_SUCCESS;

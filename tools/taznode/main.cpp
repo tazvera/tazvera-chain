@@ -606,13 +606,10 @@ int main(int argc, char** argv) {
                 std::cout << "taznode: already in sync at height " << chain.height() << "; nothing to send\n";
                 return true;
             }
-            // Refuse before receiving: the hello already states the peer's height, and every block is replayed.
-            constexpr std::uint64_t kMaxSyncAhead = 1000;
-            if (theirs.best_height > chain.height() + kMaxSyncAhead) {
-                std::cerr << "taznode: the peer claims to be " << (theirs.best_height - chain.height())
-                          << " blocks ahead; more than " << kMaxSyncAhead << " is refused before syncing\n";
-                return false;
-            }
+            // The hello height is not a per-connection work budget. send_blocks/receive_blocks already cap
+            // each exchange at kMaxBlocksPerSync (200 blocks, plus time and byte budgets). Refusing a peer
+            // merely because its total height is far ahead permanently strands new or long-offline nodes.
+            // Let one bounded batch through; --every reconnects and continues from the newly saved height.
             // Both sides see the same two hellos, so both compute the same direction: the one that is ahead
             // sends, the one that is behind receives. Nobody waits for data the other decided not to send.
             if (chain.height() > theirs.best_height)
