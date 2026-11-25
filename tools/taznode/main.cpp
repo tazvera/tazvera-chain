@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <set>
 #include <fstream>
 #include <thread>
 #include <iostream>
@@ -44,6 +45,8 @@ constexpr const char* kUsage =
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
     "  --require-identity        refuse any peer that does not prove an identity (needs --identity)\n"
+    "  --allow-peer <address>    allow this 40-hex peer address (repeatable; needs --require-identity)\n"
+    "  --allow-peer-file <path>  read allowed 40-hex peer addresses, one per line\n"
     "  --help                    this text\n"
     "\n"
     "Loading a node that cannot name its chain does not start: without --expect-genesis it exits non-zero.\n"
@@ -151,6 +154,10 @@ int main(int argc, char** argv) {
     std::string every_text;
     std::string retries_text;
     std::string identity_file;
+    std::vector<std::string> allow_peer_texts;
+    std::vector<std::string> allow_peer_files;
+    std::set<std::string> allowed_peers;
+    bool allowlist_enabled = false;
     bool require_identity = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
@@ -183,6 +190,8 @@ int main(int argc, char** argv) {
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
         if (a == "--retries" && i + 1 < argc) { retries_text = argv[++i]; continue; }
         if (a == "--identity" && i + 1 < argc) { identity_file = argv[++i]; continue; }
+        if (a == "--allow-peer" && i + 1 < argc) { allowlist_enabled = true; allow_peer_texts.emplace_back(argv[++i]); continue; }
+        if (a == "--allow-peer-file" && i + 1 < argc) { allowlist_enabled = true; allow_peer_files.emplace_back(argv[++i]); continue; }
         if (a == "--require-identity") { require_identity = true; continue; }
         if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
         if (a == "--transfer" && i + 1 < argc) {
@@ -191,6 +200,38 @@ int main(int argc, char** argv) {
         }
         return usage_error("unknown argument \"" + a + "\"");
     }
+    // Validate allowlist configuration before loading the chain or opening sockets. Empty files mean deny all.
+    if (allowlist_enabled && !require_identity)
+        return usage_error("--allow-peer and --allow-peer-file require --require-identity");
+    auto add_allowed_peer = [&](const std::string& value, const std::string& source) -> bool {
+        taz::Address address{};
+        if (!parse_address(value, address)) {
+            std::cerr << "taznode: invalid peer address in " << source
+                      << ": expected exactly 40 hexadecimal characters\n";
+            return false;
+        }
+        allowed_peers.insert(taz::to_hex(address));
+        return true;
+    };
+    for (const std::string& value : allow_peer_texts)
+        if (!add_allowed_peer(value, "--allow-peer")) return 2;
+    for (const std::string& path : allow_peer_files) {
+        std::ifstream in(path);
+        if (!in) return usage_error("cannot open peer allowlist file: " + path);
+        std::string line;
+        std::size_t line_number = 0;
+        while (std::getline(in, line)) {
+            ++line_number;
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+            std::size_t first = 0;
+            while (first < line.size() && (line[first] == ' ' || line[first] == '\t')) ++first;
+            line.erase(0, first);
+            if (line.empty()) continue;
+            if (!add_allowed_peer(line, path + ":" + std::to_string(line_number))) return 2;
+        }
+        if (in.bad()) return usage_error("cannot read peer allowlist file: " + path);
+    }
+
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
         if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
@@ -573,6 +614,25 @@ int main(int argc, char** argv) {
                 }
             }
 
+            // Allowlist checks happen only after the connection-bound identity proof has been verified.
+            if (allowlist_enabled) {
+                const std::string peer_address = taz::to_hex(taz::address_from_pubkey(theirs.pubkey));
+                if (allowed_peers.find(peer_address) == allowed_peers.end()) {
+                    const std::string reason = "peer address " + peer_address + " is not in the peer allowlist";
+                    std::cerr << "taznode: peer refused: " << reason << "\n";
+                    if (!we_speak_first) {
+                        (void)taz::send_message(sock, taz::kMsgNoBlock, reason, &net_err, deadline);
+                    } else {
+                        std::uint8_t refusal_type = 0;
+                        std::string refusal_payload;
+                        if (taz::recv_message(sock, refusal_type, refusal_payload, &net_err, deadline) &&
+                            refusal_type == taz::kMsgNoBlock)
+                            std::cerr << "taznode: remote peer refused: " << refusal_payload << "\n";
+                    }
+                    return false;
+                }
+            }
+
             // A refusal must be visible to the other side. Without this the connecting node had already read its
             // peer's auth message, saw nothing wrong, and exited 0 while the server had refused it.
             if (!we_speak_first) {
@@ -588,7 +648,10 @@ int main(int argc, char** argv) {
                     return false;
                 }
                 if (accept_type != taz::kMsgAccept) {
-                    std::cerr << "taznode: the peer did not confirm the connection\n";
+                    if (accept_type == taz::kMsgNoBlock && !accept_payload.empty())
+                        std::cerr << "taznode: the peer refused the connection: " << accept_payload << "\n";
+                    else
+                        std::cerr << "taznode: the peer did not confirm the connection\n";
                     return false;
                 }
             }

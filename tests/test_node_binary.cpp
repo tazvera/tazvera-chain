@@ -241,6 +241,106 @@ int main() {
     server_thread.join();
     CHECK(client_rc == 0);
     CHECK(server_rc == 0);
+
+    // F12 allowlist regressions: CLI validation must happen before any socket is opened.
+    const std::string allow_file = tmpdir() + "/allow-peers.txt";
+    const std::string empty_allow_file = tmpdir() + "/empty-allow-peers.txt";
+    const std::string bad_allow_file = tmpdir() + "/bad-allow-peers.txt";
+    write_text(allow_file, taz::to_hex(taz::address_from_pubkey(pk2)) + "\n");
+    write_text(empty_allow_file, "");
+    write_text(bad_allow_file, std::string(39, 'a') + "\n");
+    const std::string base_args = " --chain " + q(prod_chain) + " --expect-genesis " + prod_pin;
+    CHECK(run(exe + base_args + " --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk2)) + " --peer 1") == 2);
+    CHECK(run(exe + base_args + " --allow-peer " + std::string(40, 'z') +
+              " --identity " + q(key_file) + " --require-identity --peer 1") == 2);
+    CHECK(run(exe + base_args + " --allow-peer-file " + q(bad_allow_file) +
+              " --identity " + q(key_file) + " --require-identity --peer 1") == 2);
+    CHECK(run(exe + base_args + " --allow-peer-file " + q(allow_file) +
+              " --identity " + q(key_file) + " --require-identity --peer 1") == 3);
+
+    // Listed identity is accepted by the server; the file form is also exercised here.
+    CHECK(taz::net_startup(&net_error));
+    taz::Listener allow_reserved;
+    CHECK(taz::listen_loopback(0, allow_reserved, &net_error));
+    const std::uint16_t allow_port = allow_reserved.port;
+    allow_reserved.socket.close();
+    const std::string allow_log = tmpdir() + "/allow-server.log";
+    const std::string allow_cmd = exe + base_args + " --serve " + std::to_string(allow_port) +
+        " --max-peers 1 --serve-timeout 8 --identity " + q(key_file) +
+        " --require-identity --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk)) +
+        " --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk2)) +
+        " --allow-peer-file " + q(allow_file) + " > " + q(allow_log) + " 2>&1";
+    int allow_server_rc = -1;
+    std::thread allow_server_thread([&] { allow_server_rc = run(allow_cmd); });
+    bool allow_ready = false;
+    for (int attempt = 0; attempt < 50 && !allow_ready; ++attempt) {
+        allow_ready = slurp(allow_log).find("listening on 127.0.0.1:") != std::string::npos;
+        if (!allow_ready) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    CHECK(allow_ready);
+    const int allow_client_rc = allow_ready
+        ? run(exe + base_args + " --peer " + std::to_string(allow_port) +
+              " --identity " + q(client_identity) + " --require-identity")
+        : -1;
+    allow_server_thread.join();
+    CHECK(allow_client_rc == 0);
+    CHECK(allow_server_rc == 0);
+    fs::remove(allow_log, ec);
+
+    // A peer whose valid identity is not listed is refused with an explicit allowlist reason.
+    CHECK(taz::listen_loopback(0, allow_reserved, &net_error));
+    const std::uint16_t deny_port = allow_reserved.port;
+    allow_reserved.socket.close();
+    const std::string deny_log = tmpdir() + "/deny-server.log";
+    const std::string deny_cmd = exe + base_args + " --serve " + std::to_string(deny_port) +
+        " --max-peers 1 --serve-timeout 2 --identity " + q(key_file) +
+        " --require-identity --allow-peer " + taz::to_hex(taz::address_from_pubkey(pk)) +
+        " > " + q(deny_log) + " 2>&1";
+    int deny_server_rc = -1;
+    std::thread deny_server_thread([&] { deny_server_rc = run(deny_cmd); });
+    bool deny_ready = false;
+    for (int attempt = 0; attempt < 50 && !deny_ready; ++attempt) {
+        deny_ready = slurp(deny_log).find("listening on 127.0.0.1:") != std::string::npos;
+        if (!deny_ready) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    CHECK(deny_ready);
+    const int deny_client_rc = deny_ready
+        ? run(exe + base_args + " --peer " + std::to_string(deny_port) +
+              " --identity " + q(client_identity) + " --require-identity")
+        : -1;
+    deny_server_thread.join();
+    CHECK(deny_client_rc == 3);
+    CHECK(deny_server_rc == 3);
+    CHECK(slurp(deny_log).find("not in the peer allowlist") != std::string::npos);
+    fs::remove(deny_log, ec);
+
+    // An empty allowlist is intentionally deny-all, not an accidental allow-all.
+    CHECK(taz::listen_loopback(0, allow_reserved, &net_error));
+    const std::uint16_t empty_port = allow_reserved.port;
+    allow_reserved.socket.close();
+    const std::string empty_log = tmpdir() + "/empty-allow-server.log";
+    const std::string empty_cmd = exe + base_args + " --serve " + std::to_string(empty_port) +
+        " --max-peers 1 --serve-timeout 2 --identity " + q(key_file) +
+        " --require-identity --allow-peer-file " + q(empty_allow_file) + " > " + q(empty_log) + " 2>&1";
+    int empty_server_rc = -1;
+    std::thread empty_server_thread([&] { empty_server_rc = run(empty_cmd); });
+    bool empty_ready = false;
+    for (int attempt = 0; attempt < 50 && !empty_ready; ++attempt) {
+        empty_ready = slurp(empty_log).find("listening on 127.0.0.1:") != std::string::npos;
+        if (!empty_ready) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    CHECK(empty_ready);
+    const int empty_client_rc = empty_ready
+        ? run(exe + base_args + " --peer " + std::to_string(empty_port) +
+              " --identity " + q(client_identity) + " --require-identity")
+        : -1;
+    empty_server_thread.join();
+    CHECK(empty_client_rc == 3);
+    CHECK(empty_server_rc == 3);
+    CHECK(slurp(empty_log).find("not in the peer allowlist") != std::string::npos);
+    fs::remove(empty_log, ec);
+    fs::remove(allow_file, ec); fs::remove(empty_allow_file, ec); fs::remove(bad_allow_file, ec);
+
     taz::net_cleanup();
     fs::remove(client_identity, ec);
     fs::remove(server_log, ec);
