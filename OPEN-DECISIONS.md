@@ -41,3 +41,15 @@
 - Overflow by one (uint64 max + 1) is rejected for both genesis overloads.
 - Exact uint64 maximum is accepted for both overloads.
 - Rejection leaves chain state and producer configuration unchanged and permits a subsequent valid genesis.
+
+
+# Explorer — deferred until the RWA phase
+
+The following Explorer issues are confirmed by code review and intentionally remain open.
+They are not part of F10; address them together with the planned RWA-era Explorer redesign.
+
+1. **Chain identity validation:** Explorer does not enforce the expected chain_id against the protocol's fixed chain identity. A file from a different chain identity may be displayed as if it belongs to this chain.
+2. **Duplicate genesis address edge case:** the duplicate-address check can be bypassed when the first genesis account has zero balance. The Explorer must reject duplicate addresses regardless of either balance.
+3. **Producer signature verification:** Explorer does not independently verify producer signatures. The RWA-era redesign must either implement verification consistent with the C++ core or clearly refuse to present producer authenticity as verified.
+
+**Scope decision:** no Explorer code changes in F10. These three items are deferred to the RWA phase, when the Explorer will be redesigned.
