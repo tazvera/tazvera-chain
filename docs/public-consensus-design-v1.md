@@ -80,3 +80,32 @@ The current prototype is not sufficient as-is:
 ## 9. Non-goals for this draft
 
 This draft does not claim the chain is ready for public testnet, does not define a production token economy, does not authorize real funds, and does not replace an independent security audit.
+
+
+## 4A. Validator ON/OFF and stake unlock rules
+
+These are two separate operations and must never be treated as the same switch.
+
+### Validator status: ON / OFF
+
+- **ON (Active):** the validator is eligible for proposer selection and may PREVOTE/PRECOMMIT, provided its key and validator-set entry are valid.
+- **OFF (Inactive):** the validator voluntarily stops participating. It is excluded from the active voting-power denominator only through a deterministic, height-bound validator-set update; nodes must not locally remove it immediately.
+- An OFF request is signed by the validator's authorized consensus key (or submitted through the defined governance/staking transaction), has a nonce and target epoch/height, and is replay-protected.
+- The change takes effect only at a finalized epoch boundary after the required validator-set update is committed. Until then, the validator follows the currently committed set.
+- Reactivating an OFF validator requires a new valid ON request and takes effect only at a later finalized epoch boundary. The validator must pass key/eligibility checks again.
+- If an operator simply goes offline, the network must not silently rewrite the validator set. It remains in the committed set until the protocol's scheduled update rule applies.
+
+### Stake unlock / unbonding
+
+- **Unlock is not OFF.** Turning a validator OFF does not release its bonded stake.
+- A separate signed UNBOND request starts a protocol-defined unbonding delay. The stake remains bonded and unavailable for transfer during that delay.
+- Stake becomes withdrawable only after the unbonding period has elapsed, all applicable pending penalties/evidence windows have been checked, and a finalized state transition marks it withdrawable.
+- No instant withdrawal, administrator-only unlock, or manual database edit is permitted.
+- Exact unbonding duration, evidence window, minimum stake, and penalty rules are unresolved parameters. They must be fixed in a separate staking-economics specification before implementation; do not invent values in code.
+
+### Safety requirements
+
+- Validator-set changes must be deterministic and committed as part of consensus state.
+- The voting-power denominator for a height is the validator set committed for that height; all honest nodes must calculate the same threshold.
+- Tests must cover OFF/ON requests, replayed requests, requests during a partition, epoch-boundary activation, validator restart, unbonding delay, pending equivocation evidence, and attempts at early withdrawal.
+- This section is a design requirement only. It does not implement validator controls or enable staking withdrawals.
