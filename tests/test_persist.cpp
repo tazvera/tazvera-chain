@@ -19,6 +19,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <fcntl.h>
 #include <unistd.h>
 #else
 #include <windows.h>
@@ -682,11 +684,22 @@ static void t19_writer_lock_process_and_crash() {
 
 int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--hold-writer") {
-        testing::persist_hold_after_lock = true;
-        testing::persist_lock_ready_file = argv[3];
-        Key a = new_key(), b = new_key(); Chain c = plain_chain(a, b); std::string err;
-        (void)save_chain_json(c, argv[2], &err);
-        return EXIT_FAILURE;
+#ifndef _WIN32
+        const std::string lock_name = std::string(argv[2]) + ".lock";
+        const int fd = ::open(lock_name.c_str(), O_CREAT | O_RDWR, 0644);
+        if (fd < 0 || ::flock(fd, LOCK_EX | LOCK_NB) != 0) return EXIT_FAILURE;
+        { std::ofstream ready(argv[3]); ready << "locked"; }
+        for (;;) ::pause();
+#else
+        const std::wstring lock_name = utf8_path(std::string(argv[2]) + ".lock").wstring();
+        HANDLE lock = ::CreateFileW(lock_name.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (lock == INVALID_HANDLE_VALUE) return EXIT_FAILURE;
+        OVERLAPPED ov{};
+        if (!::LockFileEx(lock, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &ov)) return EXIT_FAILURE;
+        { std::ofstream ready(argv[3]); ready << "locked"; }
+        for (;;) ::Sleep(1000);
+#endif
     }
     g_test_executable = argv[0];
     std::srand(4242);
