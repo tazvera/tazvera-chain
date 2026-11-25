@@ -9,6 +9,7 @@
 //   N3  a block larger than the sync byte budget is still accepted (once, then the budget stops the round)
 //   N4  --transfer together with a peer mode is an error, not a silent no-op (already fixed on main; kept as a regression test)
 // N1-N5 start the real taznode binary on every platform: POSIX uses "&", Windows uses cmd's "start /b".
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -41,6 +42,7 @@ struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; if (!generate_keypair(k.sk, k.pk)) std::exit(2); k.addr = address_from_pubkey(k.pk); return k; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) {
     Transaction tx; tx.from = f.addr; tx.to = to; tx.amount = a; tx.fee = FEE_TRANSFER_V1; tx.nonce = n; tx.pubkey = f.pk;
+    tx.network_id = taztest::g_net;
     if (!sign(f.sk, tx.signable_bytes(), tx.signature)) std::exit(2);
     return tx;
 }
@@ -166,7 +168,7 @@ static std::uint64_t height_of(const fs::path& file, const Chain& like) {
     return c.height();
 }
 static Chain two_account_chain(const Key& a, const Key& b, Amount balance) {
-    Chain c; if (!c.init_genesis(a.addr, balance, b.addr, 0)) std::exit(2); return c;
+    Chain c; if (!c.init_genesis(a.addr, balance, b.addr, 0)) std::exit(2); taztest::use(c); return c;
 }
 static void add_transfers(Chain& c, const Key& from, const Key& to, std::uint64_t count) {
     std::vector<Transaction> txs; for (std::uint64_t i = 0; i < count; ++i) txs.push_back(transfer(from, to.addr, 1, i));

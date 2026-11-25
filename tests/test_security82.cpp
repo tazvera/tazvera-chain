@@ -1,5 +1,6 @@
 // Core v8.2 security tests: genesis commitment, guardian/veto lockout rule, recovery, restart (save/load mid-recovery), fuzzing.
 // Every CHECK below is a real condition (no "|| true"). Not a security audit.
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -16,7 +17,7 @@ static int failures = 0;
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
 static Transaction base(const Key& f, std::uint64_t n) { Transaction tx; tx.from = f.addr; tx.nonce = n; tx.pubkey = f.pk; return tx; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) { Transaction tx = base(f, n); tx.to = to; tx.amount = a; resign(tx, f); return tx; }
 static Transaction setg(const Key& f, std::vector<Address> l, std::uint64_t thr, const Address& veto, std::uint64_t n) {
@@ -48,7 +49,7 @@ struct World {                                   // o = owner (possibly stolen),
     Key o = new_key(), g[3] = {new_key(), new_key(), new_key()}, n = new_key(), x = new_key();
     Chain c; Amount total = BIG;
     World() {
-        CHECK(c.init_genesis(o.addr, BIG, n.addr, 0));       // n has a ZERO genesis balance
+        CHECK(c.init_genesis(o.addr, BIG, n.addr, 0)); taztest::use(c);       // n has a ZERO genesis balance
         CHECK(put(c, {transfer(o, g[0].addr, FUND, 0), transfer(o, g[1].addr, FUND, 1), transfer(o, g[2].addr, FUND, 2), transfer(o, x.addr, FUND, 3)}));
         CHECK(put(c, {setg(o, {g[0].addr, g[1].addr, g[2].addr}, 2, Address{}, 4)}));
     }
@@ -66,7 +67,7 @@ static void test_genesis() {
     CHECK(genesis_commitment_of(w.o.addr, BIG, z.addr, 0) != gc);          // zero-balance address is covered
     CHECK(genesis_commitment_of(w.o.addr, BIG, w.n.addr, 1) != gc);        // balance is covered
     CHECK(genesis_commitment_of(w.o.addr, BIG - 1, w.n.addr, 0) != gc);
-    { Chain a, b; CHECK(a.init_genesis(w.o.addr, BIG, w.n.addr, 0)); CHECK(b.init_genesis(w.o.addr, BIG, z.addr, 0));
+    { Chain a, b; CHECK(a.init_genesis(w.o.addr, BIG, w.n.addr, 0)); taztest::use(a); CHECK(b.init_genesis(w.o.addr, BIG, z.addr, 0));
       CHECK(a.blocks()[0].hash() != b.blocks()[0].hash()); }                // two chains differing only in a zero-balance address get different block 0
     // attack: swap the zero-balance address and fix up the commitment field; block 0 / block 1 must refuse
     const std::string text = to_json(w.c);
@@ -247,12 +248,12 @@ static void test_fuzz_transactions() {
 // distinguishes "a chain" from "the chain I meant to join".
 static void test_genesis_pin() {
     Key a = new_key(), b = new_key(), d = new_key();
-    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); CHECK(put(c, {transfer(a, b.addr, 1000, 0)}));
+    Chain c; CHECK(c.init_genesis(a.addr, BIG, b.addr, 0)); taztest::use(c); CHECK(put(c, {transfer(a, b.addr, 1000, 0)}));
     const std::string text = to_json(c);
     { LoadOptions o; o.expected_genesis_commitment = c.genesis_commitment(); Chain out; CHECK(load_chain_json_text(text, out, nullptr, o)); }
     { LoadOptions o; o.expected_genesis_commitment = Hash32{1}; Chain out; CHECK(!load_chain_json_text(text, out, nullptr, o)); }
     // an internally consistent chain with a different genesis is refused by the pin, accepted without it
-    Chain other; CHECK(other.init_genesis(a.addr, BIG, d.addr, 0)); CHECK(put(other, {transfer(a, d.addr, 1000, 0)}));
+    Chain other; CHECK(other.init_genesis(a.addr, BIG, d.addr, 0)); taztest::use(other); CHECK(put(other, {transfer(a, d.addr, 1000, 0)}));
     const std::string other_text = to_json(other);
     CHECK(other.genesis_commitment() != c.genesis_commitment());
     { Chain out; CHECK(load_chain_json_text(other_text, out, nullptr)); }

@@ -2,6 +2,7 @@
 //  1 save   2 load   3 strict JSON   4 replay from genesis   5 hash/signature/chain-id/state-root checks
 //  6 incomplete or wrong files   7 crash-safe atomic save   8 restart gives the same chain
 //  9 wrong version / changed data   10 random damage never produces a different accepted chain
+#include "net_ctx.hpp"
 #include "taz/chain.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -26,7 +27,7 @@ static int failures = 0;
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
 static Key new_key() { Key k; CHECK(generate_keypair(k.sk, k.pk)); k.addr = address_from_pubkey(k.pk); return k; }
-static void resign(Transaction& tx, const Key& k) { CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
+static void resign(Transaction& tx, const Key& k) { tx.network_id = taztest::g_net; CHECK(sign(k.sk, tx.signable_bytes(), tx.signature)); }
 static Transaction base(const Key& f, std::uint64_t n) { Transaction tx; tx.from = f.addr; tx.nonce = n; tx.pubkey = f.pk; return tx; }
 static Transaction transfer(const Key& f, const Address& to, Amount a, std::uint64_t n) { Transaction tx = base(f, n); tx.to = to; tx.amount = a; resign(tx, f); return tx; }
 static Transaction safety(const Key& f, Amount limit, Amount thr, std::uint64_t hold, std::uint64_t n) {
@@ -56,7 +57,7 @@ struct Keys { Key o = new_key(), g0 = new_key(), g1 = new_key(), g2 = new_key(),
 // A chain that uses every feature: plain transfers, safety rules with a held transfer, guardians with a veto
 // key, votes, a veto cancel and a recovery that really completes. `mid` receives copies taken along the way.
 static Chain full_chain(const Keys& k, std::vector<Chain>* mid = nullptr) {
-    Chain c; CHECK(c.init_genesis(k.o.addr, 100000000, k.g0.addr, 5000000));
+    Chain c; CHECK(c.init_genesis(k.o.addr, 100000000, k.g0.addr, 5000000)); taztest::use(c);
     auto snap = [&] { if (mid) mid->push_back(c); };
     CHECK(put(c, {transfer(k.o, k.g1.addr, 2000000, 0), transfer(k.o, k.g2.addr, 2000000, 1), transfer(k.o, k.x.addr, 2000000, 2), transfer(k.o, k.v.addr, 1000000, 3)})); snap();
     CHECK(put(c, {safety(k.o, 0, 500000, 10, 4)})); CHECK(put(c, {transfer(k.o, k.x.addr, 600000, 5)})); snap(); // a transfer is being held here
@@ -69,12 +70,12 @@ static Chain full_chain(const Keys& k, std::vector<Chain>* mid = nullptr) {
     return c;
 }
 static Chain plain_chain(const Key& a, const Key& b) {
-    Chain c; CHECK(c.init_genesis(a.addr, 50000000, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, 50000000, b.addr, 0)); taztest::use(c);
     CHECK(put(c, {transfer(a, b.addr, 1000000, 0)})); CHECK(put(c, {})); CHECK(put(c, {transfer(b, a.addr, 3000, 0), transfer(a, b.addr, 20, 1)}));
     return c;
 }
 static Chain safety_chain(const Key& a, const Key& b) {
-    Chain c; CHECK(c.init_genesis(a.addr, 50000000, b.addr, 0));
+    Chain c; CHECK(c.init_genesis(a.addr, 50000000, b.addr, 0)); taztest::use(c);
     CHECK(put(c, {safety(a, 0, 500000, 5, 0)})); CHECK(put(c, {transfer(a, b.addr, 600000, 1)})); empty_until(c, c.height() + 6);
     return c;
 }
@@ -146,10 +147,10 @@ static void t02_load() {
     // a chain without any transactions, and one whose genesis lists nobody / one / two accounts
     Key a = new_key(), b = new_key();
     for (auto spec : {std::pair<Amount, Amount>{5, 7}, {5, 0}, {0, 7}, {0, 0}}) {
-        Chain g; CHECK(g.init_genesis(a.addr, spec.first, b.addr, spec.second));
+        Chain g; CHECK(g.init_genesis(a.addr, spec.first, b.addr, spec.second)); taztest::use(g);
         CHECK(loads_as(to_json(g), g));
     }
-    Chain z; CHECK(z.init_genesis(a.addr, 0, b.addr, 0)); CHECK(loads_as(to_json(z), z));
+    Chain z; CHECK(z.init_genesis(a.addr, 0, b.addr, 0)); taztest::use(z); CHECK(loads_as(to_json(z), z));
     Chain big; CHECK(big.init_genesis(a.addr, 18446744073709551000ULL, b.addr, 0)); CHECK(loads_as(to_json(big), big)); // exact above 2^53
     Chain bad = sentinel(); CHECK(!load_chain_json((tmpdir() / "nope.json").string(), bad, &err) && !err.empty());
 }
@@ -262,7 +263,7 @@ static void t05_integrity() {
     // a zero balance included, so changing either address is refused. (Until v8.1 this was a pinned KNOWN
     // LIMIT: the zero-balance account never reached the state root, so no block hash covered it and such a
     // file still loaded.)
-    { Key z = new_key(); Chain zc; CHECK(zc.init_genesis(k.o.addr, 100000000, z.addr, 0)); CHECK(put(zc, {transfer(k.o, k.g0.addr, 1, 0)}));
+    { Key z = new_key(); Chain zc; CHECK(zc.init_genesis(k.o.addr, 100000000, z.addr, 0)); taztest::use(zc); CHECK(put(zc, {transfer(k.o, k.g0.addr, 1, 0)}));
       const std::string zt = to_json(zc); Key other = new_key();
       Chain out; std::string e;
       // v8.2: genesis_commitment covers zero-balance addresses too
@@ -405,7 +406,7 @@ static void t09_versions() {
 static void t10_random_damage() {
     Keys k; Chain c = plain_chain(k.o, k.g0); Chain s = safety_chain(k.x, k.n);
     // medium sized guardian chain without the 300 idle blocks keeps this quick
-    Chain g; CHECK(g.init_genesis(k.o.addr, 100000000, k.g0.addr, 5000000));
+    Chain g; CHECK(g.init_genesis(k.o.addr, 100000000, k.g0.addr, 5000000)); taztest::use(g);
     CHECK(put(g, {transfer(k.o, k.g1.addr, 2000000, 0), transfer(k.o, k.v.addr, 1000000, 1)}));
     CHECK(put(g, {setg(k.o, {k.g0.addr, k.g1.addr}, 2, k.v.addr, 2)})); CHECK(put(g, {vote(k.g0, k.o.addr, k.n.addr, 0), vote(k.g1, k.o.addr, k.n.addr, 0)}));
     std::uint64_t seed = 12345; auto rnd = [&seed](std::uint64_t n) { seed = seed * 6364136223846793005ULL + 1442695040888963407ULL; return (seed >> 33) % n; };

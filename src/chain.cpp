@@ -5,14 +5,16 @@
 #include <string_view>
 namespace taz {
 namespace {
-// v9: what a producer signs. The chain ID and the height are in the message itself, so a signature says in
-// its own bytes which chain and which height it belongs to — not only implicitly, through the block hash.
-std::vector<std::uint8_t> block_signable(const std::string& chain_id, std::uint64_t height, const Hash32& block_hash) {
+// What a producer signs. The chain ID, the NETWORK ID (protocol 4) and the height are in the message itself, so a
+// signature says in its own bytes which network and which height it belongs to — not only implicitly, through the block
+// hash and the previous_hash chain down to the genesis commitment.
+std::vector<std::uint8_t> block_signable(const std::string& chain_id, const Hash32& network_id, std::uint64_t height, const Hash32& block_hash) {
     std::vector<std::uint8_t> out;
-    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V2";
+    constexpr std::string_view domain = "TAZVERA-BLOCK-SIG-V3";
     out.insert(out.end(), domain.begin(), domain.end());
     out.insert(out.end(), chain_id.begin(), chain_id.end());
     out.push_back(0);
+    out.insert(out.end(), network_id.begin(), network_id.end());
     for (int i = 7; i >= 0; --i) out.push_back(static_cast<std::uint8_t>((height >> (8 * i)) & 0xff));
     out.insert(out.end(), block_hash.begin(), block_hash.end());
     return out;
@@ -27,6 +29,7 @@ bool Chain::init_genesis(const Address& first, Amount first_balance, const Addre
     // (genesis has no predecessor), so it is covered by block 0's hash and, through previous_hash links, by every later block.
     genesis.previous_hash = genesis_commitment_of(first, first_balance, second, second_balance);
     state_=genesis_state; blocks_.push_back(genesis);
+    state_.bind_network(genesis.previous_hash);
     genesis_balances_.clear();
     // v8: always record both genesis accounts (including zero) so load_chain_json can rebuild.
     genesis_balances_.emplace_back(first, first_balance);
@@ -92,7 +95,7 @@ ChainResult Chain::verify(const Block& block, std::int64_t max_timestamp, State&
             return {false,"block is not signed by the producer expected for this height"};
         if (address_from_pubkey(block.producer_pubkey) != block.producer)
             return {false,"the block public key does not match its producer address"};
-        const auto msg = block_signable(block.chain_id, block.height, block.hash());
+        const auto msg = block_signable(block.chain_id, network_id(), block.height, block.hash());
         if (!taz::verify(block.producer_pubkey, msg, block.producer_signature))
             return {false,"block signature does not verify"};
     }
@@ -150,6 +153,7 @@ ChainResult Chain::set_producers(std::vector<Address> producers) {
     if (blocks_.size() == 1 && genesis_balances_.size() == 2)
         blocks_[0].previous_hash = genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second,
                                                          genesis_balances_[1].first, genesis_balances_[1].second, producers_);
+    state_.bind_network(network_id());      // block 0's previous_hash is the network ID, and it just changed
     return {true, {}};
 }
 
@@ -183,7 +187,7 @@ ChainResult Chain::append_block_signed(const std::vector<Transaction>& transacti
     if (!r.ok) return r;
     block.producer = address_from_pubkey(producer_pubkey);
     block.producer_pubkey = producer_pubkey;
-    const auto msg = block_signable(block.chain_id, block.height, block.hash());
+    const auto msg = block_signable(block.chain_id, network_id(), block.height, block.hash());
     if (!sign(producer_key, msg, block.producer_signature)) return {false, "the block could not be signed"};
     commit_block(std::move(block), std::move(next));
     return {true, {}};
@@ -235,6 +239,7 @@ bool Chain::init_genesis(const Address& first, Amount first_balance,
     Block genesis; genesis.height = 0; genesis.timestamp = 0; genesis.state_root = genesis_state.state_root();
     genesis.previous_hash = genesis_commitment_of(first, first_balance, second, second_balance, producers_);
     state_ = genesis_state; blocks_.push_back(genesis);
+    state_.bind_network(genesis.previous_hash);
     genesis_balances_.clear();
     genesis_balances_.emplace_back(first, first_balance);
     genesis_balances_.emplace_back(second, second_balance);

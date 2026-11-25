@@ -1,4 +1,4 @@
-# TAZVERA Chain — Core v9.3
+# TAZVERA Chain — Core v9.4
 
 **Status: local prototype only. Not a testnet, not mainnet, and not the existing Shardeum TZV token. Do not use real funds or production/private wallet keys.**
 
@@ -407,6 +407,25 @@ the per-message deadline.
 - The transcript is ordered by nonce, so both sides build the same bytes. That makes a bounced copy of our own proof verify, so a peer whose nonce equals ours (a reflection) and a peer with an all-zero nonce are refused.
 - A hung step now ends in a failed test: the Windows workflow runs ctest with a 120 s timeout.
 - **Not done / known limits:** the node-process tests (N1-N5) are skipped on Windows (never verified there); a pure relay that forwards bytes unchanged is not stopped by signatures (needs an encrypted channel); who is *allowed* to connect (an allowlist) is not implemented; forks deeper than one block are not resolved.
+
+## v9.4: a signature belongs to one network (protocol 4)
+
+Before this version a transaction signed the protocol number, the chain ID, and the transaction fields, but nothing that
+tells one TAZVERA network from another: the chain ID is the same constant everywhere. A transaction signed for one network
+was therefore valid on any other network that had the same address with the same nonce, and chain files are public.
+
+* **Network ID.** The genesis commitment (it covers the chain ID, the protocol number, both genesis accounts and the producer
+  list) is the network ID; it is the `previous_hash` of block 0. `Chain::network_id()` returns it.
+* **Transactions.** Every transaction carries `network_id` and signs it (domains `TAZVERA-TX-SIGNATURE-V3` for transfers and
+  `-V4` for everything else). A chain refuses a transaction whose `network_id` is not its own, before it checks the signature;
+  a state that was never bound to a network applies nothing.
+* **Producer signatures.** A block signature signs the network ID too (`TAZVERA-BLOCK-SIG-V3`).
+* **Old signatures.** Protocol 3 and earlier transactions are refused with an explicit message ("signed under an older protocol
+  that did not bind a network ID"); re-sign them for the network you want. Rewriting the protocol number does not help: the signed
+  bytes differ, so the signature no longer verifies. Protocol 3 chain files do not load (the protocol number is checked first).
+* **If you reuse an address from an older network, nothing signed there can be replayed here.** (Use fresh keys anyway.)
+* Tests: `taz_network_binding_tests` (9 cases: the same transaction on two networks, downgrade and replay between protocols,
+  producer signature layout, save/load, unbound state, all-or-nothing blocks).
 
 ## v9.3: a guardian's recovery vote expires
 

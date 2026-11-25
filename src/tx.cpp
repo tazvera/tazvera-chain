@@ -17,19 +17,22 @@ void put_string(std::vector<std::uint8_t>& out, const std::string& s) {
 std::vector<std::uint8_t> Transaction::signable_bytes() const {
     std::vector<std::uint8_t> out;
     if (kind == TxKind::Transfer) {
-        // Unchanged from v1 so that plain-transfer chains keep verifying everywhere.
-        constexpr std::string_view domain = "TAZVERA-TX-SIGNATURE-V1";
+        // Protocol 4: the network ID is signed. (Domains V1/V2 belonged to protocols that did not bind a network.)
+        constexpr std::string_view domain = "TAZVERA-TX-SIGNATURE-V3";
         out.insert(out.end(), domain.begin(), domain.end());
         put_u32(out, protocol_version); put_string(out, chain_id);
+        out.insert(out.end(), network_id.begin(), network_id.end());
         out.insert(out.end(), from.begin(), from.end()); out.insert(out.end(), to.begin(), to.end());
         put_u64(out, amount); put_u64(out, fee); put_u64(out, nonce); put_u64(out, expiry_height);
         out.insert(out.end(), pubkey.begin(), pubkey.end());
         return out;
     }
     // Other kinds use a different domain string, so a signature can never be replayed across kinds.
-    constexpr std::string_view domain = "TAZVERA-TX-SIGNATURE-V2";
+    constexpr std::string_view domain = "TAZVERA-TX-SIGNATURE-V4";
     out.insert(out.end(), domain.begin(), domain.end());
-    put_u32(out, protocol_version); put_string(out, chain_id); put_u8(out, static_cast<std::uint8_t>(kind));
+    put_u32(out, protocol_version); put_string(out, chain_id);
+    out.insert(out.end(), network_id.begin(), network_id.end());
+    put_u8(out, static_cast<std::uint8_t>(kind));
     out.insert(out.end(), from.begin(), from.end());
     put_u64(out, fee); put_u64(out, nonce); put_u64(out, expiry_height);
     out.insert(out.end(), pubkey.begin(), pubkey.end());
@@ -54,6 +57,10 @@ Hash32 Transaction::txid() const {
     return sha256(bytes);
 }
 std::optional<std::string> validate_tx_shape(const Transaction& tx) {
+    // Policy for older signatures: refused, and said so. A protocol 3 (or earlier) transaction signs no network ID, so it
+    // would be valid on every network that has the same address and nonce; re-sign it for this network.
+    if (tx.protocol_version < PROTOCOL_VERSION)
+        return "transaction signed under an older protocol that did not bind a network ID (replayable across networks); sign it again for this network";
     if (tx.protocol_version != PROTOCOL_VERSION) return "unsupported protocol version";
     if (tx.chain_id != CHAIN_ID) return "wrong chain ID";
     if (tx.fee != FEE_TRANSFER_V1) return "fee does not match fee schedule v1";
