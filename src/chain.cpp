@@ -22,7 +22,8 @@ std::vector<std::uint8_t> block_signable(const std::string& chain_id, const Hash
 }
 
 bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance) {
-    if (!blocks_.empty() || first == second) return false;
+    // F11: the total supply must fit in a uint64; State::circulating() relies on it and would otherwise throw.
+    if (!blocks_.empty() || first == second || first_balance > std::numeric_limits<Amount>::max() - second_balance) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
     Block genesis; genesis.height=0; genesis.timestamp=0; genesis.state_root=genesis_state.state_root();
     // v8.2: the commitment over BOTH genesis accounts (zero balances included) sits in block 0's previous_hash field
@@ -232,7 +233,7 @@ bool Chain::init_genesis(const Address& first, Amount first_balance,
                          const Address& second, Amount second_balance, std::vector<Address> producers) {
     if (producers.empty()) return init_genesis(first, first_balance, second, second_balance);
     // The set is validated exactly as set_producers() validates it, before anything is committed.
-    if (!blocks_.empty() || first == second) return false;
+    if (!blocks_.empty() || first == second || first_balance > std::numeric_limits<Amount>::max() - second_balance) return false;   // F11
     const ChainResult pr = set_producers(std::move(producers));
     if (!pr.ok) return false;
     State genesis_state; genesis_state.set_balance(first, first_balance); genesis_state.set_balance(second, second_balance);
