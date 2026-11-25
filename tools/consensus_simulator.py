@@ -151,3 +151,55 @@ class ValidatorLifecycle:
         del self.unbonding[validator]
         self.withdrawn.add(validator)
         return amount
+
+
+@dataclass
+class WeightedRound:
+    """Educational quorum model using validator voting power.
+
+    This deliberately does not implement proposal selection, locks, signatures,
+    persistence, or network consensus.
+    """
+    stakes: Dict[Validator, int]
+    height: int = 1
+    round: int = 0
+    prevotes: Dict[Block, Set[Validator]] = field(default_factory=dict)
+    precommits: Dict[Block, Set[Validator]] = field(default_factory=dict)
+    committed: Optional[Block] = None
+
+    def __post_init__(self) -> None:
+        if len(self.stakes) < 4:
+            raise ValueError("BFT simulator requires at least 4 validators")
+        if any(not isinstance(power, int) or isinstance(power, bool) or power <= 0
+               for power in self.stakes.values()):
+            raise ValueError("validator voting power must be a positive integer")
+        self.total_power = sum(self.stakes.values())
+        self.quorum = (2 * self.total_power) // 3 + 1
+
+    def _power(self, votes: Dict[Block, Set[Validator]], block: Block) -> int:
+        return sum(self.stakes[v] for v in votes.get(block, set()))
+
+    def has_prevote_quorum(self, block: Block) -> bool:
+        return self._power(self.prevotes, block) >= self.quorum
+
+    def has_commit_quorum(self, block: Block) -> bool:
+        return self._power(self.precommits, block) >= self.quorum
+
+    def vote(self, phase: str, validator: Validator, block: Block) -> bool:
+        if validator not in self.stakes:
+            raise ValueError("unknown validator")
+        if self.committed is not None:
+            raise ValueError("height already committed")
+        if phase not in ("prevote", "precommit"):
+            raise ValueError("phase must be prevote or precommit")
+        if not isinstance(block, str) or not block:
+            raise ValueError("block identifier is required")
+        if phase == "precommit" and not self.has_prevote_quorum(block):
+            raise ValueError("precommit requires prevote quorum for this block")
+        target = self.prevotes if phase == "prevote" else self.precommits
+        if any(validator in voters for voters in target.values()):
+            raise ValueError("validator already voted in this phase")
+        target.setdefault(block, set()).add(validator)
+        if phase == "precommit" and self.has_commit_quorum(block):
+            self.committed = block
+        return self.committed == block
