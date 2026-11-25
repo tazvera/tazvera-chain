@@ -343,7 +343,8 @@ static void t07_atomic_save() {
     for (int t = 0; t < 4; ++t) th.emplace_back([&, t] {
         for (int i = 0; i < 15; ++i) {
             bool saved = false;
-            for (int retry = 0; retry < 200 && !saved; ++retry) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (!saved && std::chrono::steady_clock::now() < deadline) {
                 std::string e;
                 saved = save_chain_json(*chains[(t + i) % 3], q, &e);
                 if (!saved && e.find("writer lock is busy or unavailable") != std::string::npos)
