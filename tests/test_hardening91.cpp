@@ -294,6 +294,58 @@ static void n5_require_identity_refuses_anonymous_and_keeps_serving() {
     CHECK(slurp(out).find("proof verified on this connection") != std::string::npos);
 }
 
+// F5: if the peer's tip cannot attach to our local history, this is an unrepaired deep fork.
+// The node must refuse the sync (non-zero), not report a successful round while silently keeping its chain.
+// Common-ancestor reorganization is deliberately out of scope for this PR.
+static void f5_deep_fork_must_not_return_success() {
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    for (const std::uint64_t depth : {2ULL, 3ULL, 10ULL}) {
+        Key a = new_key(), b = new_key();
+        Chain local = two_account_chain(a, b, 1000000000);
+        Chain remote = local;
+        for (std::uint64_t h = 1; h <= depth; ++h) {
+            const std::int64_t stamp = now - 100 + static_cast<std::int64_t>(h);
+            const Amount local_amount = (h == 1 ? 1 : 1);
+            const Amount remote_amount = (h == 1 ? 2 : 1);
+            const ChainResult left = local.append_block({transfer(a, b.addr, local_amount, h - 1)}, stamp);
+            const ChainResult right = remote.append_block({transfer(a, b.addr, remote_amount, h - 1)}, stamp);
+            if (!left.ok || !right.ok) {
+                std::cerr << "F5 setup failed at depth " << depth << ": "
+                          << left.error << " / " << right.error << "\n";
+                std::exit(2);
+            }
+        }
+        CHECK(local.height() == depth);
+        CHECK(remote.height() == depth);
+        CHECK(local.blocks().back().hash() != remote.blocks().back().hash());
+
+        const fs::path dir = fs::temp_directory_path() / ("taz-f5-depth-" + std::to_string(depth));
+        std::error_code ec; fs::remove_all(dir, ec); fs::create_directories(dir);
+        std::string err;
+        CHECK(save_chain_json(local, (dir / "local.json").string(), &err));
+        CHECK(save_chain_json(remote, (dir / "remote.json").string(), &err));
+        const std::uint16_t port = free_port();
+        const std::string server_out = (dir / "server.out").string();
+        const std::string client_out = (dir / "client.out").string();
+        const std::string server = node() + " --chain \"" + (dir / "local.json").string() +
+            "\" --expect-genesis " + pin(local) + " --listen " + std::to_string(port) +
+            " --serve-timeout 2";
+        CHECK(run_in_background(server, server_out));
+        CHECK(wait_for(server_out, "listening", 10));
+        const std::string client = node() + " --chain \"" + (dir / "remote.json").string() +
+            "\" --expect-genesis " + pin(remote) + " --peer " + std::to_string(port);
+        const int client_rc = run_waiting(client, client_out);
+        CHECK(client_rc != 0); // current code returns 0 after silently keeping the local chain
+        CHECK(slurp(client_out).find("cannot attach peer tip") != std::string::npos);
+        CHECK(wait_for(server_out, "refused one connection", 5));
+        CHECK(slurp(server_out).find("served 1 of 1") == std::string::npos);
+        CHECK(height_of(dir / "local.json", local) == depth);
+        CHECK(height_of(dir / "remote.json", remote) == depth);
+        fs::remove_all(dir, ec);
+    }
+}
+
 // v9.2: --serve-timeout must end a node that is waiting for a peer that never comes. Without it the process
 // outlives the test on Windows, which is exactly why these tests were off there.
 static void n6_serve_timeout_ends_the_node() {
@@ -335,6 +387,7 @@ int main() {
         n4_transfer_with_peer_is_an_error();
         n5_require_identity_refuses_anonymous_and_keeps_serving();
         n6_serve_timeout_ends_the_node();
+        f5_deep_fork_must_not_return_success();
     }
     std::error_code ec;
     if (std::getenv("TAZ_KEEP_TMP") == nullptr) for (const char* d : {"taz-f1-over-1000", "taz91-n1", "taz91-n2", "taz91-n3", "taz91-n4", "taz91-n5", "taz91-n6"}) fs::remove_all(fs::temp_directory_path() / d, ec);
