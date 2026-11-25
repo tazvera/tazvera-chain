@@ -84,6 +84,7 @@ class ValidatorLifecycle:
     epoch: int = 0
     status_changes: Dict[Validator, tuple] = field(default_factory=dict)
     unbonding: Dict[Validator, tuple] = field(default_factory=dict)
+    withdrawn: Set[Validator] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if not self.stakes or any(amount <= 0 for amount in self.stakes.values()):
@@ -119,6 +120,8 @@ class ValidatorLifecycle:
                        evidence_until_epoch: int) -> None:
         if validator not in self.stakes:
             raise ValueError("unknown validator")
+        if validator in self.withdrawn:
+            raise ValueError("stake already withdrawn")
         if validator in self.active:
             raise ValueError("validator must be OFF before unbonding")
         if validator in self.unbonding:
@@ -135,3 +138,12 @@ class ValidatorLifecycle:
             return False
         unlock_epoch, evidence_until_epoch = request
         return self.epoch >= unlock_epoch and self.epoch >= evidence_until_epoch
+
+    def withdraw(self, validator: Validator) -> int:
+        """Finalize a one-time withdrawal after all modeled delays."""
+        if not self.withdrawable(validator):
+            raise ValueError("stake is not withdrawable")
+        amount = self.stakes.pop(validator)
+        del self.unbonding[validator]
+        self.withdrawn.add(validator)
+        return amount
