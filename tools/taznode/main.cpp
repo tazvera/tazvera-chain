@@ -676,6 +676,18 @@ int main(int argc, char** argv) {
                     std::cerr << "taznode: the peer's tip block cannot be read: " << why << "\n";
                     return false;
                 }
+                // F4/F5: a cheap structural check BEFORE the expensive one. Stepping back copies the chain and
+                // rebuilds it from genesis, re-verifying every signature, so a peer must not be able to make us do
+                // that with a block that cannot possibly attach. The only fork this exchange can resolve is one
+                // block deep: their tip must sit at our height and point at OUR block one below it. Anything else
+                // is a deeper fork (or garbage); it is reported as a failure, not as a served peer.
+                if (theirs_tip.height != chain.height() ||
+                    theirs_tip.previous_hash != chain.blocks()[chain.height() - 1].hash()) {
+                    std::cerr << "taznode: the peer's tip at height " << theirs_tip.height
+                              << " does not attach to our history (the chains differ by more than one block, "
+                                 "which this node cannot reconcile); keeping our chain\n";
+                    return false;
+                }
                 // Build their chain from the block before the fork, using our own history: at equal height the
                 // only honest candidate we can construct is "our chain minus its tip, plus their tip".
                 taz::Chain candidate = chain;
@@ -688,7 +700,7 @@ int main(int argc, char** argv) {
                 if (!took.ok) {
                     std::cerr << "taznode: the peer's tip block is not valid on our history: " << took.error
                               << "; keeping our chain\n";
-                    return true;
+                    return false;
                 }
                 const taz::ForkDecision fork = taz::choose_chain(chain, candidate);
                 if (fork.choice != taz::ForkChoice::TakeTheirs) {

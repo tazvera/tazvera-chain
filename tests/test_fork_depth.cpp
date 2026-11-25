@@ -17,6 +17,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #ifndef TAZ_NODE_BINARY
 #error "TAZ_NODE_BINARY must be defined (see CMakeLists.txt)"
@@ -62,7 +65,11 @@ static int run_waiting(const std::string& command, const std::string& out) {
 #else
     const std::string full = command + " > \"" + out + "\" 2>&1";
 #endif
-    return std::system(full.c_str());
+    int rc = std::system(full.c_str());
+#ifndef _WIN32
+    rc = (rc >= 0 && WIFEXITED(rc)) ? WEXITSTATUS(rc) : -1;    // std::system returns the raw wait status on POSIX
+#endif
+    return rc;
 }
 static std::string pin(const Chain& c) { return to_hex(c.genesis_commitment()); }
 static bool wait_for(const fs::path& file, const std::string& text, int seconds) {
