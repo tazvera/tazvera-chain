@@ -58,6 +58,9 @@ namespace testing {
 // TEST ONLY: when true, save_chain_json stops after writing and flushing the temporary file and before the
 // rename, and reports failure. This imitates a crash at the worst moment.
 inline bool persist_stop_before_rename = false;
+// Test-only process harness: pause after acquiring the writer lock until forcibly terminated.
+inline bool persist_hold_after_lock = false;
+inline std::string persist_lock_ready_file;
 }
 
 }  // namespace taz
