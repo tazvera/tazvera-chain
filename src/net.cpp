@@ -318,7 +318,7 @@ bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
     const std::uint32_t length = get_u32(header);
     // Length includes the one-byte outer message type. Four more bytes are the length prefix.
     if (length < 1 || static_cast<std::uint64_t>(length) + 4 > kMaxWireMessageBytes) {
-        if (error) *error = "message too large";
+        if (error) *error = "message too large (larger than this transport allows)";
         shutdown_connection(socket);
         return false;
     }
@@ -439,7 +439,7 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
         std::uint8_t next_type = 0;
         std::string next_payload;
         if (!read_frame(socket, next_type, next_payload, error, deadline)) {
-            if (error && *error == "message too large") {
+            if (error && error->find("message too large") == 0) {
                 shutdown_connection(socket);
                 return false;
             }
