@@ -100,7 +100,7 @@ static void n03_oversize_refused() {
     CHECK(send_all(client, header, &err));
     std::uint8_t type = 0; std::string payload;
     CHECK(!recv_message(server, type, payload, &err));
-    CHECK(err.find("larger") != std::string::npos);
+    CHECK(err.find("message too large") != std::string::npos);
 }
 
 static void n04_garbage_refused() {
@@ -463,6 +463,16 @@ static void n28_reassembled_blocks_type_preserved() {
     CHECK(type==kMsgBlocks); CHECK(payload==block_payload);
 }
 
+static void n29_impossible_oversize_stream_refused_before_growth() {
+    Listener l; Socket server,client; std::string err;
+    CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
+    // Each chunk must carry at least one data byte, so this count alone exceeds the 32 MiB ceiling.
+    CHECK(send_all(client,raw_chunk(kMsgBlocks,13,0,32u*1024u*1024u+1u,"x"),&err));
+    std::uint8_t type=0; std::string payload;
+    CHECK(!recv_message(server,type,payload,&err));
+    CHECK(err.find("stream too large")!=std::string::npos);
+}
+
 int main() {
     std::string err;
     if (!net_startup(&err)) { std::cerr << "net_startup failed: " << err << "\n"; return 1; }
@@ -488,6 +498,7 @@ int main() {
     n26_original_type_change_rejected();
     n27_nested_chunk_type_rejected();
     n28_reassembled_blocks_type_preserved();
+    n29_impossible_oversize_stream_refused_before_growth();
     net_cleanup();
     if (failures == 0) { std::cout << "net tests: all passed\n"; return 0; }
     std::cerr << "net tests: " << failures << " failure(s)\n";
