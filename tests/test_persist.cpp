@@ -14,6 +14,15 @@
 #include <iostream>
 #include <regex>
 #include <thread>
+#ifndef _WIN32
+#include <csignal>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#else
+#include <windows.h>
+#endif
 // v9.3: the protocol number is read from the constant, not typed here, so the next protocol bump cannot silently
 // turn these refusal checks into no-ops.
 static const std::string kPv = "\"protocol_version\": \"" + std::to_string(taz::PROTOCOL_VERSION) + "\"";
@@ -22,6 +31,7 @@ static const std::string kPvNumber = "\"protocol_version\": " + std::to_string(t
 using namespace taz;
 namespace fs = std::filesystem;
 static int failures = 0;
+static std::string g_test_executable;
 #define CHECK(x) do { if(!(x)){ std::cerr << "FAIL line " << __LINE__ << ": " #x "\n"; ++failures; } } while(0)
 
 struct Key { PrivKey sk{}; PubKey pk{}; Address addr{}; };
@@ -584,9 +594,103 @@ static void t18_stale_cleanup_unicode() {
     fs::remove_all(dir, ec);
 }
 
-int main() {
+
+// F10 process-level tests. The child pauses only after it has acquired the real writer lock.
+// The parent proves readers remain lock-free, a second writer fails immediately, and a forced
+// process death releases the OS lock. A normal return is deliberately NOT used as the crash test.
+static bool wait_for_file(const fs::path& p, std::chrono::milliseconds limit) {
+    const auto until = std::chrono::steady_clock::now() + limit;
+    while (std::chrono::steady_clock::now() < until) {
+        if (fs::exists(p)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return fs::exists(p);
+}
+#ifndef _WIN32
+static pid_t start_lock_holder(const std::string& file, const std::string& ready) {
+    const pid_t pid = ::fork();
+    if (pid == 0) {
+        ::execl(g_test_executable.c_str(), g_test_executable.c_str(), "--hold-writer", file.c_str(), ready.c_str(), static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    return pid;
+}
+#else
+static std::string quote_arg(const std::string& s) {
+    std::string q = "\"";
+    for (char c : s) { if (c == '"') q += '\\'; q += c; }
+    q += '"'; return q;
+}
+static PROCESS_INFORMATION start_lock_holder(const std::string& file, const std::string& ready) {
+    STARTUPINFOA si{}; si.cb = sizeof(si); PROCESS_INFORMATION pi{};
+    std::string cmd = quote_arg(g_test_executable) + " --hold-writer " + quote_arg(file) + " " + quote_arg(ready);
+    std::vector<char> mutable_cmd(cmd.begin(), cmd.end()); mutable_cmd.push_back('\0');
+    if (!::CreateProcessA(g_test_executable.c_str(), mutable_cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return {};
+    return pi;
+}
+#endif
+static void t19_writer_lock_process_and_crash() {
+    const fs::path d = tmpdir() / "t19"; fs::create_directories(d);
+    const std::string file = (d / "chain.json").string(), ready = (d / "writer-ready").string();
+    Key a = new_key(), b = new_key(); Chain chain = plain_chain(a, b); std::string err;
+    CHECK(save_chain_json(chain, file, &err));
+    const fs::path lock_path(file + ".lock");
+    CHECK(fs::exists(lock_path));
+#ifndef _WIN32
+    struct stat before{}, after{};
+    CHECK(::stat(lock_path.c_str(), &before) == 0);
+    const pid_t child = start_lock_holder(file, ready);
+    CHECK(child > 0);
+    if (child > 0) {
+        const bool acquired = wait_for_file(ready, std::chrono::seconds(5));
+        CHECK(acquired);
+        if (acquired) {
+            Chain read; CHECK(load_chain_json(file, read, &err) && same_chain(read, chain));
+            const auto begin = std::chrono::steady_clock::now();
+            CHECK(!save_chain_json(chain, file, &err));
+            CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+            CHECK(err.find("NFS/SMB") != std::string::npos);
+        }
+        ::kill(child, SIGKILL);
+        int status = 0; (void)::waitpid(child, &status, 0);
+        CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+        CHECK(save_chain_json(chain, file, &err));
+        CHECK(::stat(lock_path.c_str(), &after) == 0 && before.st_ino == after.st_ino);
+    }
+#else
+    PROCESS_INFORMATION child = start_lock_holder(file, ready);
+    CHECK(child.hProcess != nullptr);
+    if (child.hProcess) {
+        const bool acquired = wait_for_file(ready, std::chrono::seconds(5));
+        CHECK(acquired);
+        if (acquired) {
+            Chain read; CHECK(load_chain_json(file, read, &err) && same_chain(read, chain));
+            const auto begin = std::chrono::steady_clock::now();
+            CHECK(!save_chain_json(chain, file, &err));
+            CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+            CHECK(err.find("NFS/SMB") != std::string::npos);
+        }
+        CHECK(::TerminateProcess(child.hProcess, 137));
+        CHECK(::WaitForSingleObject(child.hProcess, 5000) == WAIT_OBJECT_0);
+        ::CloseHandle(child.hThread); ::CloseHandle(child.hProcess);
+        CHECK(save_chain_json(chain, file, &err));
+        CHECK(fs::exists(lock_path));
+    }
+#endif
+    CHECK(fs::exists(lock_path));
+}
+
+int main(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "--hold-writer") {
+        testing::persist_hold_after_lock = true;
+        testing::persist_lock_ready_file = argv[3];
+        Key a = new_key(), b = new_key(); Chain c = plain_chain(a, b); std::string err;
+        (void)save_chain_json(c, argv[2], &err);
+        return EXIT_FAILURE;
+    }
+    g_test_executable = argv[0];
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8(); t18_stale_cleanup_unicode();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8(); t18_stale_cleanup_unicode(); t19_writer_lock_process_and_crash();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;
