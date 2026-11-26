@@ -321,8 +321,10 @@ Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     // RWA registry: only an asset registration carries "owner", "asset_kind" and "doc_hash" (every other transaction is
     // written exactly as before, so existing files and their hashes are unchanged). It needs the veto layout (a v4+ file).
     const JVal* kind_member = find(o, "kind");
+    // Part 2: an asset transfer is written in the same layout (its asset_kind and doc_hash are always zero).
     const bool is_asset = kind_member && kind_member->type == JVal::Type::Str &&
-                          kind_member->str == std::to_string(static_cast<unsigned>(TxKind::RegisterAsset));
+                          (kind_member->str == std::to_string(static_cast<unsigned>(TxKind::RegisterAsset)) ||
+                           kind_member->str == std::to_string(static_cast<unsigned>(TxKind::TransferAsset)));
     if (is_asset) {
         if (!with_veto) fail(where + " is an asset registration, which this file's format cannot carry");
         exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
@@ -339,7 +341,7 @@ Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     tx.protocol_version = static_cast<std::uint32_t>(pv);
     tx.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
     const std::uint64_t kind = dec_u64(field(o, "kind"), where + ".kind");
-    if (kind > static_cast<std::uint64_t>(TxKind::RegisterAsset)) fail(where + " has an unknown transaction kind");
+    if (kind > static_cast<std::uint64_t>(TxKind::TransferAsset)) fail(where + " has an unknown transaction kind");
     tx.kind = static_cast<TxKind>(kind);
     tx.from = hex_of<Address>(field(o, "from"), where + ".from");
     tx.to = hex_of<Address>(field(o, "to"), where + ".to");

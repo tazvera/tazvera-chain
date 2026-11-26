@@ -51,6 +51,11 @@ std::vector<std::uint8_t> Transaction::signable_bytes() const {
             put_u8(out, asset_kind);
             out.insert(out.end(), doc_hash.begin(), doc_hash.end());
             break;
+        case TxKind::TransferAsset:   // which asset, to whom, and who the signer says is the current owner: all signed
+            out.insert(out.end(), ref.begin(), ref.end());
+            out.insert(out.end(), to.begin(), to.end());
+            out.insert(out.end(), owner.begin(), owner.end());
+            break;
     }
     return out;
 }
@@ -81,8 +86,10 @@ std::optional<std::string> validate_tx_shape(const Transaction& tx) {
     const bool no_new_owner = tx.new_owner == Address{};
     const bool no_guardians = tx.guardians.empty() && tx.guardian_threshold == 0 && tx.veto == Address{};
     // Fields that a kind does not use must be zero, so no two different byte strings mean the same thing.
-    if (tx.kind != TxKind::RegisterAsset && (tx.owner != Address{} || tx.asset_kind != 0 || tx.doc_hash != Hash32{}))
+    if (tx.kind != TxKind::RegisterAsset && tx.kind != TxKind::TransferAsset && (tx.owner != Address{} || tx.asset_kind != 0 || tx.doc_hash != Hash32{}))
         return "the owner, asset_kind and doc_hash fields belong to asset registration only";
+    if (tx.kind == TxKind::TransferAsset && (tx.asset_kind != 0 || tx.doc_hash != Hash32{}))
+        return "asset_kind and doc_hash belong to asset registration only";
     const bool only_safety = tx.amount == 0 && no_to && no_ref && no_new_owner && no_guardians;
     switch (tx.kind) {
         case TxKind::Transfer:
@@ -133,6 +140,13 @@ std::optional<std::string> validate_tx_shape(const Transaction& tx) {
             if (tx.owner != tx.from) return "an asset can only be registered by its owner, in the owner's own name";
             if (tx.asset_kind < static_cast<std::uint8_t>(AssetKind::Land) || tx.asset_kind > static_cast<std::uint8_t>(AssetKind::Other))
                 return "asset_kind must be 1 (land), 2 (vehicle), 3 (invoice) or 4 (other)";
+            return std::nullopt;
+        case TxKind::TransferAsset:
+            if (tx.amount != 0 || !no_safety_fields || !no_new_owner || !no_guardians) return "unused fields must be zero in an asset transfer";
+            if (tx.ref == Hash32{}) return "an asset transfer must name the asset";
+            if (tx.owner != tx.from) return "only the owner may transfer this asset";
+            if (no_to) return "an asset transfer must name the new owner";
+            if (tx.to == tx.owner) return "the new owner must differ from the current owner";
             return std::nullopt;
     }
     return "unknown transaction kind";

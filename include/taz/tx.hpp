@@ -10,7 +10,8 @@ enum class TxKind : std::uint8_t {
     SetGuardians = 3,    // name the trusted people who may help recover this account
     RecoveryVote = 4,    // a guardian votes to move someone's account to a new address
     RecoveryCancel = 5,  // stop a recovery: the owner (to = zero) or, if one is set, the account's veto key (to = the account)
-    RegisterAsset = 6,   // RWA registry, part 1: record that an asset exists and who owns it (no transfer of ownership yet)
+    RegisterAsset = 6,   // RWA registry, part 1: record that an asset exists and who owns it
+    TransferAsset = 7,   // RWA registry, part 2: the owner gives an asset to another address (ref = asset_id, to = new owner, owner = current owner)
 };
 // RegisterAsset: what kind of asset is being registered.
 enum class AssetKind : std::uint8_t { Land = 1, Vehicle = 2, Invoice = 3, Other = 4 };
@@ -29,12 +30,12 @@ struct Transaction {
     Amount daily_limit{0};          // SetSafety: max amount sent per window, 0 = no limit
     Amount hold_threshold{0};       // SetSafety: transfers >= this are held, 0 = never hold
     std::uint64_t hold_blocks{0};   // SetSafety: how long a held transfer waits
-    Hash32 ref{};                   // CancelHeld: txid of the held transfer
+    Hash32 ref{};                   // CancelHeld: txid of the held transfer; TransferAsset: the asset_id
     Address new_owner{};            // RecoveryVote: the address the funds should move to
     std::vector<Address> guardians; // SetGuardians: strictly ascending, at most MAX_GUARDIANS
     std::uint64_t guardian_threshold{0}; // SetGuardians: how many of them must agree
     Address veto{};                 // SetGuardians: optional separate (offline) key that alone may cancel a recovery; zero = none
-    Address owner{};                // RegisterAsset: the owner being registered; must be the signer (from)
+    Address owner{};                // RegisterAsset: the owner being registered; TransferAsset: the current owner. Must be the signer (from)
     std::uint8_t asset_kind{0};     // RegisterAsset: an AssetKind value, 1..4
     Hash32 doc_hash{};              // RegisterAsset: SHA-256 of the document that proves the asset (the document itself stays off the chain)
     std::vector<std::uint8_t> signable_bytes() const;
