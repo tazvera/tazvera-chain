@@ -25,9 +25,9 @@ static std::string request(std::uint16_t port, const std::string& bytes) {
     if (!connect_loopback(port, socket, &error)) return {};
     std::string wire = bytes;
     if (wire.find("Host:") == std::string::npos) {
-        const std::size_t end = wire.find("\\r\\n\\r\\n");
+        const std::size_t end = wire.find("\r\n\r\n");
         if (end != std::string::npos)
-            wire.insert(end + 2, "Host: localhost:" + std::to_string(port) + "\\r\\n");
+            wire.insert(end + 2, "Host: localhost:" + std::to_string(port) + "\r\n");
     }
     if (!send_all(socket, wire, &error)) return {};
     std::string response, one;
@@ -61,7 +61,7 @@ int main() {
     if (!server.running()) return 1;
     const std::uint16_t port = server.port();
 
-    const std::string status = request(port, "GET /status HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    const std::string status = request(port, "GET /status HTTP/1.1\r\nHost: localhost:" + std::to_string(port) + "\r\n\r\n");
     CHECK(status_line(status).find("200") != std::string::npos);
     CHECK(body(status).find("\"height\": \"") != std::string::npos);
     CHECK(body(status).find("\"height\": 0") == std::string::npos);
