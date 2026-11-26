@@ -7,6 +7,7 @@
 #include "taz/export.hpp"
 #include "taz/persist.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -695,6 +696,28 @@ static void t19_writer_lock_process_and_crash() {
     CHECK(fs::exists(lock_path));
 }
 
+
+static void t20_exclusive_create_race() {
+    const fs::path d = tmpdir() / "t20"; fs::create_directories(d);
+    const std::string file = (d / "chain.json").string();
+    Key a = new_key(), b = new_key(), c = new_key(), dkey = new_key();
+    Chain first = plain_chain(a, b), second = plain_chain(c, dkey);
+    std::atomic<int> ready{0}; std::atomic<bool> go{false};
+    bool ok1 = false, ok2 = false; std::string err1, err2;
+    std::thread t1([&] { ++ready; while (!go.load()) std::this_thread::yield(); ok1 = save_chain_json(first, file, &err1, true); });
+    std::thread t2([&] { ++ready; while (!go.load()) std::this_thread::yield(); ok2 = save_chain_json(second, file, &err2, true); });
+    while (ready.load() != 2) std::this_thread::yield();
+    go.store(true); t1.join(); t2.join();
+    CHECK(ok1 != ok2);
+    CHECK((ok1 ? err2 : err1).find("the chain file already exists; refusing to overwrite it (creation is exclusive)") != std::string::npos);
+    Chain saved; std::string load_err;
+    CHECK(load_chain_json(file, saved, &load_err));
+    CHECK(same_chain(saved, ok1 ? first : second));
+    CHECK(save_chain_json(ok1 ? second : first, file, &load_err, false));
+    Chain overwritten; CHECK(load_chain_json(file, overwritten, &load_err));
+    CHECK(same_chain(overwritten, ok1 ? second : first));
+}
+
 int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--hold-writer") {
 #ifndef _WIN32
@@ -716,7 +739,7 @@ int main(int argc, char** argv) {
     }
     g_test_executable = argv[0];
     std::srand(4242);
-    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8(); t18_stale_cleanup_unicode(); t19_writer_lock_process_and_crash();
+    t01_save(); t02_load(); t03_strict_json(); t04_replay(); t05_integrity(); t06_incomplete(); t07_atomic_save(); t08_restart(); t09_versions(); t10_random_damage(); t11_repository_demo_files(); t13_non_ascii_path(); t14_require_genesis_pin(); t15_version_consistency(); t16_save_never_throws(); t17_cleanup_on_failure_utf8(); t18_stale_cleanup_unicode(); t19_writer_lock_process_and_crash(); t20_exclusive_create_race();
     std::error_code ec; fs::remove_all(tmpdir(), ec);
     if (failures) { std::cerr << failures << " test(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "Persistence tests passed (11 sections). This is not a security audit.\n"; return EXIT_SUCCESS;
