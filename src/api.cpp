@@ -164,9 +164,28 @@ bool read_request_line(const Socket& socket, std::string& line, Deadline deadlin
 
 
 
-bool read_request_headers(const Socket& socket, Deadline deadline) {
-    // Consume all request headers before replying. Closing a TCP socket with unread request
-    // bytes may cause an RST and discard response bytes already queued by send_all().
+struct RequestHeaders {
+    std::string host;
+    std::string origin;
+    bool host_seen{false};
+    bool host_duplicate{false};
+    bool origin_seen{false};
+    bool origin_duplicate{false};
+};
+
+bool ascii_iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
+        if (x != y) return false;
+    }
+    return true;
+}
+
+bool read_request_headers(const Socket& socket, Deadline deadline, RequestHeaders& headers) {
+    // Consume and validate all headers before replying; never trust a browser-supplied Host value.
     constexpr std::size_t kMaxHeaderBytes = 8u * 1024u;
     std::size_t consumed = 0;
     std::string line;
@@ -184,8 +203,48 @@ bool read_request_headers(const Socket& socket, Deadline deadline) {
             }
         }
         if (line.empty()) return true;
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos || colon == 0) return false;
+        const std::string_view name(line.data(), colon);
+        std::size_t value_start = colon + 1;
+        while (value_start < line.size() && (line[value_start] == ' ' || line[value_start] == '\t')) ++value_start;
+        std::size_t value_end = line.size();
+        while (value_end > value_start && (line[value_end - 1] == ' ' || line[value_end - 1] == '\t')) --value_end;
+        const std::string value = line.substr(value_start, value_end - value_start);
+        if (ascii_iequals(name, "host")) {
+            if (headers.host_seen) headers.host_duplicate = true;
+            headers.host_seen = true;
+            headers.host = value;
+        } else if (ascii_iequals(name, "origin")) {
+            if (headers.origin_seen) headers.origin_duplicate = true;
+            headers.origin_seen = true;
+            headers.origin = value;
+        }
     }
     return false;
+}
+
+bool valid_loopback_host(std::string_view host, std::uint16_t port) {
+    const std::string suffix = ":" + std::to_string(port);
+    return host == "127.0.0.1" + suffix || host == "localhost" + suffix;
+}
+
+bool valid_origin_value(std::string_view origin) {
+    const bool https = origin.starts_with("https://");
+    const bool http = origin.starts_with("http://");
+    const std::size_t scheme = https ? 8u : (http ? 7u : 0u);
+    if (scheme == 0 || origin.size() == scheme) return false;
+    for (std::size_t i = scheme; i < origin.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(origin[i]);
+        if (c <= 0x20 || c == 0x7f || c == '/' || c == '?' || c == '#' ||
+            c == '@' || c == '*' || c == '\\' || c == ',') return false;
+    }
+    return true;
+}
+
+bool origin_is_allowed(std::string_view origin, const std::vector<std::string>& allowed_origins) {
+    if (!valid_origin_value(origin)) return false;
+    return std::find(allowed_origins.begin(), allowed_origins.end(), origin) != allowed_origins.end();
 }
 
 bool drain_oversized_request_line(const Socket& socket, std::string_view prefix, Deadline deadline) {
@@ -197,34 +256,55 @@ bool drain_oversized_request_line(const Socket& socket, std::string_view prefix,
         previous = last;
         last = byte[0];
     }
-    return read_request_headers(socket, deadline);
+    RequestHeaders ignored;
+    return read_request_headers(socket, deadline, ignored);
 }
 
-void send_response(const Socket& socket, const Response& response, bool cors) {
+void send_response(const Socket& socket, const Response& response, std::string_view cors_origin = {},
+                   bool options = false) {
     std::string wire = "HTTP/1.1 " + std::to_string(response.status) + " " + response.reason + "\r\n";
-    wire += "Content-Type: application/json\r\n";
+    if (!response.body.empty()) wire += "Content-Type: application/json\r\n";
     wire += "Content-Length: " + std::to_string(response.body.size()) + "\r\n";
     wire += "Connection: close\r\n";
-    if (cors) wire += "Access-Control-Allow-Origin: *\r\n";
+    if (!cors_origin.empty()) {
+        wire += "Access-Control-Allow-Origin: " + std::string(cors_origin) + "\r\n";
+        wire += "Vary: Origin\r\n";
+    }
+    if (options) {
+        wire += "Allow: GET\r\n";
+        wire += "Access-Control-Allow-Methods: GET\r\n";
+    }
     wire += "\r\n";
     wire += response.body;
     (void)send_all(socket, wire, nullptr);
 }
 
-void serve_one(const Chain& chain, const Socket& socket) {
+void serve_one(const Chain& chain, const Socket& socket, std::uint16_t port,
+                const std::vector<std::string>& allowed_origins) {
     const Deadline deadline = std::chrono::steady_clock::now() + kRequestTimeout;
     std::string line;
     if (!read_request_line(socket, line, deadline)) {
         // An overlong request line is a client error; a silent or slow peer is simply closed at its deadline.
         if (line.size() > kMaxRequestLine && drain_oversized_request_line(socket, line, deadline))
-            send_response(socket, error_response(400, "Bad Request", "request line exceeds 8 KiB"), false);
+            send_response(socket, error_response(400, "Bad Request", "request line exceeds 8 KiB"));
         return;
     }
 
-    if (!read_request_headers(socket, deadline)) {
-        send_response(socket, error_response(400, "Bad Request", "request headers are incomplete or exceed 8 KiB"), false);
+    RequestHeaders headers;
+    if (!read_request_headers(socket, deadline, headers)) {
+        send_response(socket, error_response(400, "Bad Request", "request headers are malformed, incomplete or exceed 8 KiB"));
         return;
     }
+    if (headers.host_duplicate || (headers.host_seen && !valid_loopback_host(headers.host, port))) {
+        send_response(socket, error_response(400, "Bad Request", "Host must be 127.0.0.1 or localhost with this API port"));
+        return;
+    }
+    if (headers.origin_duplicate) {
+        send_response(socket, error_response(400, "Bad Request", "multiple Origin headers are not allowed"));
+        return;
+    }
+    const std::string_view cors_origin = origin_is_allowed(headers.origin, allowed_origins)
+        ? std::string_view(headers.origin) : std::string_view{};
 
     const std::size_t first_space = line.find(' ');
     const std::size_t second_space = first_space == std::string::npos
@@ -232,27 +312,32 @@ void serve_one(const Chain& chain, const Socket& socket) {
     if (first_space == std::string::npos || second_space == std::string::npos ||
         line.find(' ', second_space + 1) != std::string::npos ||
         (line.substr(second_space + 1) != "HTTP/1.0" && line.substr(second_space + 1) != "HTTP/1.1")) {
-        send_response(socket, error_response(400, "Bad Request", "malformed HTTP request line"), false);
+        send_response(socket, error_response(400, "Bad Request", "malformed HTTP request line"));
         return;
     }
 
     const std::string_view method(line.data(), first_space);
     const std::string_view path(line.data() + first_space + 1, second_space - first_space - 1);
-    if (method != "GET") {
-        send_response(socket, error_response(405, "Method Not Allowed", "Only GET is allowed; this API is read-only"), false);
-        return;
-    }
     if (path.empty() || path.front() != '/' || path.find_first_of("?#") != std::string_view::npos) {
-        send_response(socket, error_response(400, "Bad Request", "request path is invalid"), true);
+        send_response(socket, error_response(400, "Bad Request", "request path is invalid"), cors_origin);
         return;
     }
-    send_response(socket, route_get(chain, path), true);
+    if (method == "OPTIONS") {
+        send_response(socket, Response{204, "No Content", {}}, cors_origin, true);
+        return;
+    }
+    if (method != "GET") {
+        send_response(socket, error_response(405, "Method Not Allowed", "Only GET is allowed; this API is read-only"), cors_origin);
+        return;
+    }
+    send_response(socket, route_get(chain, path), cors_origin);
 }
 
 }  // namespace
 
 struct ApiServer::Impl {
     const Chain* chain{nullptr};
+    std::vector<std::string> allowed_origins;
     Listener listener;
     std::atomic<bool> stopping{false};
     std::atomic<unsigned> active{0};
@@ -279,7 +364,7 @@ struct ApiServer::Impl {
             try {
                 std::thread([this, peer = std::move(peer)]() mutable {
                     try {
-                        serve_one(*chain, peer);
+                        serve_one(*chain, peer, listener.port, allowed_origins);
                     } catch (...) {
                         // A malformed request or allocation failure must not terminate the node process.
                     }
@@ -311,9 +396,20 @@ ApiServer& ApiServer::operator=(ApiServer&& other) noexcept {
 }
 
 bool ApiServer::start(const Chain& chain, std::uint16_t port, std::string* error) {
+    return start(chain, port, std::vector<std::string>{}, error);
+}
+
+bool ApiServer::start(const Chain& chain, std::uint16_t port,
+                      const std::vector<std::string>& allowed_origins, std::string* error) {
     if (!impl_ || impl_->started) {
         if (error) *error = "API server is already started";
         return false;
+    }
+    for (const std::string& origin : allowed_origins) {
+        if (!valid_origin_value(origin)) {
+            if (error) *error = "CORS origins must be exact http:// or https:// origins; '*' is forbidden";
+            return false;
+        }
     }
     if (!net_startup(error)) return false;
     impl_->network_started = true;
@@ -323,6 +419,7 @@ bool ApiServer::start(const Chain& chain, std::uint16_t port, std::string* error
         return false;
     }
     impl_->chain = &chain;
+    impl_->allowed_origins = allowed_origins;
     impl_->stopping.store(false, std::memory_order_release);
     impl_->started = true;
     try {
