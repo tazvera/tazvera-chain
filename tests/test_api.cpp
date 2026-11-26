@@ -141,6 +141,43 @@ int main() {
     CHECK(body(assets).find("\"created_at\":\"1\"") != std::string::npos);
     const Hash32 registered_id = asset_id(CHAIN_ID, owner.address, 0);
     CHECK(body(assets).find(to_hex(registered_id)) != std::string::npos);
+    // Registry-wide listing is cursor-paginated in canonical asset-id order.
+    std::vector<Hash32> extra_ids;
+    for (std::uint64_t nonce = 1; nonce <= 2; ++nonce) {
+        Transaction extra;
+        extra.kind = TxKind::RegisterAsset;
+        extra.from = owner.address; extra.owner = owner.address; extra.pubkey = owner.pk;
+        extra.nonce = nonce;
+        extra.asset_kind = static_cast<std::uint8_t>(AssetKind::Vehicle);
+        extra.doc_hash.fill(static_cast<std::uint8_t>(nonce + 10));
+        CHECK(sign(owner.sk, extra.signable_bytes(), extra.signature));
+        CHECK(chain.append_block({extra}, static_cast<std::int64_t>(nonce + 1)).ok);
+        extra_ids.push_back(asset_id(CHAIN_ID, owner.address, nonce));
+    }
+    const std::string registry = request(port, "GET /assets HTTP/1.1\r\n\r\n");
+    CHECK(status_line(registry).find("200") != std::string::npos);
+    CHECK(body(registry).find("\"assets\":[") != std::string::npos);
+    CHECK(body(registry).find("\"next_after\":null") != std::string::npos);
+    CHECK(body(registry).find(to_hex(registered_id)) != std::string::npos);
+    CHECK(body(registry).find(to_hex(extra_ids[0])) != std::string::npos);
+    CHECK(body(registry).find(to_hex(extra_ids[1])) != std::string::npos);
+
+    const std::string first_page = request(port, "GET /assets?limit=1 HTTP/1.1\r\n\r\n");
+    CHECK(status_line(first_page).find("200") != std::string::npos);
+    CHECK(body(first_page).find(to_hex(chain.state().assets().begin()->first)) != std::string::npos);
+    CHECK(body(first_page).find("\"next_after\":\"") != std::string::npos);
+    const std::string second_page = request(port, "GET /assets?after=" +
+        to_hex(chain.state().assets().begin()->first) + "&limit=1 HTTP/1.1\r\n\r\n");
+    CHECK(status_line(second_page).find("200") != std::string::npos);
+    CHECK(body(second_page).find("\"assets\":[{") != std::string::npos);
+    CHECK(body(second_page).find(to_hex(chain.state().assets().begin()->first)) == std::string::npos);
+    const std::string bad_cursor = request(port, "GET /assets?after=bad HTTP/1.1\r\n\r\n");
+    CHECK(status_line(bad_cursor).find("400") != std::string::npos);
+    const std::string bad_limit = request(port, "GET /assets?limit=101 HTTP/1.1\r\n\r\n");
+    CHECK(status_line(bad_limit).find("400") != std::string::npos);
+    const std::string zero_limit = request(port, "GET /assets?limit=0 HTTP/1.1\r\n\r\n");
+    CHECK(status_line(zero_limit).find("400") != std::string::npos);
+
     const std::string one_asset = request(port, "GET /asset/" + to_hex(registered_id) + " HTTP/1.1\r\n\r\n");
     CHECK(status_line(one_asset).find("200") != std::string::npos);
     CHECK(body(one_asset).find(to_hex(asset.doc_hash)) != std::string::npos);
