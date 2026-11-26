@@ -197,7 +197,7 @@ bool read_request_headers(const Socket& socket, Deadline deadline, RequestHeader
             line.push_back(byte[0]);
             ++consumed;
             if (consumed > kMaxHeaderBytes) return false;
-            if (line.size() >= 2 && line[line.size() - 2] == '\\r' && line.back() == '\\n') {
+            if (line.size() >= 2 && line[line.size() - 2] == '\r' && line.back() == '\n') {
                 line.resize(line.size() - 2);
                 break;
             }
@@ -207,9 +207,9 @@ bool read_request_headers(const Socket& socket, Deadline deadline, RequestHeader
         if (colon == std::string::npos || colon == 0) return false;
         const std::string_view name(line.data(), colon);
         std::size_t value_start = colon + 1;
-        while (value_start < line.size() && (line[value_start] == ' ' || line[value_start] == '\\t')) ++value_start;
+        while (value_start < line.size() && (line[value_start] == ' ' || line[value_start] == '\t')) ++value_start;
         std::size_t value_end = line.size();
-        while (value_end > value_start && (line[value_end - 1] == ' ' || line[value_end - 1] == '\\t')) --value_end;
+        while (value_end > value_start && (line[value_end - 1] == ' ' || line[value_end - 1] == '\t')) --value_end;
         const std::string value = line.substr(value_start, value_end - value_start);
         if (ascii_iequals(name, "host")) {
             if (headers.host_seen) headers.host_duplicate = true;
