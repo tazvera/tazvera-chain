@@ -25,7 +25,7 @@
 - यह public testnet या production network नहीं है; कोई public endpoint या public peer network नहीं।
 - अलग-अलग कंप्यूटरों के बीच P2P connectivity नहीं।
 - Peer authentication नहीं; local prototype को hostile network के लिए सुरक्षित न मानें।
-- Finality या production-grade chain selection/security guarantee नहीं।
+- Local demo sync को production network की सुरक्षा या स्थिरता की guarantee न मानें।
 - Wallet, smart contracts, staking या production validator economics नहीं।
 - HTTP API में transaction submit/write endpoint नहीं है।
 - Prototype transfer fee 1000 utzv है और local model में burn होती है; यह अंतिम या approved fee नहीं।
