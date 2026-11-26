@@ -151,6 +151,7 @@ int main(int argc, char** argv) {
     std::string listen_port;
     std::string serve_port;
     std::string api_port_text;
+    std::vector<std::string> api_allow_origins;
     std::string max_peers_text;
     std::string serve_timeout_text;
     std::string every_text;
@@ -191,6 +192,23 @@ int main(int argc, char** argv) {
             if (seen_api) return usage_error("--api was given twice");
             seen_api = true; api_port_text = argv[++i]; continue;
         }
+        if (a == "--api-allow-origin" && i + 1 < argc) {
+            const std::string origin = argv[++i];
+            if (origin == "*") return usage_error("--api-allow-origin does not accept '*'");
+            const bool http = origin.rfind("http://", 0) == 0;
+            const bool https = origin.rfind("https://", 0) == 0;
+            const std::size_t scheme = https ? 8u : (http ? 7u : 0u);
+            if (scheme == 0 || origin.size() == scheme)
+                return usage_error("--api-allow-origin must be an exact http:// or https:// origin");
+            for (std::size_t n = scheme; n < origin.size(); ++n) {
+                const unsigned char c = static_cast<unsigned char>(origin[n]);
+                if (c <= 0x20 || c == 0x7f || c == '/' || c == '?' || c == '#' ||
+                    c == '@' || c == '*' || c == '\\\\' || c == ',')
+                    return usage_error("--api-allow-origin must contain only an origin, without path or credentials");
+            }
+            api_allow_origins.push_back(origin);
+            continue;
+        }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
         if (a == "--serve-timeout" && i + 1 < argc) { serve_timeout_text = argv[++i]; continue; }
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
@@ -206,6 +224,8 @@ int main(int argc, char** argv) {
         }
         return usage_error("unknown argument \"" + a + "\"");
     }
+    if (!api_allow_origins.empty() && api_port_text.empty())
+        return usage_error("--api-allow-origin requires --api");
     // Validate allowlist configuration before loading the chain or opening sockets. Empty files mean deny all.
     if (allowlist_enabled && !require_identity)
         return usage_error("--allow-peer and --allow-peer-file require --require-identity");
@@ -241,7 +261,7 @@ int main(int argc, char** argv) {
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
         if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
-            !serve_port.empty() || !api_port_text.empty() || seen_key || !identity_file.empty())
+            !serve_port.empty() || !api_port_text.empty() || !api_allow_origins.empty() || seen_key || !identity_file.empty())
             return usage_error("--new-key makes a key and stops; it cannot be combined with other actions");
         if (std::ifstream(new_key_file)) return usage_error("the key file already exists; refusing to overwrite it");
         taz::PrivKey sk{};
@@ -335,7 +355,7 @@ int main(int argc, char** argv) {
             parsed.ptr != api_port_text.data() + api_port_text.size() || value == 0 || value > 65535)
             return usage_error("--api port must be a decimal number between 1 and 65535");
         taz::ApiServer api;
-        if (!api.start(chain, static_cast<std::uint16_t>(value), &err)) {
+        if (!api.start(chain, static_cast<std::uint16_t>(value), api_allow_origins, &err)) {
             std::cerr << "taznode: cannot start HTTP API: " << err << "\n";
             return 3;
         }
