@@ -125,7 +125,7 @@ Response route_get(const Chain& chain, std::string_view path, std::string_view q
 
         const auto& registry = chain.state().assets();
         auto it = after_seen ? registry.upper_bound(after) : registry.begin();
-        std::string body = "{\\"assets\\":[";
+        std::string body = "{\"assets\":[";
         std::size_t count = 0;
         Hash32 last{};
         bool has_last = false;
@@ -137,13 +137,13 @@ Response route_get(const Chain& chain, std::string_view path, std::string_view q
             ++count;
             ++it;
         }
-        body += "],\\"next_after\\":";
+        body += "],\"next_after\":";
         body += it != registry.end() && has_last ? json_string(to_hex(last)) : "null";
         body.push_back('}');
         return {200, "OK", std::move(body)};
     }
 
-Response route_get(const Chain& chain, std::string_view path, std::string_view query = {} {
+    if (path == "/status") {
     if (path == "/status") {
         return {200, "OK",
             "{\"chain_id\":" + json_string(CHAIN_ID) +
