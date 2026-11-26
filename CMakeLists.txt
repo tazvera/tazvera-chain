@@ -32,7 +32,7 @@ if(TAZVERA_SANITIZED)
     message(STATUS "TAZVERA: reduced fuzz workload (sanitizer build)")
 endif()
 
-find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
 
 add_library(tazcore
     src/crypto.cpp
@@ -48,9 +48,10 @@ add_library(tazcore
     src/net.cpp
     src/fork.cpp
     src/auth.cpp
+    src/tls.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(tazcore PUBLIC OpenSSL::Crypto)
+target_link_libraries(tazcore PUBLIC OpenSSL::Crypto OpenSSL::SSL)
 if(WIN32)
     target_link_libraries(tazcore PUBLIC ws2_32)   # v9.0: sockets on Windows
 endif()
@@ -128,6 +129,10 @@ add_test(NAME taz_producer_tests COMMAND taz_producer_tests)
 # v9.1: regression tests for the network problems found in v9.0 (a legal block too big for one message, a block over the
 # sync budget that never syncs, a future-dated block that jams a chain, a silently ignored --transfer).
 find_package(Threads REQUIRED)
+add_executable(taz_tls_tests tests/test_tls.cpp)
+target_link_libraries(taz_tls_tests PRIVATE tazcore Threads::Threads)
+add_test(NAME taz_tls_tests COMMAND taz_tls_tests)
+
 add_executable(taz_auth_tests tests/test_auth.cpp)
 target_link_libraries(taz_auth_tests PRIVATE tazcore)
 add_test(NAME taz_auth_tests COMMAND taz_auth_tests)
