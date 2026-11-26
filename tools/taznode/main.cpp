@@ -1,11 +1,8 @@
 // taznode — the first, deliberately small, node binary.
 //
-// What it does today: reads its configuration, loads the chain through load_chain_at_startup() (which refuses
-// to load without a trusted genesis commitment), and prints what it loaded so an operator can compare the
-// genesis commitment with the release notes.
-//
-// What it does NOT do: create a genesis, produce blocks, talk to other nodes, or listen on a socket. Those are
-// the next steps, and none of them is pretended here.
+// It loads the chain through load_chain_at_startup() (which refuses to load without a trusted genesis
+// commitment) and prints what it loaded. Nothing listens by default: peer networking and the read-only
+// loopback HTTP API are explicit opt-in modes.
 #include "taz/startup.hpp"
 #include "taz/crypto.hpp"
 #include "taz/export.hpp"
@@ -13,9 +10,11 @@
 #include "taz/net.hpp"
 #include "taz/fork.hpp"
 #include "taz/auth.hpp"
+#include "taz/api.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <set>
@@ -39,6 +38,7 @@ constexpr const char* kUsage =
     "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
+    "  --api <port>              read-only HTTP API on 127.0.0.1 (GET only; disabled by default)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
     "  --serve-timeout <s>       stop waiting for peers after this many seconds (default: no limit)\n"
     "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
@@ -150,6 +150,7 @@ int main(int argc, char** argv) {
     std::string transfer_spec;
     std::string listen_port;
     std::string serve_port;
+    std::string api_port_text;
     std::string max_peers_text;
     std::string serve_timeout_text;
     std::string every_text;
@@ -161,7 +162,7 @@ int main(int argc, char** argv) {
     bool allowlist_enabled = false;
     bool require_identity = false;
     std::string peer_port;
-    bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false;
+    bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false, seen_api = false;
     std::string new_key_file;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -186,6 +187,10 @@ int main(int argc, char** argv) {
         }
         if (a == "--listen" && i + 1 < argc) { listen_port = argv[++i]; continue; }
         if (a == "--serve" && i + 1 < argc) { serve_port = argv[++i]; continue; }
+        if (a == "--api" && i + 1 < argc) {
+            if (seen_api) return usage_error("--api was given twice");
+            seen_api = true; api_port_text = argv[++i]; continue;
+        }
         if (a == "--max-peers" && i + 1 < argc) { max_peers_text = argv[++i]; continue; }
         if (a == "--serve-timeout" && i + 1 < argc) { serve_timeout_text = argv[++i]; continue; }
         if (a == "--every" && i + 1 < argc) { every_text = argv[++i]; continue; }
@@ -236,7 +241,7 @@ int main(int argc, char** argv) {
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
         if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
-            !serve_port.empty() || seen_key || !identity_file.empty())
+            !serve_port.empty() || !api_port_text.empty() || seen_key || !identity_file.empty())
             return usage_error("--new-key makes a key and stops; it cannot be combined with other actions");
         if (std::ifstream(new_key_file)) return usage_error("the key file already exists; refusing to overwrite it");
         taz::PrivKey sk{};
@@ -265,6 +270,7 @@ int main(int argc, char** argv) {
     // Creating a chain: no pin is needed, because there is nothing to trust yet. The commitment this prints is
     // what an operator hands to everyone else, and what this node will demand on every later start.
     if (!init_specs.empty()) {
+        if (!api_port_text.empty()) return usage_error("--api needs an existing chain; it cannot be combined with --init-genesis");
         if (init_specs.size() != 2) return usage_error("--init-genesis must be given exactly twice");
         taz::Address a0{}, a1{};
         taz::Amount n0 = 0, n1 = 0;
@@ -316,6 +322,27 @@ int main(int argc, char** argv) {
               << " genesis=" << taz::to_hex(chain.genesis_commitment())
               << " state_root=" << taz::to_hex(chain.state().state_root())
               << "\n";
+
+    // The HTTP API is a separate, explicitly enabled read-only mode. It never shares the chain with
+    // block production or peer sync, so its concurrent readers always observe a stable Chain object.
+    if (!api_port_text.empty()) {
+        if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty() || !transfer_spec.empty() ||
+            !every_text.empty() || !retries_text.empty() || !max_peers_text.empty() || !serve_timeout_text.empty())
+            return usage_error("--api is a read-only service mode; do not combine it with peer sync or --transfer");
+        unsigned int value = 0;
+        const auto parsed = std::from_chars(api_port_text.data(), api_port_text.data() + api_port_text.size(), value);
+        if (api_port_text.empty() || parsed.ec != std::errc{} ||
+            parsed.ptr != api_port_text.data() + api_port_text.size() || value == 0 || value > 65535)
+            return usage_error("--api port must be a decimal number between 1 and 65535");
+        taz::ApiServer api;
+        if (!api.start(chain, static_cast<std::uint16_t>(value), &err)) {
+            std::cerr << "taznode: cannot start HTTP API: " << err << "\n";
+            return 3;
+        }
+        std::cout << "taznode: read-only HTTP API listening on 127.0.0.1:" << api.port() << std::endl;
+        api.wait();
+        return 0;
+    }
 
     // ---- talk to peers ----
     // Deliberately small: one peer at a time, no threads, no peer list, no discovery. --listen serves exactly one

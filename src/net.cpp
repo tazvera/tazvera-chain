@@ -123,7 +123,7 @@ Socket& Socket::operator=(Socket&& other) noexcept {
     return *this;
 }
 
-bool listen_loopback(std::uint16_t port, Listener& out, std::string* error) {
+bool listen_loopback(std::uint16_t port, Listener& out, std::string* error, int backlog) {
     const socket_t handle = ::socket(AF_INET, SOCK_STREAM, 0);
     if (handle == kInvalidSocket) {
         if (error) *error = "could not create the listening socket";
@@ -139,7 +139,7 @@ bool listen_loopback(std::uint16_t port, Listener& out, std::string* error) {
         if (error) *error = "could not bind 127.0.0.1:" + std::to_string(port);
         return false;
     }
-    if (::listen(handle, 4) != 0) {
+    if (backlog < 1 || ::listen(handle, backlog) != 0) {
         if (error) *error = "could not listen";
         return false;
     }
@@ -250,7 +250,7 @@ bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::
     out.clear();
     // v9.1: no out.reserve(count). `count` is the length the PEER announced; reserving it up front hands any
     // stranger a large allocation for a five-byte header. The string grows as real bytes arrive.
-    std::vector<char> buffer(16 * 1024);
+    std::vector<char> buffer(std::min<std::size_t>(16 * 1024, count));
     while (out.size() < count) {
         // The per-call socket timeout alone lets a peer that trickles one byte every few seconds hold this
         // process for as long as it likes. With a deadline, the remaining time also becomes the socket timeout,

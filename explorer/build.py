@@ -11,6 +11,8 @@ a = sys.argv[1] if len(sys.argv) > 1 else "demo_chain.json"
 b = sys.argv[2] if len(sys.argv) > 2 else "demo_safety_chain.json"
 c = sys.argv[3] if len(sys.argv) > 3 else "demo_recovery_chain.json"
 page = (here / "page.src.html").read_text().replace("__DEMO_JSON__", load(a)).replace("__DEMO_SAFETY_JSON__", load(b)).replace("__DEMO_RECOVERY_JSON__", load(c))
+script = (here / "script.src.js").read_text().replace("</", "<\\/")
+page = page.replace("__SCRIPT_JS__", script)
 head = '<!doctype html>\n<html lang="hi">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n</head>\n<body>\n'
 (here / "index.html").write_text(head + page + "\n</body>\n</html>\n")
 print("wrote", here / "index.html")
