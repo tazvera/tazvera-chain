@@ -5,8 +5,9 @@
 // when the chain file is real and valid, and that creating a genesis never overwrites an existing chain file.
 // It also produces a real block: a key signs a transfer, the node saves it, and a restart finds it at the same
 // height with the same state root.
-// Exit codes: 0 ok, 2 usage, 3 refused to load / refused peer, 4 refused to overwrite, 5 block refused.
+// Exit codes: 0 ok, 2 usage, 3 refused to load / refused peer / refused exclusive creation, 5 block refused.
 #include <cstdlib>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -89,8 +90,28 @@ int main() {
     // 1b. creating again over that file is refused, and the file it would have replaced is untouched
     const std::string before = slurp(chain);
     CHECK(!before.empty());
-    CHECK(run(exe + " --chain " + q(chain) + " --init-genesis " + a0 + ":500 --init-genesis " + a1 + ":500") == 4);
+    CHECK(run(exe + " --chain " + q(chain) + " --init-genesis " + a0 + ":500 --init-genesis " + a1 + ":500") == 3);
     CHECK(slurp(chain) == before);                       // byte for byte, not "roughly the same"
+
+
+    // 1c. Two independent taznode processes race to create one path. Exactly one may win.
+    {
+        const std::string race_chain = tmpdir() + "/node-create-race.json";
+        const std::string log1 = tmpdir() + "/node-create-race-1.log";
+        const std::string log2 = tmpdir() + "/node-create-race-2.log";
+        fs::remove(race_chain, ec); fs::remove(log1, ec); fs::remove(log2, ec);
+        const std::string args = " --chain " + q(race_chain) + " --init-genesis " + a0 + ":1000 --init-genesis " + a1 + ":0";
+        std::atomic<int> ready{0}; std::atomic<bool> go{false};
+        int rc1 = -1, rc2 = -1;
+        std::thread p1([&] { ++ready; while (!go.load()) std::this_thread::yield(); rc1 = run(exe + args + " > " + q(log1) + " 2>&1"); });
+        std::thread p2([&] { ++ready; while (!go.load()) std::this_thread::yield(); rc2 = run(exe + args + " > " + q(log2) + " 2>&1"); });
+        while (ready.load() != 2) std::this_thread::yield();
+        go.store(true); p1.join(); p2.join();
+        CHECK((rc1 == 0 && rc2 != 0) || (rc2 == 0 && rc1 != 0));
+        const std::string loser_log = rc1 == 0 ? slurp(log2) : slurp(log1);
+        CHECK(loser_log.find("the chain file already exists; refusing to overwrite it (creation is exclusive)") != std::string::npos);
+        fs::remove(race_chain, ec); fs::remove(race_chain + ".lock", ec); fs::remove(log1, ec); fs::remove(log2, ec);
+    }
 
     // 2. the right pin opens it
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + pin) == 0);

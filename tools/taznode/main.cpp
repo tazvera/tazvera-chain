@@ -14,6 +14,7 @@
 #include "taz/fork.hpp"
 #include "taz/auth.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -274,20 +275,10 @@ int main(int argc, char** argv) {
             return usage_error("a genesis address must be 40 hex characters");
         if (!parse_amount(init_specs[0].substr(c0 + 1), n0) || !parse_amount(init_specs[1].substr(c1 + 1), n1))
             return usage_error("a genesis amount must be a decimal number");
-        // Never replace an existing chain. A bootstrap command that quietly overwrites is a way to destroy the
-        // only copy of a chain, and the operator would find out afterwards. Check first, say why, exit non-zero.
-        // (This is a check-then-write, so it is not atomic against another process writing the same path at the
-        // same instant; that is acceptable for a one-off bootstrap command, and it is not a security boundary.)
-        std::error_code exists_ec;
-        if (std::filesystem::exists(chain_file, exists_ec)) {
-            std::cerr << "taznode: refusing to create " << chain_file
-                      << ": the file already exists and will not be replaced\n";
-            return 4;
-        }
         taz::Chain fresh;
         if (!fresh.init_genesis(a0, n0, a1, n1)) return usage_error("genesis could not be created (same address twice?)");
         std::string save_err;
-        if (!taz::save_chain_json(fresh, chain_file, &save_err)) {
+        if (!taz::save_chain_json(fresh, chain_file, &save_err, true)) {
             std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
             return 3;
         }

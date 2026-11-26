@@ -12,6 +12,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <tuple>
+#include <thread>
 #include <utility>
 
 #ifndef _WIN32
@@ -73,7 +74,8 @@ public:
     WriterLock& operator=(const WriterLock&) = delete;
     ~WriterLock() { release(); }
 
-    bool acquire(const std::string& lock_path, std::string* error) {
+    bool acquire(const std::string& lock_path, std::string* error, bool* busy = nullptr) {
+        if (busy) *busy = false;
         const std::string warning =
             "; warning: NFS/SMB and other network filesystems may not provide reliable OS file locking; "
             "use a local filesystem for a shared chain file";
@@ -86,6 +88,7 @@ public:
         if (::flock(fd_, LOCK_EX | LOCK_NB) != 0) {
             const int saved = errno;
             ::close(fd_); fd_ = -1;
+            if (saved == EWOULDBLOCK && busy) *busy = true;
             if (error) *error = std::string("writer lock is busy or unavailable: ") + std::strerror(saved) + warning;
             return false;
         }
@@ -104,6 +107,7 @@ public:
                           0, MAXDWORD, MAXDWORD, &overlapped)) {
             const DWORD code = ::GetLastError();
             ::CloseHandle(handle_); handle_ = INVALID_HANDLE_VALUE;
+            if ((code == ERROR_LOCK_VIOLATION || code == ERROR_SHARING_VIOLATION) && busy) *busy = true;
             if (error) *error = "writer lock is busy or unavailable (Windows error " + std::to_string(code) + ")" + warning;
             return false;
         }
@@ -573,7 +577,7 @@ bool load_chain_json(const std::string& path, Chain& out, std::string* error, co
     }
 }
 
-bool save_chain_json(const Chain& chain, const std::string& path, std::string* error) {
+bool save_chain_json(const Chain& chain, const std::string& path, std::string* error, bool refuse_if_exists) {
     auto set_err = [&](const std::string& m) { if (error) *error = m; };
     if (chain.blocks().empty()) { set_err("the chain has no genesis; nothing to save"); return false; }
     static std::atomic<unsigned long> counter{0};
@@ -583,7 +587,36 @@ bool save_chain_json(const Chain& chain, const std::string& path, std::string* e
         // previous complete file while a new temporary file is prepared and atomically renamed.
         // The sidecar is permanent and is never cleaned up by the stale-temp sweep.
         WriterLock writer_lock;
-        if (!writer_lock.acquire(path + ".lock", error)) return false;
+        if (refuse_if_exists) {
+            // The normal writer lock is deliberately non-blocking. For exclusive creation, wait briefly
+            // for a competing creator to finish so the loser can report the authoritative exists result.
+            const auto lock_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            for (;;) {
+                std::string lock_error;
+                bool busy = false;
+                if (writer_lock.acquire(path + ".lock", &lock_error, &busy)) break;
+                if (!busy || std::chrono::steady_clock::now() >= lock_deadline) {
+                    set_err(lock_error);
+                    return false;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        } else if (!writer_lock.acquire(path + ".lock", error)) {
+            return false;
+        }
+        // Exclusive creation must be decided while holding the same lock as the atomic replace.
+        if (refuse_if_exists) {
+            namespace fs = std::filesystem;
+            std::error_code exists_ec;
+            if (fs::exists(path_from_utf8(path), exists_ec)) {
+                set_err("the chain file already exists; refusing to overwrite it (creation is exclusive)");
+                return false;
+            }
+            if (exists_ec) {
+                set_err("could not check whether the chain file already exists: " + exists_ec.message());
+                return false;
+            }
+        }
         // v8.9: inside the try, and the helper is noexcept, so no filesystem error can escape save_chain_json.
         sweep_stale_temp_files(path);   // housekeeping only, never fatal
         const std::string body = to_json(chain);

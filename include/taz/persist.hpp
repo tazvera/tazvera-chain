@@ -43,7 +43,7 @@ struct LoadOptions {
 // Crash-safe: the data goes to a new temporary file next to the target, is flushed to disk and read back,
 // and only then renamed over the target (POSIX: the directory is flushed too). A crash or a failed write
 // leaves the old file untouched. Returns false and sets *error on any problem.
-bool save_chain_json(const Chain& chain, const std::string& path, std::string* error = nullptr);
+bool save_chain_json(const Chain& chain, const std::string& path, std::string* error = nullptr, bool refuse_if_exists = false);
 
 // Reads a chain file and verifies it from genesis. On success `out` is replaced by the loaded chain; on any
 // failure `out` is not touched.
