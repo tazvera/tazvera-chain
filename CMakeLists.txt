@@ -46,6 +46,7 @@ add_library(tazcore
     src/startup.cpp
     src/hello.cpp
     src/net.cpp
+    src/api.cpp
     src/fork.cpp
     src/auth.cpp
     src/tls.cpp
@@ -175,6 +176,11 @@ add_executable(taz_asset_registry_tests tests/test_asset_registry.cpp)
 target_link_libraries(taz_asset_registry_tests PRIVATE tazcore)
 add_test(NAME taz_asset_registry_tests COMMAND taz_asset_registry_tests)
 set_tests_properties(taz_asset_registry_tests PROPERTIES PASS_REGULAR_EXPRESSION "asset registry tests: all passed \\(10 cases\\)")
+
+# Read-only loopback HTTP API (test-first).
+add_executable(taz_api_tests tests/test_api.cpp)
+target_link_libraries(taz_api_tests PRIVATE tazcore Threads::Threads)
+add_test(NAME taz_api_tests COMMAND taz_api_tests)
 add_executable(taz_recovery_assets_tests tests/test_recovery_assets.cpp)
 target_link_libraries(taz_recovery_assets_tests PRIVATE tazcore)
 add_test(NAME taz_recovery_assets_tests COMMAND taz_recovery_assets_tests)

@@ -113,8 +113,17 @@ int main() {
         fs::remove(race_chain, ec); fs::remove(race_chain + ".lock", ec); fs::remove(log1, ec); fs::remove(log2, ec);
     }
 
-    // 2. the right pin opens it
+    // 2. the right pin opens it. Without --api the node must not open an HTTP listener.
+    std::string api_probe_error;
+    CHECK(taz::net_startup(&api_probe_error));
+    taz::Listener unused_api_port;
+    CHECK(taz::listen_loopback(0, unused_api_port, &api_probe_error));
+    const std::uint16_t no_api_port = unused_api_port.port;
+    unused_api_port.socket.close();
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + pin) == 0);
+    taz::Socket api_probe;
+    CHECK(!taz::connect_loopback(no_api_port, api_probe, &api_probe_error));
+    taz::net_cleanup();
 
     // 3. a wrong (but well-formed) pin is refused
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + std::string(64, 'a')) == 3);

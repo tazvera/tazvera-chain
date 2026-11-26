@@ -101,6 +101,22 @@ const report = (ok, label, detail) => {
     cardText.includes(raw.doc_hash) && cardText.includes("ज़मीन") && cardText.includes(assetTx.assetId),
     "RegisterAsset explorer card में owner/kind/doc_hash दिखें");
 
+  const assetTransfer = structuredClone(identityBase);
+  assetTransfer.format = "tazvera-chain-export-v4";
+  const transferRaw = assetTransfer.blocks[1].transactions[0];
+  transferRaw.kind = "7"; transferRaw.amount = "0"; transferRaw.ref = "cd".repeat(32);
+  transferRaw.owner = transferRaw.from; transferRaw.asset_kind = "0"; transferRaw.doc_hash = "00".repeat(32);
+  const parsedTransfer = api.parseChain(JSON.stringify(assetTransfer));
+  const transferTx = parsedTransfer.blocks[1].txs[0];
+  assert(transferTx.kind === 7 && transferTx.owner === transferRaw.owner &&
+    transferTx.to === transferRaw.to && transferTx.ref === transferRaw.ref,
+    "TransferAsset (kind 7) के owner/to/asset_id parse");
+  const transferCard = api.blockCard(parsedTransfer.blocks[1]);
+  const transferCardText = JSON.stringify(transferCard.children);
+  assert(transferCardText.includes("Asset transfer") && transferCardText.includes(transferRaw.owner) &&
+    transferCardText.includes(transferRaw.to) && transferCardText.includes(transferRaw.ref),
+    "TransferAsset explorer card में पुराना मालिक, नया मालिक और Asset ID दिखें");
+
 
   for (const name of demos) {
     const text = fs.readFileSync(name, "utf8");

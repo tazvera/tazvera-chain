@@ -72,7 +72,7 @@ struct Listener {
 };
 
 // port 0 asks the OS for a free port; the chosen one comes back in Listener::port.
-bool listen_loopback(std::uint16_t port, Listener& out, std::string* error = nullptr);
+bool listen_loopback(std::uint16_t port, Listener& out, std::string* error = nullptr, int backlog = 4);
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error = nullptr);
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
