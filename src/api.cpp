@@ -295,7 +295,7 @@ void serve_one(const Chain& chain, const Socket& socket, std::uint16_t port,
         send_response(socket, error_response(400, "Bad Request", "request headers are malformed, incomplete or exceed 8 KiB"));
         return;
     }
-    if (!headers.host_seen || headers.host_duplicate || !valid_loopback_host(headers.host, port)) {
+    if (headers.host_duplicate || (headers.host_seen && !valid_loopback_host(headers.host, port))) {
         send_response(socket, error_response(400, "Bad Request", "Host must be 127.0.0.1 or localhost with this API port"));
         return;
     }
