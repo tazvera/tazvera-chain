@@ -19,12 +19,12 @@ static Key make_key() {
     k.address = address_from_pubkey(k.pk);
     return k;
 }
-static std::string request(std::uint16_t port, const std::string& bytes) {
+static std::string request(std::uint16_t port, const std::string& bytes, bool add_host_if_missing = true) {
     Socket socket;
     std::string error;
     if (!connect_loopback(port, socket, &error)) return {};
     std::string wire = bytes;
-    if (wire.find("Host:") == std::string::npos) {
+    if (add_host_if_missing && wire.find("Host:") == std::string::npos) {
         const std::size_t end = wire.find("\r\n\r\n");
         if (end != std::string::npos)
             wire.insert(end + 2, "Host: localhost:" + std::to_string(port) + "\r\n");
@@ -73,6 +73,12 @@ int main() {
         std::to_string(port) + "\r\nOrigin: https://app.tazvera.com\r\n\r\n");
     CHECK(status_line(default_origin).find("200") != std::string::npos);
     CHECK(default_origin.find("Access-Control-Allow-Origin:") == std::string::npos);
+
+    const std::string no_host = request(port, "GET /status HTTP/1.1\\r\\n\\r\\n", false);
+    CHECK(status_line(no_host).find("200") != std::string::npos);
+    const std::string duplicate_host = request(port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
+        std::to_string(port) + "\\r\\nHost: 127.0.0.1:" + std::to_string(port) + "\\r\\n\\r\\n", false);
+    CHECK(status_line(duplicate_host).find("400") != std::string::npos);
 
     const std::string host_ip = request(port, "GET /status HTTP/1.1\r\nHost: 127.0.0.1:" +
         std::to_string(port) + "\r\n\r\n");
