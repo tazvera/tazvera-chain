@@ -74,10 +74,10 @@ int main() {
     CHECK(status_line(default_origin).find("200") != std::string::npos);
     CHECK(default_origin.find("Access-Control-Allow-Origin:") == std::string::npos);
 
-    const std::string no_host = request(port, "GET /status HTTP/1.1\\r\\n\\r\\n", false);
+    const std::string no_host = request(port, "GET /status HTTP/1.1\r\n\r\n", false);
     CHECK(status_line(no_host).find("200") != std::string::npos);
-    const std::string duplicate_host = request(port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
-        std::to_string(port) + "\\r\\nHost: 127.0.0.1:" + std::to_string(port) + "\\r\\n\\r\\n", false);
+    const std::string duplicate_host = request(port, "GET /status HTTP/1.1\r\nHost: localhost:" +
+        std::to_string(port) + "\r\nHost: 127.0.0.1:" + std::to_string(port) + "\r\n\r\n", false);
     CHECK(status_line(duplicate_host).find("400") != std::string::npos);
 
     const std::string host_ip = request(port, "GET /status HTTP/1.1\r\nHost: 127.0.0.1:" +
