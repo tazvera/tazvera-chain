@@ -39,7 +39,7 @@ global.window = { addEventListener() {}, matchMedia: () => ({ matches: false, ad
 global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 
 const src = fs.readFileSync(path.join(__dirname, "script.src.js"), "utf8");
-const api = new Function("document", "window", "localStorage", "navigator", src + "\n;return { parseChain, verifyChain };")(
+const api = new Function("document", "window", "localStorage", "navigator", src + "\n;return { parseChain, verifyChain, blockCard };")(
   global.document, global.window, global.localStorage, global.navigator);
 
 // v8.10: any directories given on the command line are checked too — CI passes the chains that
@@ -58,6 +58,50 @@ const report = (ok, label, detail) => {
 };
 
 (async () => {
+  const assert = (ok, label, detail) => report(!!ok, label, detail || "");
+  const identityBase = JSON.parse(fs.readFileSync(path.join(__dirname, "demo_chain.json"), "utf8"));
+  const rejects = (j, label) => {
+    let message = "";
+    try { api.parseChain(JSON.stringify(j)); } catch (e) { message = e.message; }
+    assert(!!message, label, message || "फ़ाइल स्वीकार कर ली गई");
+    return message;
+  };
+  const wrongChain = structuredClone(identityBase); wrongChain.chain_id = "some-other-chain";
+  rejects(wrongChain, "गलत chain_id मना");
+  const missingChain = structuredClone(identityBase); delete missingChain.chain_id;
+  rejects(missingChain, "chain_id गायब हो तो मना");
+  const wrongProtocol = structuredClone(identityBase); wrongProtocol.protocol_version = "99";
+  rejects(wrongProtocol, "गलत protocol_version मना");
+  const missingProtocol = structuredClone(identityBase); delete missingProtocol.protocol_version;
+  rejects(missingProtocol, "protocol_version गायब हो तो मना");
+  const valid = api.parseChain(JSON.stringify(identityBase));
+  assert(valid.chainId === "tazvera-local-prototype-v1" && valid.version === 3, "सही chain_id और protocol_version पास");
+
+  const duplicate = structuredClone(identityBase);
+  duplicate.genesis_balances[0].address = duplicate.genesis_balances[1].address;
+  duplicate.genesis_balances[0].balance = "0";
+  const duplicateReport = await api.verifyChain(api.parseChain(JSON.stringify(duplicate)));
+  assert(duplicateReport.stateBroken && duplicateReport.fails.some((x) => x.includes("एक ही पता")),
+    "शून्य balance वाले duplicate genesis पते मना");
+
+  const asset = structuredClone(identityBase);
+  asset.format = "tazvera-chain-export-v4";
+  const raw = asset.blocks[1].transactions[0];
+  raw.kind = "6"; raw.amount = "0"; raw.to = "0".repeat(40);
+  raw.owner = raw.from; raw.asset_kind = "1"; raw.doc_hash = "ab".repeat(32);
+  const parsedAsset = api.parseChain(JSON.stringify(asset));
+  const assetTx = parsedAsset.blocks[1].txs[0];
+  assert(assetTx.kind === 6 && assetTx.owner === raw.owner && assetTx.assetKind === 1 &&
+    assetTx.docHash === raw.doc_hash, "RegisterAsset के owner/kind/doc_hash parse");
+  await api.verifyChain(parsedAsset); // computes the protocol-defined asset_id from chain_id, owner and nonce
+  assert(/^[0-9a-f]{64}$/.test(assetTx.assetId || ""), "RegisterAsset का asset_id निकले");
+  const card = api.blockCard(parsedAsset.blocks[1]);
+  const cardText = JSON.stringify(card.children);
+  assert(cardText.includes("Asset") && cardText.includes(raw.owner) &&
+    cardText.includes(raw.doc_hash) && cardText.includes("ज़मीन") && cardText.includes(assetTx.assetId),
+    "RegisterAsset explorer card में owner/kind/doc_hash दिखें");
+
+
   for (const name of demos) {
     const text = fs.readFileSync(name, "utf8");
     let r;
