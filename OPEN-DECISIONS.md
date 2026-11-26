@@ -75,3 +75,34 @@ They are not part of F10; address them together with the planned RWA-era Explore
 - On POSIX, the sidecar inode is checked before and after the crash/recovery cycle to prove it was not replaced.
 - Concurrent in-process writers retry transient lock contention and every successful save remains a complete valid chain.
 - No reader lock, chain-file format change, network protocol change, or Explorer code change is included.
+
+# RWA registry, part 1 — register an asset (no transfer yet)
+
+## Fixed behaviour in this change
+
+- New transaction kind `RegisterAsset` (6) with `owner` (20 bytes), `asset_kind` (1 land, 2 vehicle, 3 invoice, 4 other) and `doc_hash` (32 bytes). Only the owner may register, in the owner's own name; the signer must be the owner.
+- `asset_id = SHA-256("TAZVERA-ASSET-V1" || chain_id || owner || u64be(nonce))`, all 32 bytes. The domain length (16) is `static_assert`ed. The id is pinned in a test to digests computed with another SHA-256 implementation.
+- The registry (`asset_id -> {owner, asset_kind, doc_hash, created_at}`) is part of the state and of the state root: a non-empty registry switches the root to a new domain `TAZVERA-STATE-V4` (V3 layout plus the registry). A chain that never registers anything keeps its V1/V2/V3 root exactly as before.
+- The fee is the transfer fee (`FEE_TRANSFER_V1`, burned). Nothing else moves.
+- Only a registration carries the three new fields in the chain file; every other transaction is written exactly as before.
+
+## Protocol version
+
+- **The protocol version stays 3 (devnet).** Adding a transaction kind means that every node must upgrade at the same moment: a node that does not know kind 6 refuses a block that contains one, and the chain splits. **Before the chain is public the protocol must become 4.**
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **`chain_id` in the asset id is hashed as its raw bytes, with no length prefix.** The brief writes `|| chain_id ||`; the signed transaction bytes use a length prefix. `chain_id` is a fixed constant of the chain, so the two are equally unambiguous today. Changing this later changes every asset id.
+2. **A zero `doc_hash` is accepted.** The brief did not say. It is almost certainly a mistake by the registrant, but rejecting it is a rule nobody asked for.
+3. **The duplicate-id check in `State` is defence in depth and has no test of its own.** `asset_id` contains the owner's nonce, and a nonce is used once, so a repeated registration is refused earlier, as a bad nonce. The test for "the same registration twice" therefore proves the nonce path; the registry check cannot be reached through `apply`.
+4. **File format:** a registration is only readable in the layout that carries the veto key (format v4 and later, which is what the file label becomes for any kind of transaction 3 and above). It is refused in v1/v2 layouts.
+5. **`asset_kind` is a closed set 1..4.** A fifth kind needs a rule change (and, once public, a protocol bump).
+
+## Not done here, on purpose (separate changes)
+
+- **Transfer of ownership** of an asset. Until it exists the registry is write-once.
+- **Guardian recovery does not follow assets.** An asset is keyed by the owner's address at registration; when a key is recovered to a new address the registry still names the old one. How recovery and the registry interact is the next design question (it is the purpose of step 3 of the plan).
+- **No `taznode` command** to register an asset yet; the tests build transactions directly.
+- **The explorer (JavaScript) does not understand kind 6.** The existing demo chains contain none, so the cross-check is unaffected; showing assets is a later change.
+- **No limit on the size of the registry.** The fee is the only cost; the state root is recomputed over all of it. The loader's existing size limits (and finding F2 of the audit) apply to the chain file.
+- **Documents:** only a hash is stored. Keeping personal or confidential documents off the chain is a rule for whoever writes the application, not something the chain can enforce.

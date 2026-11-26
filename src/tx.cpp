@@ -46,11 +46,26 @@ std::vector<std::uint8_t> Transaction::signable_bytes() const {
             out.insert(out.end(), to.begin(), to.end()); out.insert(out.end(), new_owner.begin(), new_owner.end()); break;
         case TxKind::RecoveryCancel: out.insert(out.end(), to.begin(), to.end()); break; // which account is being protected
         case TxKind::Transfer: break; // (signed above in the v1 layout)
-        case TxKind::RegisterAsset: break; // STUB (tests-first commit): the asset fields are not signed yet
+        case TxKind::RegisterAsset:   // the owner, the kind and the document hash are all signed
+            out.insert(out.end(), owner.begin(), owner.end());
+            put_u8(out, asset_kind);
+            out.insert(out.end(), doc_hash.begin(), doc_hash.end());
+            break;
     }
     return out;
 }
-Hash32 asset_id(std::string_view, const Address&, std::uint64_t) { return Hash32{}; } // STUB (tests-first commit)
+Hash32 asset_id(std::string_view chain_id, const Address& owner, std::uint64_t nonce) {
+    // The length of the domain string is part of the hashed bytes, so it is pinned: "TAZVERA" (7) + "-" + "ASSET" (5) + "-" + "V1" (2).
+    constexpr std::string_view domain = "TAZVERA-ASSET-V1";
+    static_assert(domain.size() == 16, "the domain length is part of the hashed bytes");
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(domain.size() + chain_id.size() + owner.size() + 8);
+    bytes.insert(bytes.end(), domain.begin(), domain.end());
+    bytes.insert(bytes.end(), chain_id.begin(), chain_id.end());
+    bytes.insert(bytes.end(), owner.begin(), owner.end());
+    put_u64(bytes, nonce);   // big-endian, so the bytes do not depend on the machine
+    return sha256(bytes);    // all 32 bytes of the digest
+}
 Hash32 Transaction::txid() const {
     auto bytes = signable_bytes(); bytes.insert(bytes.end(), signature.begin(), signature.end());
     return sha256(bytes);
@@ -66,6 +81,8 @@ std::optional<std::string> validate_tx_shape(const Transaction& tx) {
     const bool no_new_owner = tx.new_owner == Address{};
     const bool no_guardians = tx.guardians.empty() && tx.guardian_threshold == 0 && tx.veto == Address{};
     // Fields that a kind does not use must be zero, so no two different byte strings mean the same thing.
+    if (tx.kind != TxKind::RegisterAsset && (tx.owner != Address{} || tx.asset_kind != 0 || tx.doc_hash != Hash32{}))
+        return "the owner, asset_kind and doc_hash fields belong to asset registration only";
     const bool only_safety = tx.amount == 0 && no_to && no_ref && no_new_owner && no_guardians;
     switch (tx.kind) {
         case TxKind::Transfer:
@@ -111,7 +128,12 @@ std::optional<std::string> validate_tx_shape(const Transaction& tx) {
             if (tx.to == tx.from) return "leave the account empty to cancel your own recovery";
             return std::nullopt;
         case TxKind::RegisterAsset:
-            break; // STUB (tests-first commit): falls through to "unknown transaction kind"
+            if (tx.amount != 0 || !no_to || !no_ref || !no_safety_fields || !no_new_owner || !no_guardians) return "unused fields must be zero in an asset registration";
+            if (tx.owner == Address{}) return "an asset needs an owner";
+            if (tx.owner != tx.from) return "an asset can only be registered by its owner, in the owner's own name";
+            if (tx.asset_kind < static_cast<std::uint8_t>(AssetKind::Land) || tx.asset_kind > static_cast<std::uint8_t>(AssetKind::Other))
+                return "asset_kind must be 1 (land), 2 (vehicle), 3 (invoice) or 4 (other)";
+            return std::nullopt;
     }
     return "unknown transaction kind";
 }

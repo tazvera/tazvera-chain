@@ -21,6 +21,7 @@ enum class EntryKind {
     Refunded,    // a hold could not be delivered and went back to the sender
     SafetyChanged,
     GuardiansChanged,   // the owner set or changed the trusted people
+    AssetRegistered,    // the owner registered an asset (only the fee moves)
     RecoveryVoted,      // this address (as a guardian) voted to recover someone else's account
     RecoveryCancelled,  // the owner stopped a recovery
     RecoveryMoved,      // this account's funds were moved to a new address by an agreed recovery

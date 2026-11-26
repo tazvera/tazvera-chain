@@ -58,6 +58,8 @@ std::string block_to_json(const Block& b) {
         j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
         for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
         j += "], ";
+        if (tx.kind == TxKind::RegisterAsset)   // only an asset registration carries these three fields
+            j += "\"owner\": " + hex(tx.owner) + ", \"asset_kind\": " + num(tx.asset_kind) + ", \"doc_hash\": " + hex(tx.doc_hash) + ", ";
         j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
     }
     // Same bytes as before this was lifted out of to_json: a block with no transactions closes the array on
@@ -147,6 +149,7 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
                 else if (tx.kind == TxKind::SetGuardians) add(b.height, id, Address{}, EntryKind::GuardiansChanged, 0, tx.fee);
                 else if (tx.kind == TxKind::RecoveryVote) add(b.height, id, tx.to, EntryKind::RecoveryVoted, 0, tx.fee);
                 else if (tx.kind == TxKind::RecoveryCancel) add(b.height, id, tx.to, EntryKind::RecoveryCancelled, 0, tx.fee);
+                else if (tx.kind == TxKind::RegisterAsset) add(b.height, id, Address{}, EntryKind::AssetRegistered, 0, tx.fee);
                 else if (target) add(b.height, id, target->to, EntryKind::Cancelled, target->amount, tx.fee);
             }
             if (tx.kind == TxKind::RecoveryCancel && tx.to == address && tx.from != address) add(b.height, id, tx.from, EntryKind::RecoveryCancelled, 0, 0); // stopped by the veto key
@@ -162,7 +165,7 @@ WalletStatement wallet_statement(const Chain& chain, const Address& address) {
             case EntryKind::RecoveryArrived: s.recovered_in += e.amount; break;
             case EntryKind::RecoveryMoved: s.recovered_out += e.amount; break;
             case EntryKind::SafetyChanged: case EntryKind::GuardiansChanged: case EntryKind::RecoveryVoted:
-            case EntryKind::RecoveryCancelled: case EntryKind::RecoveryDropped: break;
+            case EntryKind::RecoveryCancelled: case EntryKind::RecoveryDropped: case EntryKind::AssetRegistered: break;
         }
     }
     for (const auto& [_, h] : st.held()) {

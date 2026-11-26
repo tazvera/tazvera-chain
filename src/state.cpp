@@ -235,16 +235,25 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         }
         break;
     }
-    case TxKind::RegisterAsset: return fail("asset registration is not implemented yet"); // STUB (tests-first commit)
+    case TxKind::RegisterAsset: {
+        // Shape rules already proved: the signer is the owner, the kind is 1..4, the fee is the transfer fee.
+        const Hash32 id = asset_id(tx.chain_id, tx.owner, tx.nonce);
+        if (assets_.contains(id)) return fail("asset already registered");   // defence in depth: a nonce is used once
+        sender.balance -= tx.fee; sender.nonce += 1;
+        accounts_[tx.from] = sender;
+        assets_[id] = AssetRecord{tx.owner, tx.asset_kind, tx.doc_hash, height};
+        break;
+    }
     }
     burned_ += tx.fee;
     result.ok = true; result.burned = tx.fee; return result;
 }
 Hash32 State::state_root() const {
     bool safety_ext = !held_.empty(), guardian_ext = false;
+    const bool asset_ext = !assets_.empty();   // the registry joins the state root only once it holds something (V4)
     for (const auto& [_, a] : accounts_) { if (a.has_safety_extension()) safety_ext = true; if (a.has_guardian_extension()) guardian_ext = true; }
     std::vector<std::uint8_t> bytes;
-    if (!safety_ext && !guardian_ext) {
+    if (!safety_ext && !guardian_ext && !asset_ext) {
         // Identical to the v1 encoding, so chains that only use plain transfers keep their old roots.
         constexpr std::string_view domain = "TAZVERA-STATE-V1";
         bytes.insert(bytes.end(), domain.begin(), domain.end());
@@ -255,8 +264,11 @@ Hash32 State::state_root() const {
         put_u64(bytes, burned_);
         return sha256(bytes);
     }
-    // V2 (safety rules) is unchanged; V3 appends the guardian fields to every account. Fully length-prefixed.
-    const std::string_view domain = guardian_ext ? "TAZVERA-STATE-V3" : "TAZVERA-STATE-V2";
+    // V2 (safety rules) is unchanged; V3 appends the guardian fields to every account; V4 is V3 plus the asset registry at the end.
+    // Fully length-prefixed. A chain with an empty registry keeps its V1/V2/V3 root exactly as before.
+    static_assert(std::string_view("TAZVERA-STATE-V4").size() == 16, "the domain length is part of the hashed bytes");
+    const std::string_view domain = asset_ext ? "TAZVERA-STATE-V4" : (guardian_ext ? "TAZVERA-STATE-V3" : "TAZVERA-STATE-V2");
+    guardian_ext = guardian_ext || asset_ext;   // V4 carries the guardian fields of V3
     bytes.insert(bytes.end(), domain.begin(), domain.end());
     put_u64(bytes, accounts_.size());
     auto put_addr = [&bytes](const Address& a) { bytes.insert(bytes.end(), a.begin(), a.end()); };
@@ -284,6 +296,15 @@ Hash32 State::state_root() const {
         bytes.insert(bytes.end(), id.begin(), id.end());
         put_addr(h.from); put_addr(h.to);
         put_u64(bytes, h.amount); put_u64(bytes, h.release_height);
+    }
+    if (asset_ext) {
+        put_u64(bytes, assets_.size());
+        for (const auto& [id, rec] : assets_) {   // std::map: the same order on every node
+            bytes.insert(bytes.end(), id.begin(), id.end());
+            put_addr(rec.owner); put_u8(bytes, rec.asset_kind);
+            bytes.insert(bytes.end(), rec.doc_hash.begin(), rec.doc_hash.end());
+            put_u64(bytes, rec.created_at);
+        }
     }
     return sha256(bytes);
 }
