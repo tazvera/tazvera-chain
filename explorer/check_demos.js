@@ -114,8 +114,10 @@ const report = (ok, label, detail) => {
   const transferCard = api.blockCard(parsedTransfer.blocks[1]);
   const transferCardText = JSON.stringify(transferCard.children);
   assert(transferCardText.includes("Asset transfer") && transferCardText.includes(transferRaw.owner) &&
-    transferCardText.includes(transferRaw.to) && transferCardText.includes(transferRaw.ref),
-    "TransferAsset explorer card में पुराना मालिक, नया मालिक और Asset ID दिखें");
+    transferCardText.includes(transferRaw.to) && transferCardText.includes(transferRaw.ref) &&
+    transferCardText.includes("Asset kind:") && transferCardText.includes(String(transferRaw.asset_kind)) &&
+    transferCardText.includes(transferRaw.doc_hash),
+    "TransferAsset explorer card में owner, asset_kind, doc_hash और asset_id दिखें");
 
 
   for (const name of demos) {
