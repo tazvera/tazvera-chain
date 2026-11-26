@@ -133,7 +133,7 @@ int main() {
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + std::string(64, 'z')) == 2);
     // CORS wildcard is never a valid allow-origin, even when explicitly requested.
     CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + pin +
-              " --api-allow-origin *") == 2);
+              " --api-allow-origin " + q("*")) == 2);
 
     // 4b. --new-key makes a key file, prints the address, and never replaces an existing one
     {
