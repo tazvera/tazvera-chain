@@ -101,7 +101,7 @@ Windows UCRT64 में copy के लिए cp उपलब्ध है; Win
     ./build/taznode --chain local-chain.json --expect-genesis GENESIS_HASH
     ./build/taznode --chain peer-chain.json --expect-genesis GENESIS_HASH
 
-**क्या दिखना चाहिए:** दोनों में समान chain का genesis commitment और synced height दिखे। कोई block बना/आया नहीं है तो height समान रहना ही अपेक्षित है। यह consensus या finality का प्रमाण नहीं है।
+**क्या दिखना चाहिए:** दोनों में समान chain का genesis commitment और synced height दिखे। कोई block बना/आया नहीं है तो height समान रहना ही अपेक्षित है। यह production network की सुरक्षा या स्थिरता का प्रमाण नहीं है।
 
 ## आम गलतियाँ
 
