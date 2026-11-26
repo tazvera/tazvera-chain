@@ -92,3 +92,11 @@ Error responses use JSON: `{"error":"description"}`. The API does not expose wri
 मालिकाना बदलने के लिए `TransferAsset` transaction बनाना और मौजूदा मालिक के अधिकार से उसे sign करना आवश्यक है। **अभी यह काम taznode के माध्यम से ही किया जा सकता है; वॉलेट में transaction बनाने/भेजने की सुविधा अभी उपलब्ध नहीं है।**
 
 **महत्वपूर्ण:** यह HTTP API केवल पढ़ने के लिए है। इसमें कोई write endpoint नहीं है — वॉलेट इस API से balance और संपत्तियाँ पढ़ सकता है, लेकिन इससे transfer या कोई अन्य transaction submit नहीं कर सकता।
+
+
+## जानी हुई सीमाएँ
+
+- HTTP API केवल पढ़ने के लिए है; लिखने या transaction भेजने का कोई endpoint नहीं है।
+- CORS डिफ़ॉल्ट रूप से बंद है।
+- API केवल `127.0.0.1` पर सुनता है; LAN या सार्वजनिक नेटवर्क से उपलब्ध नहीं है।
+- सभी 64-bit integer मान JSON number के बजाय string में लौटते हैं।
