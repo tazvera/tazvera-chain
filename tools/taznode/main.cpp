@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
             for (std::size_t n = scheme; n < origin.size(); ++n) {
                 const unsigned char c = static_cast<unsigned char>(origin[n]);
                 if (c <= 0x20 || c == 0x7f || c == '/' || c == '?' || c == '#' ||
-                    c == '@' || c == '*' || c == '\\\\' || c == ',')
+                    c == '@' || c == '*' || c == '\\' || c == ',')
                     return usage_error("--api-allow-origin must contain only an origin, without path or credentials");
             }
             api_allow_origins.push_back(origin);
