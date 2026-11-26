@@ -39,6 +39,7 @@ constexpr const char* kUsage =
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
     "  --api <port>              read-only HTTP API on 127.0.0.1 (GET only; disabled by default)\n"
+    "  --api-allow-origin <origin> allow exact browser Origin (repeatable; default: none)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
     "  --serve-timeout <s>       stop waiting for peers after this many seconds (default: no limit)\n"
     "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
