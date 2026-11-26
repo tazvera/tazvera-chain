@@ -169,6 +169,7 @@ struct RequestHeaders {
     std::string origin;
     bool host_seen{false};
     bool host_duplicate{false};
+    bool origin_seen{false};
     bool origin_duplicate{false};
 };
 
@@ -215,7 +216,8 @@ bool read_request_headers(const Socket& socket, Deadline deadline, RequestHeader
             headers.host_seen = true;
             headers.host = value;
         } else if (ascii_iequals(name, "origin")) {
-            if (!headers.origin.empty() || headers.origin_duplicate) headers.origin_duplicate = true;
+            if (headers.origin_seen) headers.origin_duplicate = true;
+            headers.origin_seen = true;
             headers.origin = value;
         }
     }
@@ -241,16 +243,24 @@ bool drain_oversized_request_line(const Socket& socket, std::string_view prefix,
         previous = last;
         last = byte[0];
     }
-    return read_request_headers(socket, deadline);
+    RequestHeaders ignored;
+    return read_request_headers(socket, deadline, ignored);
 }
 
 void send_response(const Socket& socket, const Response& response, std::string_view cors_origin = {},
                    bool options = false) {
     std::string wire = "HTTP/1.1 " + std::to_string(response.status) + " " + response.reason + "\r\n";
-    wire += "Content-Type: application/json\r\n";
+    if (!response.body.empty()) wire += "Content-Type: application/json\r\n";
     wire += "Content-Length: " + std::to_string(response.body.size()) + "\r\n";
     wire += "Connection: close\r\n";
-    if (cors) wire += "Access-Control-Allow-Origin: *\r\n";
+    if (!cors_origin.empty()) {
+        wire += "Access-Control-Allow-Origin: " + std::string(cors_origin) + "\r\n";
+        wire += "Vary: Origin\r\n";
+    }
+    if (options) {
+        wire += "Allow: GET\r\n";
+        wire += "Access-Control-Allow-Methods: GET\r\n";
+    }
     wire += "\r\n";
     wire += response.body;
     (void)send_all(socket, wire, nullptr);
