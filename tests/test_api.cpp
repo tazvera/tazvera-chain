@@ -69,6 +69,10 @@ int main() {
     CHECK(status.find("Content-Type: application/json") != std::string::npos);
     CHECK(status.find("Access-Control-Allow-Origin:") == std::string::npos);
     CHECK(status.find("Access-Control-Allow-Credentials") == std::string::npos);
+    const std::string default_origin = request(port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
+        std::to_string(port) + "\\r\\nOrigin: https://app.tazvera.com\\r\\n\\r\\n");
+    CHECK(status_line(default_origin).find("200") != std::string::npos);
+    CHECK(default_origin.find("Access-Control-Allow-Origin:") == std::string::npos);
 
     const std::string host_ip = request(port, "GET /status HTTP/1.1\r\nHost: 127.0.0.1:" +
         std::to_string(port) + "\r\n\r\n");
@@ -85,17 +89,21 @@ int main() {
     CHECK(status_line(options).find("204") != std::string::npos);
     CHECK(options.find("Access-Control-Allow-Methods: GET") != std::string::npos);
     CHECK(options.find("Allow: GET") != std::string::npos);
+    CHECK(options.find("Access-Control-Allow-Methods: POST") == std::string::npos);
     CHECK(options.find("Access-Control-Allow-Credentials") == std::string::npos);
     CHECK(options.find("Access-Control-Allow-Origin:") == std::string::npos);
 
     ApiServer cors_server;
-    const std::vector<std::string> allowed_origins{"https://app.tazvera.com"};
+    const std::vector<std::string> allowed_origins{"https://app.tazvera.com", "https://admin.tazvera.com"};
     CHECK(cors_server.start(chain, 0, allowed_origins, &error));
     const std::uint16_t cors_port = cors_server.port();
     const std::string allowed_origin = request(cors_port, "GET /status HTTP/1.1\r\nHost: 127.0.0.1:" +
         std::to_string(cors_port) + "\r\nOrigin: https://app.tazvera.com\r\n\r\n");
     CHECK(status_line(allowed_origin).find("200") != std::string::npos);
     CHECK(allowed_origin.find("Access-Control-Allow-Origin: https://app.tazvera.com") != std::string::npos);
+    const std::string second_allowed = request(cors_port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
+        std::to_string(cors_port) + "\\r\\nOrigin: https://admin.tazvera.com\\r\\n\\r\\n");
+    CHECK(second_allowed.find("Access-Control-Allow-Origin: https://admin.tazvera.com") != std::string::npos);
     const std::string denied_origin = request(cors_port, "GET /status HTTP/1.1\r\nHost: localhost:" +
         std::to_string(cors_port) + "\r\nOrigin: https://evil.example\r\n\r\n");
     CHECK(status_line(denied_origin).find("200") != std::string::npos);
