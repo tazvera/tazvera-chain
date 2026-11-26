@@ -169,3 +169,9 @@ endif()
 # chains the C++ core itself produced (not only against the three shipped demos).
 add_executable(taz_gen_veto_demo tests/gen_veto_demo.cpp)
 target_link_libraries(taz_gen_veto_demo PRIVATE tazcore)
+
+# RWA registry, part 1: registering an asset (exact case count so a silent skip cannot pass)
+add_executable(taz_asset_registry_tests tests/test_asset_registry.cpp)
+target_link_libraries(taz_asset_registry_tests PRIVATE tazcore)
+add_test(NAME taz_asset_registry_tests COMMAND taz_asset_registry_tests)
+set_tests_properties(taz_asset_registry_tests PROPERTIES PASS_REGULAR_EXPRESSION "asset registry tests: all passed \\(10 cases\\)")

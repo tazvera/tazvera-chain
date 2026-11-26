@@ -314,7 +314,18 @@ constexpr std::string_view FORMAT_PREFIX = "tazvera-chain-export-";
 
 Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     const JVal& o = obj_of(jv, where);
-    if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+    // RWA registry: only an asset registration carries "owner", "asset_kind" and "doc_hash" (every other transaction is
+    // written exactly as before, so existing files and their hashes are unchanged). It needs the veto layout (a v4+ file).
+    const JVal* kind_member = find(o, "kind");
+    const bool is_asset = kind_member && kind_member->type == JVal::Type::Str &&
+                          kind_member->str == std::to_string(static_cast<unsigned>(TxKind::RegisterAsset));
+    if (is_asset) {
+        if (!with_veto) fail(where + " is an asset registration, which this file's format cannot carry");
+        exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
+                       "hold_threshold", "hold_blocks", "ref", "new_owner", "veto", "guardian_threshold", "guardians", "owner", "asset_kind", "doc_hash",
+                       "pubkey", "signature"}, where);
+    }
+    else if (with_veto) exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                                   "hold_threshold", "hold_blocks", "ref", "new_owner", "veto", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
     else exact_keys(o, {"txid", "protocol_version", "chain_id", "kind", "from", "to", "amount", "fee", "nonce", "expiry_height", "daily_limit",
                         "hold_threshold", "hold_blocks", "ref", "new_owner", "guardian_threshold", "guardians", "pubkey", "signature"}, where);
@@ -324,7 +335,7 @@ Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     tx.protocol_version = static_cast<std::uint32_t>(pv);
     tx.chain_id = str_of(field(o, "chain_id"), where + ".chain_id");
     const std::uint64_t kind = dec_u64(field(o, "kind"), where + ".kind");
-    if (kind > static_cast<std::uint64_t>(TxKind::RecoveryCancel)) fail(where + " has an unknown transaction kind");
+    if (kind > static_cast<std::uint64_t>(TxKind::RegisterAsset)) fail(where + " has an unknown transaction kind");
     tx.kind = static_cast<TxKind>(kind);
     tx.from = hex_of<Address>(field(o, "from"), where + ".from");
     tx.to = hex_of<Address>(field(o, "to"), where + ".to");
@@ -342,6 +353,13 @@ Transaction parse_tx(const JVal& jv, bool with_veto, const std::string& where) {
     const JVal& g = arr_of(field(o, "guardians"), where + ".guardians");
     if (g.arr.size() > 64) fail(where + " lists too many guardians");
     for (std::size_t i = 0; i < g.arr.size(); ++i) tx.guardians.push_back(hex_of<Address>(g.arr[i], where + ".guardians[" + std::to_string(i) + "]"));
+    if (is_asset) {
+        tx.owner = hex_of<Address>(field(o, "owner"), where + ".owner");
+        const std::uint64_t ak = dec_u64(field(o, "asset_kind"), where + ".asset_kind");
+        if (ak > 255) fail(where + ".asset_kind is out of range");
+        tx.asset_kind = static_cast<std::uint8_t>(ak);
+        tx.doc_hash = hex_of<Hash32>(field(o, "doc_hash"), where + ".doc_hash");
+    }
     tx.pubkey = hex_of<PubKey>(field(o, "pubkey"), where + ".pubkey");
     tx.signature = hex_of<Signature>(field(o, "signature"), where + ".signature");
     if (hex_of<Hash32>(field(o, "txid"), where + ".txid") != tx.txid()) fail(where + ": txid does not match the transaction contents (data was changed)");

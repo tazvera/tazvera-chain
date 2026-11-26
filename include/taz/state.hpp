@@ -55,6 +55,14 @@ struct Account {
     bool has_extension() const noexcept { return has_safety_extension() || has_guardian_extension(); }
     bool is_default() const noexcept { return balance == 0 && nonce == 0 && !has_extension(); }
 };
+// RWA registry, part 1: one registered asset.
+struct AssetRecord {
+    Address owner{};
+    std::uint8_t asset_kind{0};
+    Hash32 doc_hash{};
+    std::uint64_t created_at{0};   // the height of the block that registered it
+    friend bool operator==(const AssetRecord&, const AssetRecord&) = default;
+};
 struct HeldTransfer { Address from{}; Address to{}; Amount amount{0}; std::uint64_t release_height{0}; };
 struct HeldEvent { Hash32 txid{}; Address from{}; Address to{}; Amount amount{0}; bool refunded{false}; };
 // A recovery that came due: the whole spendable balance moved (or, if the new address could not hold it, nothing did).
@@ -75,6 +83,9 @@ public:
     Amount circulating() const;       // spendable balances only
     Amount held_total() const;        // funds waiting inside held transfers
     const std::map<Hash32, HeldTransfer>& held() const noexcept { return held_; }
+    const AssetRecord* find_asset(const Hash32& asset_id) const;
+    std::size_t asset_count() const noexcept { return assets_.size(); }
+    const std::map<Hash32, AssetRecord>& assets() const noexcept { return assets_; }
     // Must be called once at the start of every block, before its transactions.
     BlockEvents begin_block(std::uint64_t height);
     ApplyResult apply(const Transaction& tx, std::uint64_t current_height);
@@ -82,6 +93,7 @@ public:
 private:
     std::map<Address, Account> accounts_;   // std::map = the same canonical order on every node
     std::map<Hash32, HeldTransfer> held_;   // keyed by the txid of the held transfer
+    std::map<Hash32, AssetRecord> assets_;  // asset_id -> record; part of the state root once non-empty
     Amount burned_{0};
 };
 }
