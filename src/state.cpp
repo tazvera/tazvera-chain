@@ -35,6 +35,7 @@ std::uint64_t State::nonce(const Address& address) const {
 const Account* State::find(const Address& address) const {
     auto it = accounts_.find(address); return it == accounts_.end() ? nullptr : &it->second;
 }
+const AssetRecord* State::find_asset(const Hash32& id) const { auto it = assets_.find(id); return it == assets_.end() ? nullptr : &it->second; }
 Amount State::circulating() const {
     Amount total = 0;
     for (const auto& [_, account] : accounts_) {
@@ -234,6 +235,7 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         }
         break;
     }
+    case TxKind::RegisterAsset: return fail("asset registration is not implemented yet"); // STUB (tests-first commit)
     }
     burned_ += tx.fee;
     result.ok = true; result.burned = tx.fee; return result;

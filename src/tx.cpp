@@ -46,9 +46,11 @@ std::vector<std::uint8_t> Transaction::signable_bytes() const {
             out.insert(out.end(), to.begin(), to.end()); out.insert(out.end(), new_owner.begin(), new_owner.end()); break;
         case TxKind::RecoveryCancel: out.insert(out.end(), to.begin(), to.end()); break; // which account is being protected
         case TxKind::Transfer: break; // (signed above in the v1 layout)
+        case TxKind::RegisterAsset: break; // STUB (tests-first commit): the asset fields are not signed yet
     }
     return out;
 }
+Hash32 asset_id(std::string_view, const Address&, std::uint64_t) { return Hash32{}; } // STUB (tests-first commit)
 Hash32 Transaction::txid() const {
     auto bytes = signable_bytes(); bytes.insert(bytes.end(), signature.begin(), signature.end());
     return sha256(bytes);
@@ -108,6 +110,8 @@ std::optional<std::string> validate_tx_shape(const Transaction& tx) {
             if (tx.amount != 0 || !no_ref || !no_new_owner || !no_guardians || !no_safety_fields) return "unused fields must be zero in a recovery cancel";
             if (tx.to == tx.from) return "leave the account empty to cancel your own recovery";
             return std::nullopt;
+        case TxKind::RegisterAsset:
+            break; // STUB (tests-first commit): falls through to "unknown transaction kind"
     }
     return "unknown transaction kind";
 }
