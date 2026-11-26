@@ -1,5 +1,7 @@
 "use strict";
 const U64MAX = (1n << 64n) - 1n;
+const CHAIN_ID = "tazvera-local-prototype-v1";
+const PROTOCOL_VERSION = 3;
 const enc = new TextEncoder();
 const $ = (id) => document.getElementById(id);
 
@@ -43,6 +45,11 @@ function parseChain(text) {
   // v8.3: the node rebuilds exactly two genesis accounts, and block 0's previous_hash commits to both.
   need(Array.isArray(j.genesis_balances) && j.genesis_balances.length === 2,
        "genesis सूची में ठीक दो खाते होने चाहिए (पुरानी v7 या उससे पहले की फ़ाइल में एक ही होता है)");
+  need(typeof j.chain_id === "string" && j.chain_id.length > 0, "chain_id नहीं मिला");
+  need(j.chain_id === CHAIN_ID, "गलत chain_id — यह TAZVERA chain की फ़ाइल नहीं है");
+  need(j.protocol_version !== undefined, "protocol_version नहीं मिला");
+  const declaredProtocol = Number(dec(j.protocol_version, "protocol_version"));
+  need(declaredProtocol === PROTOCOL_VERSION, "गलत protocol_version — इस explorer को protocol 3 चाहिए");
   need(j.params && typeof j.params === "object", "params गलत हैं");
   const c = {
     format: j.format, chainId: str(j.chain_id, "chain_id"), version: Number(dec(j.protocol_version, "protocol_version")),
@@ -62,12 +69,13 @@ function parseChain(text) {
       producer: hxOr(b.producer, 20, ZERO20, "producer"),   // v9: absent on chains that do not use producer signatures
       producerKey: hxOr(b.producer_pubkey, 32, ZERO32, "producer_pubkey"),
       producerSig: hxOr(b.producer_signature, 64, ZERO64, "producer_signature"),
-      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 5n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
+      txs: b.transactions.map((t) => { need(t && typeof t === "object", "लेन-देन का ढाँचा गलत है"); const kind = decOr(t.kind, 0n, "kind"); need(kind <= 6n, "अज्ञात लेन-देन प्रकार"); need(t.guardians === undefined || (Array.isArray(t.guardians) && t.guardians.length <= 100), "guardians सूची गलत है"); return {
         txid: hx(t.txid, 32, "txid"), version: Number(dec(t.protocol_version, "tx version")), chainId: str(t.chain_id, "tx chain_id"), kind: Number(kind),
         from: hx(t.from, 20, "from"), to: hx(t.to, 20, "to"), amount: dec(t.amount, "amount"), fee: dec(t.fee, "fee"),
         nonce: dec(t.nonce, "nonce"), expiry: dec(t.expiry_height, "expiry"),
         limit: decOr(t.daily_limit, 0n, "daily_limit"), thr: decOr(t.hold_threshold, 0n, "hold_threshold"), hold: decOr(t.hold_blocks, 0n, "hold_blocks"), ref: hxOr(t.ref, 32, ZERO32, "ref"),
         newOwner: hxOr(t.new_owner, 20, ZERO20, "new_owner"), gthr: decOr(t.guardian_threshold, 0n, "guardian_threshold"), guardians: (t.guardians || []).map((g) => hx(g, 20, "guardian")), veto: hxOr(t.veto, 20, ZERO20, "veto"),
+        owner: kind === 6n ? hx(t.owner, 20, "owner") : ZERO20, assetKind: kind === 6n ? Number(dec(t.asset_kind, "asset_kind")) : 0, docHash: kind === 6n ? hx(t.doc_hash, 32, "doc_hash") : ZERO32,
         pubkey: hx(t.pubkey, 32, "pubkey"), sig: hx(t.signature, 64, "signature") }; }),
     });
   }
@@ -94,7 +102,8 @@ function txSignable(t) {
     t.kind === 1 ? cat(u64(t.limit), u64(t.thr), u64(t.hold))
     : t.kind === 2 ? hexToBytes(t.ref)
     : t.kind === 3 ? cat(u64(BigInt(t.guardians.length)), ...t.guardians.map(hexToBytes), u64(t.gthr), hexToBytes(t.veto))
-    : t.kind === 4 ? cat(hexToBytes(t.to), hexToBytes(t.newOwner)) : t.kind === 5 ? hexToBytes(t.to) : new Uint8Array(0));
+    : t.kind === 4 ? cat(hexToBytes(t.to), hexToBytes(t.newOwner)) : t.kind === 5 ? hexToBytes(t.to)
+    : t.kind === 6 ? cat(hexToBytes(t.owner), u8(t.assetKind), hexToBytes(t.docHash)) : new Uint8Array(0));
 }
 
 /* ---------- the account state machine (a mirror of the C++ State) ---------- */
@@ -197,6 +206,10 @@ function applyTx(S, c, t, h) {
     if (t.to === t.from) return "खाता अपनी ही वापसी पर वोट नहीं दे सकता";
     if (noNew) return "वोट में नया पता लिखना ज़रूरी है";
     if (t.newOwner === t.to) return "नया पता पुराने से अलग होना चाहिए";
+  } else if (t.kind === 6) {
+    if (t.amount !== 0n || !noTo || !noRef || !noSafety || !noNew || !noG) return "asset registration में अनावश्यक फ़ील्ड भरे हैं";
+    if (t.owner !== t.from) return "asset का owner भेजने वाले से मेल नहीं खाता";
+    if (t.assetKind < 1 || t.assetKind > 4) return "asset_kind 1 से 4 के बीच होना चाहिए";
   } else {
     if (!(t.amount === 0n && noRef && noNew && noG) || !noSafety) return "वापसी-रद्द में अनावश्यक फ़ील्ड भरे हैं";
     if (t.to === t.from) return "अपनी वापसी रद्द करने के लिए खाता खाली छोड़िए";
@@ -252,6 +265,8 @@ function applyTx(S, c, t, h) {
     if (agree >= prot.g.thr) { prot.rec = { active: true, target: t.newOwner, ready: h + c.recoveryDelay, postponed: false }; prot.votes = new Map(); }
     S.acc.set(t.from, snd); S.acc.set(t.to, prot); S.burned += t.fee;
     return { held, target };
+  } else if (t.kind === 6) {
+    snd.bal -= t.fee; snd.nonce += 1n;
   } else if (t.to === ZERO20) {
     if (snd.g.veto !== ZERO20) return "इस खाते की veto चाबी है: सिर्फ़ वही रद्द कर सकती है";
     if (!snd.rec.active && snd.votes.size === 0) return "रद्द करने के लिए कोई वापसी नहीं है";
@@ -335,9 +350,11 @@ async function verifyChain(c) {
 
   const S = { acc: new Map(), held: new Map(), burned: 0n };
   const history = new Map(); let stateBroken = false;
+  const genesisAddresses = new Set();
   const addHist = (addr, e) => { if (!history.has(addr)) history.set(addr, []); history.get(addr).push(e); };
   for (const g of c.genesis) {
-    if (S.acc.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
+    if (genesisAddresses.has(g.address)) { fail(0, "genesis में एक ही पता दो बार है"); stateBroken = true; continue; }
+    genesisAddresses.add(g.address);
     if (g.balance !== 0n) { const a = newAcc(); a.bal = g.balance; S.acc.set(g.address, a); }
   }
 
@@ -369,6 +386,7 @@ async function verifyChain(c) {
     const txids = [];
     for (let k = 0; k < b.txs.length; k++) {
       const t = b.txs[k]; const where = "tx " + k;
+      if (t.kind === 6) t.assetId = toHex(await sha(cat(enc.encode("TAZVERA-ASSET-V1"), enc.encode(t.chainId), hexToBytes(t.owner), u64(t.nonce))));
       const id = toHex(await sha(cat(txSignable(t), hexToBytes(t.sig))));
       txids.push(hexToBytes(t.txid));
       tick("txid", id === t.txid, h, where + ": txid लेन-देन की सामग्री से नहीं मिलता (डेटा बदला गया)");
@@ -537,7 +555,7 @@ function blockCard(b) {
   add("hash", b.hash, true); add("previous hash", b.prev, true); add("state root", b.root, true);
   add("समय", b.ts === 0n ? "genesis (0)" : new Date(Number(b.ts) * 1000).toLocaleString("hi-IN") + " (" + b.ts + ")");
   for (const t of b.txs) {
-    const label = ["ट्रांसफ़र", "सुरक्षा नियम", "रुका ट्रांसफ़र रद्द", "guardian तय", "वापसी पर वोट", "वापसी रद्द"][t.kind];
+    const label = ["ट्रांसफ़र", "सुरक्षा नियम", "रुका ट्रांसफ़र रद्द", "guardian तय", "वापसी पर वोट", "वापसी रद्द", "Asset registration"][t.kind];
     add(label + " " + short(t.txid, 8), "", false);
     const dd = dl.lastChild; dd.append(el("div", "mono", "से: " + t.from));
     if (t.kind === 0) { dd.append(el("div", "mono", "को: " + t.to)); dd.append(el("div", "", fmt(t.amount) + " utzv · फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce)); }
@@ -546,6 +564,13 @@ function blockCard(b) {
     else {
       if (t.kind === 3) dd.append(el("div", "", t.guardians.length ? t.gthr + " / " + t.guardians.length + " चाहिए: " + t.guardians.map((g) => short(g, 6)).join(", ") : "सभी guardian हटाना"));
       if (t.kind === 4) { dd.append(el("div", "mono", "खाता: " + t.to)); dd.append(el("div", "mono", "नया पता: " + t.newOwner)); }
+      if (t.kind === 6) {
+        const kinds = { 1: "ज़मीन", 2: "वाहन", 3: "इनवॉइस", 4: "अन्य" };
+        dd.append(el("div", "mono", "मालिक (owner): " + t.owner));
+        dd.append(el("div", "", "Asset kind: " + (kinds[t.assetKind] || "अमान्य") + " (" + t.assetKind + ")"));
+        dd.append(el("div", "mono", "Document hash: " + t.docHash));
+        dd.append(el("div", "mono", "Asset ID: " + (t.assetId || "जाँच जारी")));
+      }
       dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
     }
   }
