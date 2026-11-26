@@ -69,8 +69,8 @@ int main() {
     CHECK(status.find("Content-Type: application/json") != std::string::npos);
     CHECK(status.find("Access-Control-Allow-Origin:") == std::string::npos);
     CHECK(status.find("Access-Control-Allow-Credentials") == std::string::npos);
-    const std::string default_origin = request(port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
-        std::to_string(port) + "\\r\\nOrigin: https://app.tazvera.com\\r\\n\\r\\n");
+    const std::string default_origin = request(port, "GET /status HTTP/1.1\r\nHost: localhost:" +
+        std::to_string(port) + "\r\nOrigin: https://app.tazvera.com\r\n\r\n");
     CHECK(status_line(default_origin).find("200") != std::string::npos);
     CHECK(default_origin.find("Access-Control-Allow-Origin:") == std::string::npos);
 
@@ -101,8 +101,8 @@ int main() {
         std::to_string(cors_port) + "\r\nOrigin: https://app.tazvera.com\r\n\r\n");
     CHECK(status_line(allowed_origin).find("200") != std::string::npos);
     CHECK(allowed_origin.find("Access-Control-Allow-Origin: https://app.tazvera.com") != std::string::npos);
-    const std::string second_allowed = request(cors_port, "GET /status HTTP/1.1\\r\\nHost: localhost:" +
-        std::to_string(cors_port) + "\\r\\nOrigin: https://admin.tazvera.com\\r\\n\\r\\n");
+    const std::string second_allowed = request(cors_port, "GET /status HTTP/1.1\r\nHost: localhost:" +
+        std::to_string(cors_port) + "\r\nOrigin: https://admin.tazvera.com\r\n\r\n");
     CHECK(second_allowed.find("Access-Control-Allow-Origin: https://admin.tazvera.com") != std::string::npos);
     const std::string denied_origin = request(cors_port, "GET /status HTTP/1.1\r\nHost: localhost:" +
         std::to_string(cors_port) + "\r\nOrigin: https://evil.example\r\n\r\n");
