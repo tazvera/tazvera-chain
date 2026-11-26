@@ -144,7 +144,6 @@ Response route_get(const Chain& chain, std::string_view path, std::string_view q
     }
 
     if (path == "/status") {
-    if (path == "/status") {
         return {200, "OK",
             "{\"chain_id\":" + json_string(CHAIN_ID) +
             ",\"protocol_version\":" + std::to_string(PROTOCOL_VERSION) +
