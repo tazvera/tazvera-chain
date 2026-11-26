@@ -229,8 +229,21 @@ bool valid_loopback_host(std::string_view host, std::uint16_t port) {
     return host == "127.0.0.1" + suffix || host == "localhost" + suffix;
 }
 
+bool valid_origin_value(std::string_view origin) {
+    const bool https = origin.starts_with("https://");
+    const bool http = origin.starts_with("http://");
+    const std::size_t scheme = https ? 8u : (http ? 7u : 0u);
+    if (scheme == 0 || origin.size() == scheme) return false;
+    for (std::size_t i = scheme; i < origin.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(origin[i]);
+        if (c <= 0x20 || c == 0x7f || c == '/' || c == '?' || c == '#' ||
+            c == '@' || c == '*' || c == '\\\\' || c == ',') return false;
+    }
+    return true;
+}
+
 bool origin_is_allowed(std::string_view origin, const std::vector<std::string>& allowed_origins) {
-    if (origin.empty()) return false;
+    if (!valid_origin_value(origin)) return false;
     return std::find(allowed_origins.begin(), allowed_origins.end(), origin) != allowed_origins.end();
 }
 
@@ -391,6 +404,12 @@ bool ApiServer::start(const Chain& chain, std::uint16_t port,
     if (!impl_ || impl_->started) {
         if (error) *error = "API server is already started";
         return false;
+    }
+    for (const std::string& origin : allowed_origins) {
+        if (!valid_origin_value(origin)) {
+            if (error) *error = "CORS origins must be exact http:// or https:// origins; '*' is forbidden";
+            return false;
+        }
     }
     if (!net_startup(error)) return false;
     impl_->network_started = true;
