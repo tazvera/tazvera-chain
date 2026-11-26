@@ -23,7 +23,13 @@ static std::string request(std::uint16_t port, const std::string& bytes) {
     Socket socket;
     std::string error;
     if (!connect_loopback(port, socket, &error)) return {};
-    if (!send_all(socket, bytes, &error)) return {};
+    std::string wire = bytes;
+    if (wire.find("Host:") == std::string::npos) {
+        const std::size_t end = wire.find("\\r\\n\\r\\n");
+        if (end != std::string::npos)
+            wire.insert(end + 2, "Host: localhost:" + std::to_string(port) + "\\r\\n");
+    }
+    if (!send_all(socket, wire, &error)) return {};
     std::string response, one;
     while (recv_exact(socket, 1, one, nullptr)) response += one;
     return response;
