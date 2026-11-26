@@ -65,8 +65,8 @@ struct AssetRecord {
 };
 struct HeldTransfer { Address from{}; Address to{}; Amount amount{0}; std::uint64_t release_height{0}; };
 struct HeldEvent { Hash32 txid{}; Address from{}; Address to{}; Amount amount{0}; bool refunded{false}; };
-// A recovery that came due: the whole spendable balance moved (or, if the new address could not hold it, nothing did).
-struct RecoveryEvent { Address from{}; Address to{}; Amount amount{0}; bool moved{false}; };
+// A recovery that came due: the whole spendable balance and every registered asset moved (or, if the new address could not hold the balance, nothing did).
+struct RecoveryEvent { Address from{}; Address to{}; Amount amount{0}; bool moved{false}; std::uint64_t asset_count{0}; }; // asset_count: registered assets whose owner changed
 struct BlockEvents { std::vector<HeldEvent> held; std::vector<RecoveryEvent> recoveries; };
 struct ApplyResult { bool ok{false}; std::string error; Amount burned{0}; bool held{false}; };
 
