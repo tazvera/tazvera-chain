@@ -156,3 +156,21 @@ They are not part of F10; address them together with the planned RWA-era Explore
 - No sale, price, escrow or "swap asset for money": a transfer of an asset and a transfer of money are two separate transactions.
 - No allowance/approval (someone else moving your asset for you).
 - No limit on how often an asset can change hands.
+
+# taznode: RWA commands (`--register-asset`, `--transfer-asset`)
+
+## Fixed behaviour (decided by the owner of the project)
+
+- `--register-asset <kind>:<doc_hash_hex>` registers an asset owned by the key's address; `--transfer-asset <asset_id_hex>:<to_address>` gives an asset to another address.
+- Both need `--chain`, `--expect-genesis` and `--key-file`, make exactly one block and stop, like `--transfer`.
+- kind must be 1..4 and the hash 64 hex characters (asset id 64 hex, address 40 hex); anything else is a usage error (exit 2) and nothing is written.
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **One action per run.** `--transfer`, `--register-asset` and `--transfer-asset` cannot be combined with each other, with a second copy of themselves, with `--listen`/`--serve`/`--peer` or with `--new-key` (usage error). Same rule as `--transfer`.
+2. **`--register-asset` prints the new asset id** (`taznode: registered asset id=<64 hex>`), because the id is made from chain id, owner and nonce and the user needs it for `--transfer-asset`. Nothing else was added to the output; the existing "produced block ..." line is unchanged. There is no command that lists a chain's assets yet.
+3. **An upper-case document hash is accepted** and stored as the same 32 bytes (the chain file writes lower case).
+4. **The chain decides, not the command:** an asset that does not exist, or that the key does not own, is refused by the chain (the block is not made, exit 5, the file is not touched), not by a usage check. The command does not look up the registry first.
+5. **Exit codes follow `--transfer`:** 2 usage, 3 cannot write, 5 the block was refused.
+6. **The same arguments again** (`--register-asset 1:<same hash>`) make a new asset each time (the id includes the nonce). A repeated command therefore registers a second asset. This is the chain's rule from part 1, not something the command can prevent.
+7. **No `--allow-anonymous`-style or producer options** were added: on a chain that declares producers the block is signed by the key, exactly as `--transfer` does.

@@ -120,7 +120,7 @@ int main() {
     }
     // bob, the new owner, passes it back
     CHECK(run(as(bob) + " --transfer-asset " + to_hex(id0) + ":" + to_hex(alice.addr)) == 0);
-    { Chain c; if (load(c)) CHECK(c.height() == 5 && c.state().find_asset(id0)->owner == alice.addr); }
+    { Chain c; if (load(c)) CHECK(c.height() == 5 && c.state().find_asset(id0) && c.state().find_asset(id0)->owner == alice.addr); }
 
     // 3. wrong usage is a usage error (exit 2) and writes nothing
     {
@@ -156,7 +156,7 @@ int main() {
     CHECK(run(as(alice) + " --register-asset 4:" + std::string(64, 'A')) == 0);
     { Chain c; if (load(c)) {
         CHECK(c.height() == 7 && c.state().asset_count() == 5);
-        const AssetRecord* r = c.state().find_asset(asset_id(CHAIN_ID, alice.addr, 6));
+        const AssetRecord* r = c.state().find_asset(asset_id(CHAIN_ID, alice.addr, 5));   // alice has made 5 transactions before this one: 3 registrations, 1 transfer, 1 registration
         CHECK(r && r->asset_kind == 4 && to_hex(r->doc_hash) == std::string(64, 'a'));
     } }
     // 5. the usage text mentions both commands

@@ -36,6 +36,11 @@ constexpr const char* kUsage =
     "  --key-file <path>         prototype key file: line 1 = 64 hex private seed, line 2 = 64 hex public key\n"
     "  --new-key <path>          make a new key file and print its address, then stop (never overwrites)\n"
     "  --transfer <a>:<n>        produce one block with a transfer from the key's address to <a>\n"
+    "  --register-asset <k>:<h>  produce one block that registers an asset owned by the key's address:\n"
+    "                            <k> = kind 1 land, 2 vehicle, 3 invoice, 4 other; <h> = 64 hex SHA-256 of the document\n"
+    "                            (prints the asset id)\n"
+    "  --transfer-asset <id>:<a> produce one block that gives the asset <id> (64 hex) to the address <a> (40 hex);\n"
+    "                            the key must be the asset's current owner\n"
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
     "  --api <port>              read-only HTTP API on 127.0.0.1 (GET only; disabled by default)\n"
@@ -149,6 +154,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> init_specs;
     std::string key_file;
     std::string transfer_spec;
+    std::string register_spec, transfer_asset_spec;
     std::string listen_port;
     std::string serve_port;
     std::string api_port_text;
@@ -165,6 +171,7 @@ int main(int argc, char** argv) {
     bool require_identity = false;
     std::string peer_port;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false, seen_api = false;
+    bool seen_register = false, seen_transfer_asset = false;
     std::string new_key_file;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -223,10 +230,22 @@ int main(int argc, char** argv) {
             if (seen_transfer) return usage_error("--transfer was given twice");
             seen_transfer = true; transfer_spec = argv[++i]; continue;
         }
+        if (a == "--register-asset" && i + 1 < argc) {
+            if (seen_register) return usage_error("--register-asset was given twice");
+            seen_register = true; register_spec = argv[++i]; continue;
+        }
+        if (a == "--transfer-asset" && i + 1 < argc) {
+            if (seen_transfer_asset) return usage_error("--transfer-asset was given twice");
+            seen_transfer_asset = true; transfer_asset_spec = argv[++i]; continue;
+        }
         return usage_error("unknown argument \"" + a + "\"");
     }
     if (!api_allow_origins.empty() && api_port_text.empty())
         return usage_error("--api-allow-origin requires --api");
+    // --transfer, --register-asset and --transfer-asset each make one block and stop: one of them per run.
+    const bool production_asked = seen_transfer || seen_register || seen_transfer_asset;
+    if ((seen_transfer ? 1 : 0) + (seen_register ? 1 : 0) + (seen_transfer_asset ? 1 : 0) > 1)
+        return usage_error("--transfer, --register-asset and --transfer-asset each do one thing and stop; use one of them");
     // Validate allowlist configuration before loading the chain or opening sockets. Empty files mean deny all.
     if (allowlist_enabled && !require_identity)
         return usage_error("--allow-peer and --allow-peer-file require --require-identity");
@@ -261,7 +280,7 @@ int main(int argc, char** argv) {
 
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
-        if (seen_chain || !init_specs.empty() || seen_transfer || !peer_port.empty() || !listen_port.empty() ||
+        if (seen_chain || !init_specs.empty() || production_asked || !peer_port.empty() || !listen_port.empty() ||
             !serve_port.empty() || !api_port_text.empty() || !api_allow_origins.empty() || seen_key || !identity_file.empty())
             return usage_error("--new-key makes a key and stops; it cannot be combined with other actions");
         if (std::ifstream(new_key_file)) return usage_error("the key file already exists; refusing to overwrite it");
@@ -384,6 +403,8 @@ int main(int argc, char** argv) {
         if (given > 1) return usage_error("--listen, --serve and --peer are three different modes; pick one");
         if (!transfer_spec.empty())
             return usage_error("--transfer does one thing and stops; it cannot be combined with --listen, --serve or --peer");
+        if (seen_register || seen_transfer_asset)
+            return usage_error("--register-asset and --transfer-asset do one thing and stop; they cannot be combined with --listen, --serve or --peer");
 
         auto parse_port = [](const std::string& text, std::uint16_t& out) -> bool {
             taz::Amount value = 0;
@@ -899,15 +920,40 @@ int main(int argc, char** argv) {
         return all_ok ? 0 : 3;
     }
 
-    // ---- block production: one transfer, one block, then save ----
-    if (!transfer_spec.empty()) {
-        if (key_file.empty()) return usage_error("--transfer needs --key-file: a transaction must be signed by its sender");
-        const std::size_t colon = transfer_spec.find(':');
-        if (colon == std::string::npos) return usage_error("--transfer wants <address>:<amount>");
+    // ---- block production: one transaction, one block, then save ----
+    if (!transfer_spec.empty() || seen_register || seen_transfer_asset) {
+        const char* what = !transfer_spec.empty() ? "--transfer" : (seen_register ? "--register-asset" : "--transfer-asset");
+        if (key_file.empty()) return usage_error(std::string(what) + " needs --key-file: a transaction must be signed by its sender");
+        // Everything that can be wrong with the arguments is checked before the key is read or the chain is touched.
         taz::Address to{};
         taz::Amount amount = 0;
-        if (!parse_address(transfer_spec.substr(0, colon), to)) return usage_error("the transfer address must be 40 hex characters");
-        if (!parse_amount(transfer_spec.substr(colon + 1), amount)) return usage_error("the transfer amount must be a decimal number");
+        std::uint8_t asset_kind = 0;
+        taz::Hash32 doc_or_asset{};   // --register-asset: the document hash; --transfer-asset: the asset id
+        if (!transfer_spec.empty()) {
+            const std::size_t colon = transfer_spec.find(':');
+            if (colon == std::string::npos) return usage_error("--transfer wants <address>:<amount>");
+            if (!parse_address(transfer_spec.substr(0, colon), to)) return usage_error("the transfer address must be 40 hex characters");
+            if (!parse_amount(transfer_spec.substr(colon + 1), amount)) return usage_error("the transfer amount must be a decimal number");
+        } else if (seen_register) {
+            const std::size_t colon = register_spec.find(':');
+            if (colon == std::string::npos) return usage_error("--register-asset wants <kind>:<document hash>");
+            const std::string kind_text = register_spec.substr(0, colon), doc_text = register_spec.substr(colon + 1);
+            taz::Amount kind_value = 0;
+            if (!parse_amount(kind_text, kind_value) || kind_value < 1 || kind_value > 4)
+                return usage_error("the asset kind must be 1 (land), 2 (vehicle), 3 (invoice) or 4 (other)");
+            if (!is_hex64(doc_text)) return usage_error("the document hash must be 64 hex characters");
+            asset_kind = static_cast<std::uint8_t>(kind_value);
+            const std::vector<std::uint8_t> raw = from_hex(doc_text);
+            for (std::size_t i = 0; i < doc_or_asset.size(); ++i) doc_or_asset[i] = raw[i];
+        } else {
+            const std::size_t colon = transfer_asset_spec.find(':');
+            if (colon == std::string::npos) return usage_error("--transfer-asset wants <asset id>:<address>");
+            const std::string id_text = transfer_asset_spec.substr(0, colon);
+            if (!is_hex64(id_text)) return usage_error("the asset id must be 64 hex characters");
+            if (!parse_address(transfer_asset_spec.substr(colon + 1), to)) return usage_error("the new owner's address must be 40 hex characters");
+            const std::vector<std::uint8_t> raw = from_hex(id_text);
+            for (std::size_t i = 0; i < doc_or_asset.size(); ++i) doc_or_asset[i] = raw[i];
+        }
 
         taz::PrivKey sk{};
         taz::PubKey pk{};
@@ -917,11 +963,23 @@ int main(int argc, char** argv) {
 
         taz::Transaction tx;
         tx.from = from;
-        tx.to = to;
-        tx.amount = amount;
         tx.fee = taz::FEE_TRANSFER_V1;
         tx.nonce = chain.state().nonce(from);
         tx.pubkey = pk;
+        if (!transfer_spec.empty()) {
+            tx.to = to;
+            tx.amount = amount;
+        } else if (seen_register) {
+            tx.kind = taz::TxKind::RegisterAsset;
+            tx.owner = from;                 // an asset can only be registered by its owner, in the owner's own name
+            tx.asset_kind = asset_kind;
+            tx.doc_hash = doc_or_asset;
+        } else {
+            tx.kind = taz::TxKind::TransferAsset;
+            tx.ref = doc_or_asset;           // the asset id
+            tx.to = to;
+            tx.owner = from;                 // the signer says he is the current owner; the chain checks the registry
+        }
         const std::vector<std::uint8_t> signable = tx.signable_bytes();
         if (!taz::sign(sk, signable, tx.signature)) return usage_error("the key cannot sign (is the key file right?)");
         // The file carries the seed and the public key side by side, so they can disagree. Signing with one and
@@ -968,6 +1026,8 @@ int main(int argc, char** argv) {
             std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
             return 3;
         }
+        if (seen_register)   // the id is made from chain id, owner and nonce; print it so it can be used with --transfer-asset
+            std::cout << "taznode: registered asset id=" << taz::to_hex(taz::asset_id(tx.chain_id, tx.owner, tx.nonce)) << "\n";
         std::cout << "taznode: produced block height=" << chain.height()
                   << " hash=" << taz::to_hex(chain.blocks().back().hash())
                   << " state_root=" << taz::to_hex(chain.state().state_root())
