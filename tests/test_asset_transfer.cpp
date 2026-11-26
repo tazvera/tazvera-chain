@@ -95,6 +95,13 @@ static void t3_wrong_signature_is_refused() {
     { Transaction tx = give(w.a, w.id, w.b.addr, 1); tx.signature = Signature{}; CHECK(!w.s.apply(tx, 2).ok); }  // no signature
     { Transaction tx = give(w.a, w.id, w.b.addr, 1); resign(tx, w.b); CHECK(!w.s.apply(tx, 2).ok); }             // somebody else's signature
     CHECK(w.s.find_asset(w.id)->owner == w.a.addr && w.s.state_root() == root);
+    {   // the asset id is signed: switching to ANOTHER asset of the same owner (which does exist) must not pass
+        CHECK(w.s.apply(reg(w.a, 1, 3, 4), 2).ok);                    // a second asset, nonce 1
+        const Hash32 other = asset_id(CHAIN_ID, w.a.addr, 1);
+        Transaction tx = give(w.a, w.id, w.b.addr, 2); tx.ref = other;
+        const auto r = w.s.apply(tx, 3); CHECK(!r.ok && r.error == "invalid Ed25519 signature");
+        CHECK(w.s.find_asset(other)->owner == w.a.addr && w.s.find_asset(w.id)->owner == w.a.addr);
+    }
 }
 
 // t4: an asset that does not exist
@@ -161,6 +168,7 @@ static void t6b_after_the_recovery_the_old_key_has_nothing() {
     const std::uint64_t ready = s.find(o.addr)->recovery.ready_height;
     s.begin_block(ready);
     CHECK(s.find_asset(id)->owner == n.addr);
+    s.set_balance(o.addr, START);                                     // the recovery moved all the money away; give the old key some, to pay the fee
     const auto r = s.apply(give(o, id, y.addr, 2), ready);
     CHECK(!r.ok && r.error == "only the owner may transfer this asset");
 }
@@ -194,7 +202,7 @@ static void t8_shape_rules() {
     { Transaction t = good(); t.hold_blocks = 1; resign(t, w.a); CHECK(bad(t)); }
     { Transaction t = good(); t.owner = w.b.addr; resign(t, w.a); CHECK(bad(t)); }                    // owner must be the signer
     { Transaction t = transfer(w.a, w.b.addr, 5, 1); t.owner = w.a.addr; resign(t, w.a); CHECK(bad(t)); }   // `owner` still belongs to assets only
-    { Transaction t = good(); t.ref = Hash32{}; resign(t, w.a); CHECK(bad(t)); }                      // no asset named
+    { Transaction t = good(); t.ref = Hash32{}; resign(t, w.a); const auto r = w.s.apply(t, 2); CHECK(!r.ok && r.error == "an asset transfer must name the asset"); }   // no asset named
     {   // the sender cannot pay the fee
         State s2; s2.set_balance(w.a.addr, F); CHECK(s2.apply(reg(w.a, 0, 2, 9), 1).ok);   // the registration uses up the money
         const auto r = s2.apply(give(w.a, w.id, w.b.addr, 1), 2); CHECK(!r.ok && s2.find_asset(w.id)->owner == w.a.addr);

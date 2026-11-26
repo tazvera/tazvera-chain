@@ -58,7 +58,7 @@ std::string block_to_json(const Block& b) {
         j += "\"new_owner\": " + hex(tx.new_owner) + ", \"veto\": " + hex(tx.veto) + ", \"guardian_threshold\": " + num(tx.guardian_threshold) + ", \"guardians\": [";
         for (std::size_t g = 0; g < tx.guardians.size(); ++g) j += std::string(g ? ", " : "") + hex(tx.guardians[g]);
         j += "], ";
-        if (tx.kind == TxKind::RegisterAsset)   // only an asset registration carries these three fields
+        if (tx.kind == TxKind::RegisterAsset || tx.kind == TxKind::TransferAsset)   // only the two asset kinds carry these three fields
             j += "\"owner\": " + hex(tx.owner) + ", \"asset_kind\": " + num(tx.asset_kind) + ", \"doc_hash\": " + hex(tx.doc_hash) + ", ";
         j += "\"pubkey\": " + hex(tx.pubkey) + ", \"signature\": " + hex(tx.signature) + "}";
     }

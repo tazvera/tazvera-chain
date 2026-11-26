@@ -249,6 +249,20 @@ ApplyResult State::apply(const Transaction& tx, std::uint64_t height) {
         assets_[id] = AssetRecord{tx.owner, tx.asset_kind, tx.doc_hash, height};
         break;
     }
+    case TxKind::TransferAsset: {
+        // Shape rules already proved: the signer is tx.owner, `to` is a different non-zero address, the fee is the transfer fee.
+        // Every check comes before the first write. Assets are moved one transaction at a time, so a second transaction of the
+        // old owner for the same asset (in the same block or later) no longer finds him as the owner: no double sale.
+        const auto ait = assets_.find(tx.ref);
+        if (ait == assets_.end()) return fail("asset was not found");
+        if (ait->second.owner != tx.owner) return fail("only the owner may transfer this asset");
+        // A thief with the stolen key would try to move the assets while the guardians' recovery waits out its delay.
+        if (sender.recovery.active) return fail("asset transfer is blocked while a recovery is pending");
+        sender.balance -= tx.fee; sender.nonce += 1;
+        accounts_[tx.from] = sender;
+        ait->second.owner = tx.to;   // only the owner changes: asset_id, kind, doc_hash and created_at stay
+        break;
+    }
     }
     burned_ += tx.fee;
     result.ok = true; result.burned = tx.fee; return result;

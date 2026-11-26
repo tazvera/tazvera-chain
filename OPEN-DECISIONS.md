@@ -127,3 +127,32 @@ They are not part of F10; address them together with the planned RWA-era Explore
 ## Files
 
 `src/persist.cpp` is **not** touched (not needed: only the owner of existing records changes, and the chain file is rebuilt by replay). `CMakeLists.txt` has one new test target only.
+
+# RWA registry, part 2 — transfer the ownership of an asset (TransferAsset)
+
+## Fixed behaviour (decided by the owner of the project)
+
+- New transaction kind `TransferAsset` (7). It names the asset (asset_id), the new owner (`to`) and the current owner (`owner`), and is signed by the current owner's key, i.e. the owner the registry holds now.
+- Refused: asset not in the registry ("asset was not found"); `owner` is not the registry's owner ("only the owner may transfer this asset"); wrong signature; `to` empty; fee other than the transfer fee.
+- Only the owner changes. asset_id, kind, doc_hash and created_at stay.
+- The same asset cannot be sold twice: after the first transfer the old owner is no longer the owner, so a second transaction for it (same block or later) is refused, and a block that contains one is refused as a whole.
+- **While a recovery is pending for the owner's address, the asset cannot be moved** ("asset transfer is blocked while a recovery is pending"). A thief with the stolen key would try exactly that during the guardians' delay.
+- **The protocol version stays 3 (devnet). A new transaction kind means all nodes must upgrade at the same time; before the chain is public the protocol must become 4** (this is the same open item as for kind 6; it is now two kinds).
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **The asset id travels in the existing `ref` field** (the 32-byte field that CancelHeld already uses for a txid). No new field was added, so the chain file needs no new key. `to` and `owner` are the existing fields too.
+2. **"Recovery pending" means a recovery that has been agreed and is waiting out its delay** (`recovery.active`). Guardian votes that have not yet reached the threshold do **not** block a transfer. Reason: one guardian could otherwise freeze the owner's assets just by voting (votes expire only after VOTE_EXPIRY_BLOCKS and can be re-cast). The cost: between the first vote and the threshold a thief can still move the asset. If the opposite trade-off is wanted (block while any vote is open), it is a one-line change in `State::apply`, with a test.
+3. **Sending an asset to yourself is refused** (`to == owner`), as a plain transfer to yourself is.
+4. **An asset can be sent to any non-zero address**, including one that has never been seen on the chain. There is no "accept" step, so a wrong address loses the asset (the transfer is final). Same as money.
+5. **The receiver pays nothing and signs nothing.** Only the sender's fee is burned.
+6. **The registry check comes after the usual checks** (nonce, balance for the fee). So a stranger with no money gets "insufficient balance", not "only the owner may transfer this asset".
+7. **`owner`, `asset_kind` and `doc_hash` fields on other kinds stay refused**; `owner` is now allowed on TransferAsset too (and must be the signer); `asset_kind` and `doc_hash` must be zero there.
+8. **File format:** a transfer is written in the same layout as a registration (with `owner`, `asset_kind` = 0 and `doc_hash` = zeros), so `src/persist.cpp` and `src/export.cpp` needed a one-line change each (the loader accepts kind 7; the writer writes the three keys for kind 7). Format level stays v4.
+
+## Not done here, on purpose
+
+- No `taznode` command, no explorer display, no wallet-statement line for an asset transfer (the fee is counted in the statement's total; there is no "asset sent" entry).
+- No sale, price, escrow or "swap asset for money": a transfer of an asset and a transfer of money are two separate transactions.
+- No allowance/approval (someone else moving your asset for you).
+- No limit on how often an asset can change hands.
