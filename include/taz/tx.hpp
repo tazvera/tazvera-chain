@@ -10,7 +10,8 @@ enum class TxKind : std::uint8_t {
     SetGuardians = 3,    // name the trusted people who may help recover this account
     RecoveryVote = 4,    // a guardian votes to move someone's account to a new address
     RecoveryCancel = 5,  // stop a recovery: the owner (to = zero) or, if one is set, the account's veto key (to = the account)
-    RegisterAsset = 6,   // RWA registry, part 1: record that an asset exists and who owns it (no transfer of ownership yet)
+    RegisterAsset = 6,   // RWA registry, part 1: record that an asset exists and who owns it
+    TransferAsset = 7,   // RWA registry, part 2: the owner gives an asset to another address (ref = asset_id, to = new owner, owner = current owner)
 };
 // RegisterAsset: what kind of asset is being registered.
 enum class AssetKind : std::uint8_t { Land = 1, Vehicle = 2, Invoice = 3, Other = 4 };
