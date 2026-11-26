@@ -237,7 +237,7 @@ bool valid_origin_value(std::string_view origin) {
     for (std::size_t i = scheme; i < origin.size(); ++i) {
         const unsigned char c = static_cast<unsigned char>(origin[i]);
         if (c <= 0x20 || c == 0x7f || c == '/' || c == '?' || c == '#' ||
-            c == '@' || c == '*' || c == '\\\\' || c == ',') return false;
+            c == '@' || c == '*' || c == '\\' || c == ',') return false;
     }
     return true;
 }
