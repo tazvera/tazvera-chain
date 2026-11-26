@@ -106,6 +106,11 @@ BlockEvents State::begin_block(std::uint64_t height) {
         old.recovery = PendingRecovery{}; old.votes.clear();
         if (amount <= MAX_AMOUNT - have) {
             if (amount != 0) { old.balance = 0; accounts_[target].balance = have + amount; }
+            // RWA part 1.5: every registered asset of the old address goes with the balance, in this same step. Only the owner
+            // changes; the registry keeps its size and anybody else's asset is not touched. This sits inside the "moved" branch,
+            // so when the balance cannot move, the assets do not move either.
+            for (auto& [id, rec] : assets_)
+                if (rec.owner == addr) { rec.owner = target; ++ev.asset_count; }
             old.guardians = GuardianConfig{}; old.pending_guardians = PendingGuardians{}; // the old key is retired
             ev.moved = true;
         }

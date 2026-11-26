@@ -106,3 +106,24 @@ They are not part of F10; address them together with the planned RWA-era Explore
 - **The explorer (JavaScript) does not understand kind 6.** The existing demo chains contain none, so the cross-check is unaffected; showing assets is a later change.
 - **No limit on the size of the registry.** The fee is the only cost; the state root is recomputed over all of it. The loader's existing size limits (and finding F2 of the audit) apply to the chain file.
 - **Documents:** only a hash is stored. Keeping personal or confidential documents off the chain is a rule for whoever writes the application, not something the chain can enforce.
+
+# RWA registry, part 1.5 — a recovery carries the assets
+
+## Fixed behaviour (decided by the owner of the project)
+
+- When an agreed recovery comes due, **every** asset whose owner is the old address gets the new address as owner, in the same step as the balance. There is no "chosen assets" option (more complex, and it opens a way to lose an asset).
+- The registry keeps its size and each record keeps its kind, doc_hash and created_at; only `owner` changes. Assets of other owners are not touched. The state root changes because the registry changed.
+- `RecoveryEvent` has a new field `asset_count`: how many assets were carried over.
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **All or nothing with the balance.** If the new address cannot hold the balance (it would overflow), the recovery ends with nothing moved, as before, and the assets stay with the old address too (`moved == false`, `asset_count == 0`). Assets do not overflow, but splitting the step would leave funds and assets under different addresses.
+2. **An account with assets but no money** is carried over too (balance 0, assets move).
+3. **`asset_id` does not change** when the owner changes. It was derived from the first owner and nonce and stays the asset's identity; it does not name the current owner.
+4. **Cost:** a recovery walks the whole registry once (O(registry size)) per recovery that comes due. Fine for a prototype; an index by owner is a later change if the registry gets large.
+5. **Not shown in the wallet statement.** `wallet_statement` still shows balances only; a statement line for "assets moved" was not asked for, so `src/export.cpp` / `export.hpp` are unchanged.
+6. **The old key is still alive** after recovery (its guardians are retired, as before). If a thief later registers a new asset with the old key, it belongs to the old address; recovery runs once per guardian agreement.
+
+## Files
+
+`src/persist.cpp` is **not** touched (not needed: only the owner of existing records changes, and the chain file is rebuilt by replay). `CMakeLists.txt` has one new test target only.
