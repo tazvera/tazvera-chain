@@ -160,10 +160,16 @@ static void t04_a_stalled_handshake_is_cut_off() {
 }
 
 int main() {
+    std::string startup_error;
+    if (!net_startup(&startup_error)) {
+        std::cerr << "network startup failed: " << startup_error << "\\n";
+        return 1;
+    }
     t01_both_sides_make_a_certificate();
     t02_two_nodes_exchange_bytes_and_fingerprints();
     t03_plaintext_client_is_refused();
     t04_a_stalled_handshake_is_cut_off();
+    net_cleanup();
     if (failures == 0) { std::cout << "tls tests: all passed\n"; return 0; }
     std::cerr << "tls tests: " << failures << " failure(s)\n";
     return 1;
