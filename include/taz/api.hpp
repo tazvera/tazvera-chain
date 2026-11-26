@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace taz {
 
@@ -17,6 +18,8 @@ public:
     ApiServer& operator=(const ApiServer&) = delete;
 
     bool start(const Chain& chain, std::uint16_t port, std::string* error = nullptr);
+    bool start(const Chain& chain, std::uint16_t port,
+               const std::vector<std::string>& allowed_origins, std::string* error = nullptr);
     void wait();
     void stop();
     bool running() const noexcept;
