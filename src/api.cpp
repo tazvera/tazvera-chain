@@ -86,7 +86,64 @@ std::string asset_json(const Hash32& id, const AssetRecord& asset) {
            ",\"created_at\":" + json_string(std::to_string(asset.created_at)) + "}";
 }
 
-Response route_get(const Chain& chain, std::string_view path) {
+Response route_get(const Chain& chain, std::string_view path, std::string_view query) {
+    if (path == "/assets") {
+        std::size_t limit = 100;
+        bool limit_seen = false, after_seen = false;
+        Hash32 after{};
+        std::size_t pos = 0;
+        while (pos < query.size()) {
+            const std::size_t amp = query.find('&', pos);
+            const std::string_view item = query.substr(pos, amp == std::string_view::npos ? query.size() - pos : amp - pos);
+            const std::size_t equal = item.find('=');
+            if (equal == std::string_view::npos || equal == 0)
+                return error_response(400, "Bad Request", "assets query parameters must be key=value pairs");
+            const std::string_view key = item.substr(0, equal);
+            const std::string_view value = item.substr(equal + 1);
+            if (key == "after") {
+                if (after_seen || !parse_hex(value, after))
+                    return error_response(400, "Bad Request", "after must be one 64-character hexadecimal asset id");
+                after_seen = true;
+            } else if (key == "limit") {
+                if (limit_seen || value.empty())
+                    return error_response(400, "Bad Request", "limit must be supplied once as an integer from 1 to 100");
+                unsigned parsed_limit = 0;
+                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), parsed_limit);
+                if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+                    parsed_limit == 0 || parsed_limit > 100)
+                    return error_response(400, "Bad Request", "limit must be an integer from 1 to 100");
+                limit = parsed_limit;
+                limit_seen = true;
+            } else {
+                return error_response(400, "Bad Request", "unknown assets query parameter");
+            }
+            if (amp == std::string_view::npos) break;
+            pos = amp + 1;
+            if (pos == query.size())
+                return error_response(400, "Bad Request", "assets query parameters must not be empty");
+        }
+
+        const auto& registry = chain.state().assets();
+        auto it = after_seen ? registry.upper_bound(after) : registry.begin();
+        std::string body = "{\\"assets\\":[";
+        std::size_t count = 0;
+        Hash32 last{};
+        bool has_last = false;
+        while (it != registry.end() && count < limit) {
+            if (count != 0) body.push_back(',');
+            body += asset_json(it->first, it->second);
+            last = it->first;
+            has_last = true;
+            ++count;
+            ++it;
+        }
+        body += "],\\"next_after\\":";
+        body += it != registry.end() && has_last ? json_string(to_hex(last)) : "null";
+        body.push_back('}');
+        return {200, "OK", std::move(body)};
+    }
+
+Response route_get(const Chain& chain, std::string_view path, std::string_view query = {} {
     if (path == "/status") {
         return {200, "OK",
             "{\"chain_id\":" + json_string(CHAIN_ID) +
@@ -317,8 +374,12 @@ void serve_one(const Chain& chain, const Socket& socket, std::uint16_t port,
     }
 
     const std::string_view method(line.data(), first_space);
-    const std::string_view path(line.data() + first_space + 1, second_space - first_space - 1);
-    if (path.empty() || path.front() != '/' || path.find_first_of("?#") != std::string_view::npos) {
+    const std::string_view target(line.data() + first_space + 1, second_space - first_space - 1);
+    const std::size_t question = target.find('?');
+    const std::string_view path = target.substr(0, question);
+    const std::string_view query = question == std::string_view::npos ? std::string_view{} : target.substr(question + 1);
+    if (path.empty() || path.front() != '/' || path.find('#') != std::string_view::npos ||
+        (question != std::string_view::npos && path != "/assets")) {
         send_response(socket, error_response(400, "Bad Request", "request path is invalid"), cors_origin);
         return;
     }
@@ -330,7 +391,7 @@ void serve_one(const Chain& chain, const Socket& socket, std::uint16_t port,
         send_response(socket, error_response(405, "Method Not Allowed", "Only GET is allowed; this API is read-only"), cors_origin);
         return;
     }
-    send_response(socket, route_get(chain, path), cors_origin);
+    send_response(socket, route_get(chain, path, query), cors_origin);
 }
 
 }  // namespace
