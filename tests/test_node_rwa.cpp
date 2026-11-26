@@ -147,6 +147,8 @@ int main() {
         CHECK(run(as(alice) + " --register-asset 1:" + good_doc + " --peer 9") == 2);
         CHECK(run(as(alice) + " --transfer-asset " + id + ":" + to + " --serve 9") == 2);
         CHECK(run(as(alice) + " --transfer-asset " + id + ":" + to + " --listen 9") == 2);
+        CHECK(run(as(alice) + " --register-asset 1:" + good_doc + " --api 9") == 2);                 // the read-only API mode is not an action either
+        CHECK(run(as(alice) + " --transfer-asset " + id + ":" + to + " --api 9") == 2);
         CHECK(run(exe + " --new-key " + q(tmpdir() + "/nk.key") + " --register-asset 1:" + good_doc) == 2);
         CHECK(!fs::exists(tmpdir() + "/nk.key"));
         CHECK(slurp(chain) == before);

@@ -366,9 +366,9 @@ int main(int argc, char** argv) {
     // The HTTP API is a separate, explicitly enabled read-only mode. It never shares the chain with
     // block production or peer sync, so its concurrent readers always observe a stable Chain object.
     if (!api_port_text.empty()) {
-        if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty() || !transfer_spec.empty() ||
+        if (!listen_port.empty() || !serve_port.empty() || !peer_port.empty() || !transfer_spec.empty() || seen_register || seen_transfer_asset ||
             !every_text.empty() || !retries_text.empty() || !max_peers_text.empty() || !serve_timeout_text.empty())
-            return usage_error("--api is a read-only service mode; do not combine it with peer sync or --transfer");
+            return usage_error("--api is a read-only service mode; do not combine it with peer sync, --transfer, --register-asset or --transfer-asset");
         unsigned int value = 0;
         const auto parsed = std::from_chars(api_port_text.data(), api_port_text.data() + api_port_text.size(), value);
         if (api_port_text.empty() || parsed.ec != std::errc{} ||
