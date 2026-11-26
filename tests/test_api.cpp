@@ -109,8 +109,8 @@ int main() {
     CHECK(status_line(denied_origin).find("200") != std::string::npos);
     CHECK(denied_origin.find("Access-Control-Allow-Origin:") == std::string::npos);
     CHECK(denied_origin.find("Access-Control-Allow-Credentials") == std::string::npos);
-    const std::string allowed_options = request(cors_port, "OPTIONS /status HTTP/1.1\\r\\nHost: localhost:" +
-        std::to_string(cors_port) + "\\r\\nOrigin: https://app.tazvera.com\\r\\n\\r\\n");
+    const std::string allowed_options = request(cors_port, "OPTIONS /status HTTP/1.1\r\nHost: localhost:" +
+        std::to_string(cors_port) + "\r\nOrigin: https://app.tazvera.com\r\n\r\n");
     CHECK(status_line(allowed_options).find("204") != std::string::npos);
     CHECK(allowed_options.find("Access-Control-Allow-Origin: https://app.tazvera.com") != std::string::npos);
     CHECK(allowed_options.find("Access-Control-Allow-Methods: GET") != std::string::npos);
