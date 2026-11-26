@@ -524,4 +524,18 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
     return true;
 }
 
+
+// ---- the transport layer: declared, not written yet (the tests for it come first) ----
+namespace {
+bool not_yet(std::string* error) { if (error) *error = "not implemented yet"; return false; }
+}
+bool PlainTransport::send_all(std::string_view, std::string* error, Deadline) { return not_yet(error); }
+bool PlainTransport::recv_exact(std::size_t, std::string&, std::string* error, Deadline) { return not_yet(error); }
+bool PlainTransport::prepare_send(Deadline, std::string* error) { return not_yet(error); }
+void PlainTransport::shutdown() noexcept {}
+bool send_message(Transport&, std::uint8_t, std::string_view, std::string* error, Deadline) { return not_yet(error); }
+bool recv_message(Transport&, std::uint8_t&, std::string&, std::string* error, Deadline) { return not_yet(error); }
+bool exchange_hello(Transport&, const Hello&, Hello&, bool, std::string* error, Deadline, std::string*) { return not_yet(error); }
+bool exchange_authenticated_hello(Transport&, Hello&, const PrivKey&, Hello&, bool, std::string* error, Deadline) { return not_yet(error); }
+
 }  // namespace taz
