@@ -3,6 +3,7 @@
 #include "taz/crypto.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <vector>
 
 #ifdef _WIN32
@@ -13,6 +14,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -217,8 +219,100 @@ bool connect_loopback(std::uint16_t port, Socket& out, std::string* error) {
     return true;
 }
 
-bool connect_to(std::string_view address, std::uint16_t port, Socket& out, std::string* error, std::chrono::milliseconds) {
-    return connect_loopback(port, out, error);   // red stub: not yet
+bool connect_to(std::string_view address, std::uint16_t port, Socket& out, std::string* error, std::chrono::milliseconds timeout) {
+    if (!is_ipv4_address(address)) {
+        if (error) *error = "not a dotted-quad IPv4 address: \"" + std::string(address) + "\"";
+        return false;
+    }
+    const std::string where = std::string(address) + ":" + std::to_string(port);
+    std::uint32_t host = 0;
+    {   // is_ipv4_address has checked the shape; read the four numbers
+        std::size_t i = 0;
+        for (int part = 0; part < 4; ++part) {
+            unsigned value = 0;
+            while (i < address.size() && address[i] != '.') value = value * 10 + static_cast<unsigned>(address[i++] - '0');
+            host = (host << 8) | value;
+            ++i;
+        }
+    }
+    const socket_t handle = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (handle == kInvalidSocket) {
+        if (error) *error = "could not create the socket";
+        return false;
+    }
+    Socket socket(handle);
+    // Connect without blocking, then wait with select(): a blocking connect() to a machine that does not answer
+    // waits for the operating system's own limit (minutes on Linux), and a node must not hang on that.
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (::ioctlsocket(handle, FIONBIO, &nonblocking) != 0) {
+#else
+    const int flags = ::fcntl(handle, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(handle, F_SETFL, flags | O_NONBLOCK) != 0) {
+#endif
+        if (error) *error = "could not prepare the socket";
+        return false;
+    }
+    sockaddr_in remote{};
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(port);
+    remote.sin_addr.s_addr = htonl(host);
+    if (::connect(handle, reinterpret_cast<sockaddr*>(&remote), sizeof(remote)) != 0) {
+#ifdef _WIN32
+        const bool pending = ::WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+        const bool pending = errno == EINPROGRESS;
+#endif
+        if (!pending) {
+            if (error) *error = "could not connect to " + where;
+            return false;
+        }
+        const long long ms = timeout.count() < 0 ? 0 : static_cast<long long>(timeout.count());
+        timeval tv{};
+        tv.tv_sec = static_cast<long>(ms / 1000);
+        tv.tv_usec = static_cast<long>((ms % 1000) * 1000);
+        fd_set writable, failed;
+        FD_ZERO(&writable); FD_ZERO(&failed);
+        FD_SET(static_cast<socket_t>(handle), &writable);
+        FD_SET(static_cast<socket_t>(handle), &failed);   // Windows reports a refused connection here
+#ifdef _WIN32
+        const int ready = ::select(0, nullptr, &writable, &failed, &tv);
+#else
+        const int ready = ::select(handle + 1, nullptr, &writable, &failed, &tv);
+#endif
+        if (ready == 0) {
+            if (error) *error = "could not connect to " + where + ": no answer within " + std::to_string((ms + 999) / 1000) + "s";
+            return false;
+        }
+        if (ready < 0 || FD_ISSET(handle, &failed)) {
+            if (error) *error = "could not connect to " + where;
+            return false;
+        }
+        int pending_error = 0;
+#ifdef _WIN32
+        int size = static_cast<int>(sizeof(pending_error));
+        const int got = ::getsockopt(handle, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&pending_error), &size);
+#else
+        socklen_t size = sizeof(pending_error);
+        const int got = ::getsockopt(handle, SOL_SOCKET, SO_ERROR, &pending_error, &size);
+#endif
+        if (got != 0 || pending_error != 0) {
+            if (error) *error = "could not connect to " + where;
+            return false;
+        }
+    }
+#ifdef _WIN32
+    nonblocking = 0;
+    if (::ioctlsocket(handle, FIONBIO, &nonblocking) != 0) {
+#else
+    if (::fcntl(handle, F_SETFL, flags) != 0) {
+#endif
+        if (error) *error = "could not prepare the socket";
+        return false;
+    }
+    if (!set_timeout(socket, error)) return false;
+    out = std::move(socket);
+    return true;
 }
 
 bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadline deadline) {
