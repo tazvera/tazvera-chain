@@ -4,13 +4,13 @@
 
 ## 1. कोड और सुरक्षा
 
-- [ ] `--listen-on` का व्यवहार स्पष्ट और जाँचा हुआ है: डिफ़ॉल्ट bind address सुरक्षित है, और स्पष्ट address देने पर ही अपेक्षित interface पर सुनता है।
-- [ ] `--produce-every` का input जाँचा हुआ है: invalid, zero, negative या overflow करने वाले मान अस्वीकार होते हैं; वैध interval पर block production अपेक्षित ढंग से चलता है।
-- [ ] **F7 — producer रुके नहीं:** लंबे समय तक चलने वाले परीक्षण में producer लगातार आगे बढ़ता है; peer disconnect, sync, invalid input या असफल operation के बाद भी अनजाने में स्थायी रूप से अटकता नहीं। Stop/shutdown का तरीका भी जाँचा गया है।
-- [ ] **F4 — DoS सीमा:** connection, message/frame size, chunking, समय और sync के लिए सीमाएँ लागू हैं; सीमा से बाहर input सीमित संसाधन खर्च करके अस्वीकार होता है। सीमा-पार और boundary tests सफल हैं।
+- [ ] `--listen-on <IPv4-address>` का व्यवहार जाँचा है। यह `--serve <port>` या `--listen <port>` के साथ listener address सेट करता है; default `127.0.0.1` है।
+- [ ] `--produce-every` अभी बना नहीं है; इसे उपलब्ध feature या tested behavior न मानें। CLI का `--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
+- [ ] **F7 खुला है:** producer availability/slot skipping लागू और प्रमाणित नहीं है। Producer रुकने पर chain रुक सकती है; इसे बंद issue न मानें।
+- [ ] **F4 खुला है:** bounded frame/message और sync batch/time/byte limits मौजूद हैं, लेकिन connection/request rate limit अभी नहीं है। इसे complete न मानें; rate-limit/cooldown design और abuse tests लागू होने के बाद ही पूरा मानें।
 - [ ] नए और पुराने network tests पूरे चलाए गए; कोई test हटाया, skip किया या कमजोर assertion के साथ बदला नहीं गया।
 - [ ] Linux और Windows पर build तथा test परिणाम दर्ज हैं; sanitizer/fuzz परीक्षण जहाँ लागू हों वहाँ सफल हैं।
-- [ ] `--listen-on` और `--produce-every` के help/usage और error messages सही हैं; गलत configuration पर node साफ़ error देकर रुकता है।
+- [ ] `--listen-on` का help/usage और error behavior सही है। `--produce-every` अभी बना नहीं है; उसके लिए कोई उपलब्ध CLI behavior claim न करें।
 
 ## 2. दो अलग मशीनों का परीक्षण
 
@@ -30,8 +30,8 @@
 
 ## 4. Testnet की सीमाएँ — शुरू करने से पहले पढ़ें
 
-- [ ] **असली पैसा नहीं:** इस testnet पर कोई वास्तविक मूल्य या असली funds नहीं हैं। Testnet data/keys को मूल्यवान न समझें।
-- [ ] **पैसा भेजना नहीं:** यह वास्तविक भुगतान या असली wallet transfer के लिए नहीं है। कोई ऐसा दावा/निर्देश प्रकाशित नहीं है।
+- [ ] **केवल test data:** balances/transactions का कोई घोषित आर्थिक मूल्य नहीं है और कोई real-world payment path नहीं है; इन्हें भुगतान या funds न समझें।
+- [ ] Local prototype transfer को वास्तविक भुगतान या wallet/payment service के रूप में प्रस्तुत नहीं किया गया है.
 - [ ] **TLS नहीं:** transport encrypted नहीं है। इसे केवल नियंत्रित, भरोसेमंद LAN परीक्षण तक सीमित रखें; सार्वजनिक Wi-Fi या इंटरनेट पर न चलाएँ।
 - [ ] **Consensus नहीं:** nodes के बीच production-grade consensus/finality नहीं है। समान chain दिखना या sync पूरा होना canonical chain/finality की गारंटी नहीं है।
 - [ ] Testnet को production, सुरक्षित, विकेंद्रीकृत या आर्थिक रूप से उपयोग योग्य network के रूप में प्रस्तुत नहीं किया जा रहा है।

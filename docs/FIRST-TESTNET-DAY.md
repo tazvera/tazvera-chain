@@ -1,6 +1,6 @@
 # TAZVERA testnet: पहले दिन की checklist
 
-यह development test है, public testnet launch नहीं। असली funds/private keys इस्तेमाल न करें। **आज की सीमा:** `--listen-on` उपलब्ध है, लेकिन `--peer` अभी केवल `127.0.0.1` पर connect करता है। B से A के LAN address पर जुड़ने का `--peer <address>:<port>` विकल्प अभी बाकी है; Claude बना रहा है। इसलिए दो-मशीन sync वाला चरण तभी करें जब वह विकल्प merge होकर test हो जाए। तब तक एक ही मशीन पर दो नोड चलाकर localhost sync जाँचें।
+यह local development test है, public testnet launch या payment service नहीं। Balances/transactions केवल test data हैं; private keys/seed साझा न करें। **आज की सीमा:** `--listen-on` उपलब्ध है, लेकिन `--peer` अभी केवल `127.0.0.1` पर connect करता है। B से A के LAN address पर जुड़ने का `--peer <address>:<port>` विकल्प अभी बना नहीं है। इसलिए दो-मशीन sync वाला चरण तभी करें जब वह विकल्प merge होकर test हो जाए। तब तक एक ही मशीन पर दो नोड चलाकर localhost sync जाँचें।
 
 ## 1. दोनों मशीनों पर binary build करें
 
@@ -20,7 +20,7 @@
 
 - A पर `ipconfig` (Windows) या `ip addr` (Linux) से connected LAN/Wi-Fi interface का IPv4 address निकालें। `127.0.0.1`, VPN या virtual adapter का address नहीं।
 - दोनों मशीनें भरोसेमंद उसी LAN/Wi-Fi पर हों; guest Wi-Fi/client isolation न हो।
-- Remote-peer address support उपलब्ध होने पर A पर चलाएं:
+- Remote-peer address support merge और test होने के बाद A पर चलाएं:
 
 ```sh
 taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
@@ -30,7 +30,7 @@ taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का
 
 ## 4. B से जुड़ें और sync/height देखें
 
-Remote `--peer` address विकल्प merge होकर उपलब्ध और test होने के बाद B पर:
+Remote `--peer <address>:<port>` विकल्प अभी उपलब्ध नहीं है। इसके merge और test होने के बाद ही B पर यह command चलाएँ:
 
 ```sh
 taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
@@ -38,7 +38,7 @@ taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:70
 
 B के logs में connection/sync देखें। Height तभी बढ़ेगी जब A के पास B से आगे के blocks हों; A के पास नए blocks न हों तो height का न बढ़ना अपने-आप failure नहीं है। Genesis pin दोनों तरफ समान होना चाहिए।
 
-**अभी का fallback:** B से A के LAN address पर connect करने का `--peer` address विकल्प उपलब्ध नहीं है। तब तक दोनों नोड एक ही computer पर चलाएं: A/server `--serve 7001 --listen-on 127.0.0.1`, B/peer `--peer 7001`; chain files अलग copies हों।
+**अभी का fallback:** B से A के LAN address पर connect करने का `--peer` address विकल्प अभी बना नहीं है। तब तक दोनों नोड एक ही computer पर चलाएं: A/server `--serve 7001 --listen-on 127.0.0.1`, B/peer `--peer 7001`; chain files अलग copies हों।
 
 ## 5. Connection न बने तो एक-एक करके जाँचें
 

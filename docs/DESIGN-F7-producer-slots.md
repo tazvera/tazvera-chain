@@ -2,9 +2,11 @@
 
 ## Current rule in main
 
-Reviewed against main at `8bb8fa2`.
+Reviewed against main at `6c03457`.
 
 The producer list is committed in order to the genesis commitment. `Chain::append_block_signed` selects the producer for the next height as `producers_[height() % producers_.size()]`; verification in `Chain::verify` expects `producers_[(block.height - 1) % producers_.size()]`. Thus height 1 uses producer 0, height 2 producer 1, etc. The block carries a timestamp, but no slot number. A missing producer cannot be skipped: the next height still expects the same producer.
+
+**Status:** F7 remains open; slot skipping/independent producer availability is not implemented. The CLI option `--produce-every` does not exist in main `6c03457`. The separate `--every <seconds>` option is only the `--peer` reconnect interval and does not schedule block production.
 
 ## Proposed slot rule
 

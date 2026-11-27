@@ -1,6 +1,6 @@
 # अपनी मशीन पर TAZVERA node चलाना
 
-यह development/testnet prototype है। असली पैसा, असली wallet key या Shardeum TZV इस्तेमाल न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
+यह local development prototype है, public testnet या payment service नहीं। यहाँ के balances/transactions test data हैं, आर्थिक मूल्य नहीं। Private keys/seed साझा न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
 
 ## 1. Build करें
 
@@ -64,9 +64,9 @@ Windows पर दोनों commands में `./build/taznode` की ज�
 
 ## 5. अलग मशीनों के बारे में जरूरी बात
 
-`--listen-on ADDRESS` अब मौजूद है और server को चुने हुए local interface/IP पर listen कराने के लिए है। लेकिन `--peer` अभी **सिर्फ़ `127.0.0.1` पर जुड़ता है**; remote address वाला विकल्प अभी बाकी है और Claude उसे बना रहा है। इसलिए B से A तक जाने के लिए `--peer` में address देने वाली सुविधा अभी उपलब्ध नहीं है। Remote-peer address support आने और test होने तक दो नोड एक ही मशीन पर ही चलाएं।
+`--listen-on <IPv4-address>` मौजूद है; इसे `--serve <port>` या `--listen <port>` के साथ दें। Default listener address `127.0.0.1` है। `--peer <port>` अभी केवल `127.0.0.1:<port>` पर connect करता है; `--peer <address>:<port>` वाला remote-address विकल्प अभी बना नहीं है। इसलिए दो नोड एक ही मशीन पर चलाएं।
 
-Remote support आने के बाद अपेक्षित LAN command यह होगी—इसे अभी चलने योग्य न मानें:
+Remote `--peer` address support आने के बाद ही ये LAN commands चलने योग्य होंगी; अभी ये केवल अपेक्षित syntax हैं:
 
 मशीन A:
 ```sh
@@ -86,4 +86,4 @@ taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:70
 - **Height नहीं बढ़ती:** server के पास नए blocks न हों तो height बढ़ना अपेक्षित नहीं। दोनों logs और heights देखें।
 - **Chain load/parse error:** node रोकें, logs सुरक्षित करें; chain file हाथ से edit न करें। केवल disposable test data के लिए नई filename से genesis बनाएं।
 
-Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।
+Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें। `--produce-every` अभी बना नहीं है; CLI का `--every <seconds>` केवल `--peer` reconnect interval है, block production option नहीं.

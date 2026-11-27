@@ -2,11 +2,11 @@
 
 ## Scope and current-main finding
 
-Reviewed against main at `8bb8fa2`.
+Reviewed against main at `6c03457`.
 
-**Important accuracy note:** the current tree does not contain a chain-sync dispatcher that receives a peer's whole-chain message and invokes full-chain verification. `include/taz/net.hpp` declares wire message types `kMsgChain = 2`, `kMsgBlocks = 3`, and `kMsgWant = 4`; `src/net.cpp` currently implements framing, bounded receive/reassembly, hello exchange, and authenticated-hello proof. It has no handler/switch for `kMsgChain` and no connection-to-chain-validation call. Therefore the reported “every connection forces full-chain revalidation” is **not an active path in this main snapshot**. The risk becomes real if a future sync handler accepts `kMsgChain` and routes its payload through whole-chain parsing/validation (the persistence loader's `load_chain_json_text`/chain verification path).
+**Current behavior:** the node has a block-based sync path, not the old whole-chain transfer path. It compares peer height and tip hash, skips transfer when the tip matches, and otherwise exchanges bounded batches (up to 200 blocks per batch). Receive work is bounded by a 60-second deadline and 4 MiB byte budget; each received block is parsed and validated against the local chain. These are useful per-sync work limits, but they are not connection/request rate limits. The `--peer` client currently dials only `127.0.0.1:<port>`.
 
-Before implementation, Claude should identify the actual caller in the branch being changed. Do not describe a future path as current behavior.
+**Still open (F4):** no connection/request rate limit or cooldown/backoff is implemented. Repeated reconnects or repeated sync attempts can still consume bounded work repeatedly. This document is a design proposal for the remaining resource-abuse controls, not a claim that all F4 protections exist. Recheck the implementation before applying this design to a later commit.
 
 ## Threat and invariants
 
@@ -23,9 +23,9 @@ A remote peer must not be able to multiply CPU, memory, or disk work by reconnec
 | Hard byte, block-count, parse-time, and total-work budgets | Bounds worst-case memory/CPU independent of peer identity | Requires careful limits so valid large blocks/chains are not rejected |
 | Cache validated chain/tip results | Avoids repeating identical work | Cache invalidation, storage, and hash-key correctness become security-sensitive |
 
-## Recommendation
+## Recommendation for the remaining F4 work
 
-Use layered controls, not a single per-peer limit:
+The existing tip comparison, bounded block batches, receive deadline/byte budget, and per-block validation should be retained. Add layered connection/request controls, not a single per-peer limit:
 
 1. **Before authentication:** global concurrent-handshake cap, per-source-IP token bucket, bounded frame/stream sizes, and a single absolute handshake deadline. Keep the current pre-allocation length checks.
 2. **After authenticated hello:** maintain a bounded per-identity connection/sync budget plus a global sync-work budget. Charge an attempt before parsing; impose a cooldown for failed or unchanged-tip requests.
@@ -33,7 +33,7 @@ Use layered controls, not a single per-peer limit:
 4. **Bound work:** cap outstanding syncs, response bytes, blocks per batch, and total validation work/time. Reject over-budget requests before allocating or replaying a chain. Make limits configurable only within safe hard ceilings.
 5. **Observability:** expose counters for rejected connections, redundant syncs, bytes, blocks validated, and budget exhaustion; avoid logging private keys or full sensitive payloads.
 
-### Tests required before implementation is accepted
+### Tests required before the remaining F4 work is accepted
 
 - Repeated connections from one source hit the rate limit; another source still connects.
 - Many source addresses cannot exceed the global handshake/concurrency cap.
