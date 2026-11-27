@@ -786,8 +786,11 @@ function blockCard(b) {
         dd.append(el("div", "mono", "Asset ID: " + (t.assetId || "जाँच जारी")));
       }
       if (t.kind === 7) {
+        const kinds = { 0: "अज्ञात", 1: "ज़मीन", 2: "वाहन", 3: "इनवॉइस", 4: "अन्य" };
         dd.append(el("div", "mono", "मौजूदा मालिक (owner): " + t.owner));
         dd.append(el("div", "mono", "नया मालिक (to): " + t.to));
+        dd.append(el("div", "", "Asset kind: " + (kinds[t.assetKind] || "अमान्य") + " (" + t.assetKind + ")"));
+        dd.append(el("div", "mono", "Document hash: " + t.docHash));
         dd.append(el("div", "mono", "Asset ID: " + t.ref));
       }
       dd.append(el("div", "", "फ़ीस " + fmt(t.fee) + " · nonce " + t.nonce));
