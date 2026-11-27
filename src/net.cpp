@@ -123,7 +123,42 @@ Socket& Socket::operator=(Socket&& other) noexcept {
     return *this;
 }
 
-bool listen_loopback(std::uint16_t port, Listener& out, std::string* error, int backlog) {
+bool is_ipv4_address(std::string_view text) {
+    // Strict, and the same on every platform (no inet_pton, whose leniency differs): four decimal parts separated by
+    // dots, each 0..255, written without leading zeros ("01" could be read as octal), nothing before or after.
+    int parts = 0;
+    std::size_t i = 0;
+    while (true) {
+        const std::size_t start = i;
+        unsigned value = 0;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+            value = value * 10 + static_cast<unsigned>(text[i] - '0');
+            if (++i - start > 3) return false;
+        }
+        const std::size_t digits = i - start;
+        if (digits == 0 || value > 255 || (digits > 1 && text[start] == '0')) return false;
+        ++parts;
+        if (i == text.size()) return parts == 4;
+        if (text[i] != '.' || parts == 4) return false;
+        ++i;
+    }
+}
+
+bool listen_on(std::string_view address, std::uint16_t port, Listener& out, std::string* error, int backlog) {
+    if (!is_ipv4_address(address)) {
+        if (error) *error = "\"" + std::string(address) + "\" is not a valid IPv4 address";
+        return false;
+    }
+    std::uint32_t host = 0;
+    {   // is_ipv4_address has checked the shape; read the four numbers
+        std::size_t i = 0;
+        for (int part = 0; part < 4; ++part) {
+            unsigned value = 0;
+            while (i < address.size() && address[i] != '.') value = value * 10 + static_cast<unsigned>(address[i++] - '0');
+            host = (host << 8) | value;
+            ++i;
+        }
+    }
     const socket_t handle = ::socket(AF_INET, SOCK_STREAM, 0);
     if (handle == kInvalidSocket) {
         if (error) *error = "could not create the listening socket";
@@ -131,12 +166,12 @@ bool listen_loopback(std::uint16_t port, Listener& out, std::string* error, int 
     }
     Socket socket(handle);
     // No SO_REUSEADDR: on Windows it lets another process take the port, and this code never needs it.
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(port);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // 127.0.0.1 only, never 0.0.0.0
-    if (::bind(handle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-        if (error) *error = "could not bind 127.0.0.1:" + std::to_string(port);
+    sockaddr_in bind_address{};
+    bind_address.sin_family = AF_INET;
+    bind_address.sin_port = htons(port);
+    bind_address.sin_addr.s_addr = htonl(host);   // exactly the address that was asked for; 0.0.0.0 only if it was asked for
+    if (::bind(handle, reinterpret_cast<sockaddr*>(&bind_address), sizeof(bind_address)) != 0) {
+        if (error) *error = "could not bind " + std::string(address) + ":" + std::to_string(port);
         return false;
     }
     if (backlog < 1 || ::listen(handle, backlog) != 0) {
@@ -156,6 +191,10 @@ bool listen_loopback(std::uint16_t port, Listener& out, std::string* error, int 
     out.socket = std::move(socket);
     out.port = ntohs(bound.sin_port);
     return true;
+}
+
+bool listen_loopback(std::uint16_t port, Listener& out, std::string* error, int backlog) {
+    return listen_on("127.0.0.1", port, out, error, backlog);   // 127.0.0.1 only, as always: no argument can change it
 }
 
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error) {
@@ -541,10 +580,5 @@ bool PlainTransport::prepare_send(Deadline deadline, std::string* error) {
     return true;
 }
 void PlainTransport::shutdown() noexcept { shutdown_connection(socket_); }
-
-
-// ---- declared, not written yet (the tests come first) ----
-bool is_ipv4_address(std::string_view) { return false; }
-bool listen_on(std::string_view, std::uint16_t, Listener&, std::string* error, int) { if (error) *error = "not implemented yet"; return false; }
 
 }  // namespace taz

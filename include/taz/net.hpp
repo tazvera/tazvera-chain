@@ -10,7 +10,7 @@ namespace taz {
 // v9.0: loopback transport for the handshake. Two processes on one machine, nothing on the internet.
 //
 // Deliberate limits of this step:
-//   - it binds 127.0.0.1 only; there is no way to ask it to listen on 0.0.0.0;
+//   - listen_loopback() binds 127.0.0.1 only; to listen anywhere else the caller must name the address (listen_on);
 //   - it carries one message at a time and no peer discovery;
 //   - a successful handshake means "same chain", never "trusted peer". Hello is not authenticated, so any
 //     stranger can claim to be a node. Peer identity is a separate milestone.
