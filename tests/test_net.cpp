@@ -34,15 +34,16 @@ static Chain make_chain(Amount first_balance) {
 // in recv while the other sends; calling it on both ends of one process would simply time out.
 static bool pump(Socket& first, const Hello& first_hello, Hello& first_got,
                  Socket& second, const Hello& second_hello, Hello& second_got, std::string& err) {
-    if (!send_message(first, kMsgHello, encode_hello(first_hello), &err)) return false;
+    PlainTransport first_t(first), second_t(second);
+    if (!send_message(first_t, kMsgHello, encode_hello(first_hello), &err)) return false;
     std::uint8_t type = 0;
     std::string payload;
-    if (!recv_message(second, type, payload, &err)) return false;
+    if (!recv_message(second_t, type, payload, &err)) return false;
     if (type != kMsgHello) { err = "the peer did not send a hello"; return false; }
     if (!decode_hello(payload, second_got, &err)) return false;
 
-    if (!send_message(second, kMsgHello, encode_hello(second_hello), &err)) return false;
-    if (!recv_message(first, type, payload, &err)) return false;
+    if (!send_message(second_t, kMsgHello, encode_hello(second_hello), &err)) return false;
+    if (!recv_message(first_t, type, payload, &err)) return false;
     if (type != kMsgHello) { err = "the peer did not send a hello"; return false; }
     return decode_hello(payload, first_got, &err);
 }
@@ -87,6 +88,7 @@ static void n02_wrong_chain_refused() {
 
 static void n03_oversize_refused() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
@@ -99,18 +101,19 @@ static void n03_oversize_refused() {
     header.push_back(static_cast<char>(0));
     CHECK(send_all(client, header, &err));
     std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(server, type, payload, &err));
+    CHECK(!recv_message(server_t, type, payload, &err));
     CHECK(err.find("message too large") != std::string::npos);
 }
 
 static void n04_garbage_refused() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport client_t(client), server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
-    CHECK(send_message(client, kMsgHello, "this is not a hello message\n", &err));
+    CHECK(send_message(client_t, kMsgHello, "this is not a hello message\n", &err));
     Hello got;
-    CHECK(!exchange_hello(server, hello_for(make_chain(1000)), got, false, &err));
+    CHECK(!exchange_hello(server_t, hello_for(make_chain(1000)), got, false, &err));
     CHECK(!err.empty());
 }
 
@@ -120,6 +123,7 @@ static void n04_garbage_refused() {
 static void n06_slow_peer_is_cut_at_the_deadline() {
     Listener listener;
     Socket server, client;
+    PlainTransport server_t(server);
     std::string err;
     CHECK(listen_loopback(0, listener, &err));
     CHECK(connect_loopback(listener.port, client, &err));
@@ -142,7 +146,7 @@ static void n06_slow_peer_is_cut_at_the_deadline() {
     std::uint8_t type = 0;
     std::string payload;
     const auto started = std::chrono::steady_clock::now();
-    const bool got = recv_message(server, type, payload, &err, started + std::chrono::milliseconds(10000));
+    const bool got = recv_message(server_t, type, payload, &err, started + std::chrono::milliseconds(10000));
     const auto took =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
 
@@ -157,6 +161,7 @@ static void n06_slow_peer_is_cut_at_the_deadline() {
 // v9.3: the authenticated handshake proves control of both peer keys and binds the proof to fresh hellos.
 static void n08_authenticated_handshake_ok() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server), client_t(client);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
 
@@ -171,10 +176,10 @@ static void n08_authenticated_handshake_ok() {
     bool server_ok = false, client_ok = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
-        server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
+        server_ok = exchange_authenticated_hello(server_t, server_hello, server_key, server_got,
                                                  false, &server_err, deadline);
     });
-    client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
+    client_ok = exchange_authenticated_hello(client_t, client_hello, client_key, client_got,
                                              true, &client_err, deadline);
     server_thread.join();
 
@@ -194,6 +199,7 @@ static void n08_authenticated_handshake_ok() {
 // must replace that value with a fresh nonce before signing, rather than trusting non-zero bytes.
 static void n11_authenticated_handshake_refreshes_reused_nonce() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server), client_t(client);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
@@ -213,10 +219,10 @@ static void n11_authenticated_handshake_refreshes_reused_nonce() {
     bool server_ok = false, client_ok = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
-        server_ok = exchange_authenticated_hello(server, server_hello, server_key, server_got,
+        server_ok = exchange_authenticated_hello(server_t, server_hello, server_key, server_got,
                                                  false, &server_err, deadline);
     });
-    client_ok = exchange_authenticated_hello(client, client_hello, client_key, client_got,
+    client_ok = exchange_authenticated_hello(client_t, client_hello, client_key, client_got,
                                              true, &client_err, deadline);
     server_thread.join();
 
@@ -230,6 +236,7 @@ static void n11_authenticated_handshake_refreshes_reused_nonce() {
 // An unsigned hello may identify a chain, but it must never pass the authenticated handshake.
 static void n09_unsigned_peer_refused() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport client_t(client), server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
@@ -238,16 +245,17 @@ static void n09_unsigned_peer_refused() {
     CHECK(generate_keypair(local_key, local_pub));
     Hello local = hello_for(chain);
     Hello anonymous = hello_for(chain);
-    CHECK(send_message(client, kMsgHello, encode_hello(anonymous), &err));
+    CHECK(send_message(client_t, kMsgHello, encode_hello(anonymous), &err));
 
     Hello got;
-    CHECK(!exchange_authenticated_hello(server, local, local_key, got, false, &err));
+    CHECK(!exchange_authenticated_hello(server_t, local, local_key, got, false, &err));
     CHECK(err.find("peer did not prove an identity") != std::string::npos);
 }
 
 // A peer that advertises a key but sends a broken hello signature must not pass strict authentication.
 static void n12_invalid_peer_hello_signature_refused() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport client_t(client), server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
@@ -260,15 +268,16 @@ static void n12_invalid_peer_hello_signature_refused() {
     CHECK(sign_hello(peer, peer_key));
     peer.signature[0] ^= 0x01;  // corrupt the signed hello after signing
     CHECK(!hello_signature_ok(peer));
-    CHECK(send_message(client, kMsgHello, encode_hello(peer), &err));
+    CHECK(send_message(client_t, kMsgHello, encode_hello(peer), &err));
 
-    CHECK(!exchange_authenticated_hello(server, local, local_key, got, false, &err));
+    CHECK(!exchange_authenticated_hello(server_t, local, local_key, got, false, &err));
     CHECK(err.find("identity signature is invalid") != std::string::npos);
 }
 
 // The proof key must be the same key that signed the peer's hello.
 static void n13_auth_proof_key_must_match_hello_key() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server), client_t(client);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
@@ -288,21 +297,21 @@ static void n13_auth_proof_key_must_match_hello_key() {
     std::string server_err;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::thread server_thread([&] {
-        server_ok = exchange_authenticated_hello(server, local, local_key, server_got,
+        server_ok = exchange_authenticated_hello(server_t, local, local_key, server_got,
                                                  false, &server_err, deadline);
     });
 
-    CHECK(send_message(client, kMsgHello, peer_raw, &err, deadline));
+    CHECK(send_message(client_t, kMsgHello, peer_raw, &err, deadline));
     std::uint8_t type = 0;
     std::string server_raw;
-    CHECK(recv_message(client, type, server_raw, &err, deadline));
+    CHECK(recv_message(client_t, type, server_raw, &err, deadline));
     CHECK(type == kMsgHello);
     Hello server_hello;
     CHECK(decode_hello(server_raw, server_hello, &err));
     const std::string transcript = auth_transcript(peer, peer_raw, server_hello, server_raw);
     AuthMessage wrong_key_proof;
     CHECK(sign_auth(wrong_key_proof, proof_key, transcript));
-    CHECK(send_message(client, kMsgAuth, encode_auth(wrong_key_proof), &err, deadline));
+    CHECK(send_message(client_t, kMsgAuth, encode_auth(wrong_key_proof), &err, deadline));
 
     server_thread.join();
     CHECK(!server_ok);
@@ -312,13 +321,14 @@ static void n13_auth_proof_key_must_match_hello_key() {
 // A zero-filled seed is not an identity and must be rejected before any hello is sent.
 static void n10_zero_local_identity_refused() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) return;
 
     const Chain chain = make_chain(1000);
     Hello local = hello_for(chain), got;
     PrivKey empty_key{};
-    CHECK(!exchange_authenticated_hello(server, local, empty_key, got, false, &err));
+    CHECK(!exchange_authenticated_hello(server_t, local, empty_key, got, false, &err));
     CHECK(err.find("identity key is empty") != std::string::npos);
 }
 
@@ -338,13 +348,14 @@ static void n05_closed_port_is_an_error() {
 // this test would not merely fail — it would disappear.
 static void n06_send_to_closed_peer_is_an_error() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
 
     client.close();                                   // the peer goes away
     bool failed = false;
     for (int i = 0; i < 4 && !failed; ++i)            // the first send may still fit in the socket buffer
-        failed = !send_message(server, kMsgHello, std::string(4096, 'x'), &err);
+        failed = !send_message(server_t, kMsgHello, std::string(4096, 'x'), &err);
     CHECK(failed);
     CHECK(!err.empty());
 }
@@ -354,6 +365,7 @@ static void n06_send_to_closed_peer_is_an_error() {
 // per-call socket timeout.
 static void n07_deadline_cuts_off_a_slow_peer() {
     Listener listener; Socket server, client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(listener, server, client, err));
     if (!server.valid() || !client.valid()) { std::cerr << "  " << err << "\n"; return; }
 
@@ -364,7 +376,7 @@ static void n07_deadline_cuts_off_a_slow_peer() {
     const auto started = std::chrono::steady_clock::now();
     std::uint8_t type = 0;
     std::string payload;
-    const bool got = recv_message(server, type, payload, &err, started + std::chrono::milliseconds(400));
+    const bool got = recv_message(server_t, type, payload, &err, started + std::chrono::milliseconds(400));
     const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
     CHECK(!got);
     CHECK(!err.empty());
@@ -391,16 +403,18 @@ static std::string raw_chunk(std::uint8_t original, std::uint32_t stream,
 }
 static bool reject_chunk_frame(Socket& server, Socket& client, const std::string& frame,
                                std::string& err, std::string_view expected) {
+    PlainTransport server_t(server);
     CHECK(send_all(client, frame, &err));
     std::uint8_t type=0; std::string payload;
-    const bool ok=recv_message(server,type,payload,&err);
+    const bool ok=recv_message(server_t,type,payload,&err);
     CHECK(!ok); CHECK(err.find(expected)!=std::string::npos);
     return !ok;
 }
 static void n22_small_message_stays_direct() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport client_t(client);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
-    CHECK(send_message(client,kMsgBlocks,"small",&err));
+    CHECK(send_message(client_t,kMsgBlocks,"small",&err));
     std::string hdr,ty,body;
     CHECK(recv_exact(server,4,hdr,&err)); CHECK(recv_exact(server,1,ty,&err));
     CHECK(ty.size()==1 && static_cast<std::uint8_t>(ty[0])==kMsgBlocks);
@@ -413,30 +427,33 @@ static void n23_chunk_order_rejected() {
 }
 static void n24_incomplete_stream_deadline_and_close() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     CHECK(send_all(client,raw_chunk(kMsgBlocks,8,0,2,"first"),&err));
     std::uint8_t type=0; std::string payload;
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(300);
-    CHECK(!recv_message(server,type,payload,&err,deadline));
+    CHECK(!recv_message(server_t,type,payload,&err,deadline));
     CHECK(err.find("incomplete stream")!=std::string::npos);
     std::string ignored;
     CHECK(!recv_exact(client,1,ignored,&err,std::chrono::steady_clock::now()+std::chrono::milliseconds(500)));
 }
 static void n25_total_chunks_must_match() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     std::string frames=raw_chunk(kMsgBlocks,9,0,2,"a")+raw_chunk(kMsgBlocks,9,1,3,"b");
     CHECK(send_all(client,frames,&err));
     std::uint8_t type=0; std::string payload;
-    CHECK(!recv_message(server,type,payload,&err)); CHECK(err.find("total_chunks")!=std::string::npos);
+    CHECK(!recv_message(server_t,type,payload,&err)); CHECK(err.find("total_chunks")!=std::string::npos);
 }
 static void n26_original_type_change_rejected() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     std::string frames=raw_chunk(kMsgBlocks,10,0,2,"a")+raw_chunk(kMsgHello,10,1,2,"b");
     CHECK(send_all(client,frames,&err));
     std::uint8_t type=0; std::string payload;
-    CHECK(!recv_message(server,type,payload,&err)); CHECK(err.find("original_type")!=std::string::npos);
+    CHECK(!recv_message(server_t,type,payload,&err)); CHECK(err.find("original_type")!=std::string::npos);
 }
 static void n27_nested_chunk_type_rejected() {
     Listener l; Socket server,client; std::string err;
@@ -445,27 +462,30 @@ static void n27_nested_chunk_type_rejected() {
 }
 static void n28_reassembled_blocks_type_preserved() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     const std::string block_payload="blocks-payload";
     CHECK(send_all(client,raw_chunk(kMsgBlocks,12,0,2,"blocks-"),&err));
     CHECK(send_all(client,raw_chunk(kMsgBlocks,12,1,2,"payload"),&err));
     std::uint8_t type=0; std::string payload;
-    CHECK(recv_message(server,type,payload,&err));
+    CHECK(recv_message(server_t,type,payload,&err));
     CHECK(type==kMsgBlocks); CHECK(payload==block_payload);
 }
 
 static void n29_impossible_oversize_stream_refused_before_growth() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     // Each chunk must carry at least one data byte, so this count alone exceeds the 32 MiB ceiling.
     CHECK(send_all(client,raw_chunk(kMsgBlocks,13,0,32u*1024u*1024u+1u,"x"),&err));
     std::uint8_t type=0; std::string payload;
-    CHECK(!recv_message(server,type,payload,&err));
+    CHECK(!recv_message(server_t,type,payload,&err));
     CHECK(err.find("stream too large")!=std::string::npos);
 }
 
 static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     const std::string bytes(65518,'z'); // maximum data bytes in one 64 KiB wire frame
     bool sender_ok=true; std::string sender_err;
@@ -476,7 +496,7 @@ static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
         }
     });
     std::uint8_t type=0; std::string payload;
-    const bool received=recv_message(server,type,payload,&err);
+    const bool received=recv_message(server_t,type,payload,&err);
     sender.join();
     CHECK(!received);
     CHECK(err.find("stream too large")!=std::string::npos);
@@ -485,22 +505,24 @@ static void n30_stream_over_32_mib_is_rejected_at_growth_boundary() {
 
 static void n21_sender_chunks_one_mib_and_receiver_restores_type() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport client_t(client), server_t(server);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     const std::string source(1024*1024,'B');
     bool sent=false; std::string send_err;
-    std::thread sender([&] { sent=send_message(client,kMsgBlocks,source,&send_err); });
+    std::thread sender([&] { sent=send_message(client_t,kMsgBlocks,source,&send_err); });
     std::uint8_t type=0; std::string got;
-    const bool received=recv_message(server,type,got,&err);
+    const bool received=recv_message(server_t,type,got,&err);
     sender.join();
     CHECK(sent); CHECK(received); CHECK(type==kMsgBlocks); CHECK(got==source);
     if(!send_err.empty()) std::cerr<<"  sender: "<<send_err<<"\n";
 }
 static void n31_sender_wire_frames_do_not_exceed_64_kib() {
     Listener l; Socket server,client; std::string err;
+    PlainTransport client_t(client);
     CHECK(connected_pair(l,server,client,err)); if(!server.valid()||!client.valid()) return;
     const std::string source(1024*1024,'W');
     bool sent=false; std::string send_err;
-    std::thread sender([&] { sent=send_message(client,kMsgBlocks,source,&send_err); });
+    std::thread sender([&] { sent=send_message(client_t,kMsgBlocks,source,&send_err); });
     for(std::size_t received=0; received<source.size();) {
         std::string header, type_byte, payload;
         CHECK(recv_exact(server,4,header,&err));

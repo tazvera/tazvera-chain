@@ -18,6 +18,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <sys/time.h>
+#endif
 
 using namespace taz;
 static int failures = 0;
@@ -107,13 +111,25 @@ static void t1_plain_transport_over_a_socket() {
     std::string back; const bool received = recv_message(ps, type, back, &err, std::chrono::steady_clock::now() + std::chrono::seconds(10));
     sender.join();
     CHECK(sent && received && type == kMsgBlocks && back == big);
-    // a deadline that passes while the peer is silent is an error, not a hang
+    // a deadline that passes while the peer is silent is an error, not a hang: the read ends at the deadline, not at the 3 s socket timeout
     std::string why;
-    CHECK(!recv_message(ps, type, payload, &why, std::chrono::steady_clock::now() + std::chrono::milliseconds(200)));
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK(!recv_message(ps, type, payload, &why, t0 + std::chrono::milliseconds(200)));
     CHECK(!why.empty());
+    CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1500));
+#ifndef _WIN32
+    {   // prepare_send turns the deadline into the socket's send timeout (at most the usual per-call timeout); no deadline leaves it alone
+        auto send_timeout_ms = [&] { timeval tv{}; socklen_t len = sizeof tv; ::getsockopt(client.raw(), SOL_SOCKET, SO_SNDTIMEO, &tv, &len); return tv.tv_sec * 1000 + tv.tv_usec / 1000; };
+        CHECK(pc.prepare_send(std::chrono::steady_clock::now() + std::chrono::milliseconds(500), &err));
+        const auto ms = send_timeout_ms(); CHECK(ms >= 1 && ms <= 500);
+        CHECK(pc.prepare_send(no_deadline(), &err) && send_timeout_ms() == ms);
+    }
+#endif
     // shutdown() cuts the connection: the other side sees it closed
     ps.shutdown();
-    std::string one; CHECK(!recv_exact(client, 1, one, &err));
+    const auto t1 = std::chrono::steady_clock::now();
+    std::string one; CHECK(!recv_exact(client, 1, one, &err, t1 + std::chrono::seconds(2)));
+    CHECK(std::chrono::steady_clock::now() - t1 < std::chrono::milliseconds(1000));   // it saw the close at once; it did not wait for its deadline
 }
 
 // t2: the whole message layer runs over a transport that is not a socket
