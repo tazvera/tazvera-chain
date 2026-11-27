@@ -66,20 +66,22 @@ static void h3_worst_case_block_fits() {
       CHECK(parsed); CHECK(parsed && back.hash() == b.hash()); }
     // and a longer announced length is still refused before anything is read
     std::string err; Listener l; Socket server, client;
+    PlainTransport client_t(client);
     CHECK(connected_pair(l, server, client, err));
     const std::uint32_t over = kMaxPayloadBytes + 1;
     std::string header; for (int i = 3; i >= 0; --i) header.push_back(static_cast<char>((over >> (8 * i)) & 0xff));
     header.push_back(static_cast<char>(kMsgBlocks));
     CHECK(send_all(server, header, &err));
     std::uint8_t type = 0; std::string payload;
-    CHECK(!recv_message(client, type, payload, &err));
+    CHECK(!recv_message(client_t, type, payload, &err));
     CHECK(err.find("message too large") != std::string::npos);
     // a big (3 MiB) message still arrives intact (on a fresh connection: the refused one is dropped, as a real node does)
     Listener l2; Socket server2, client2;
+    PlainTransport server2_t(server2), client2_t(client2);
     CHECK(connected_pair(l2, server2, client2, err));
     const std::string big(3u * 1024u * 1024u, 'q');
-    std::thread sender([&] { std::string e; send_message(server2, kMsgBlocks, big, &e); });
-    const bool got_big = recv_message(client2, type, payload, &err);
+    std::thread sender([&] { std::string e; send_message(server2_t, kMsgBlocks, big, &e); });
+    const bool got_big = recv_message(client2_t, type, payload, &err);
     if (!got_big) std::cerr << "  big message: " << err << "\n";
     CHECK(got_big);
     sender.join();

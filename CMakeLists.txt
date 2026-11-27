@@ -195,3 +195,7 @@ target_compile_definitions(taz_node_rwa_tests PRIVATE TAZ_NODE_BINARY="$<TARGET_
 add_dependencies(taz_node_rwa_tests taznode)
 add_test(NAME taz_node_rwa_tests COMMAND taz_node_rwa_tests)
 set_tests_properties(taz_node_rwa_tests PROPERTIES PASS_REGULAR_EXPRESSION "node rwa tests: all passed")
+add_executable(taz_transport_tests tests/test_transport.cpp)
+target_link_libraries(taz_transport_tests PRIVATE tazcore Threads::Threads)
+add_test(NAME taz_transport_tests COMMAND taz_transport_tests)
+set_tests_properties(taz_transport_tests PROPERTIES PASS_REGULAR_EXPRESSION "transport tests: all passed \\(7 cases\\)")

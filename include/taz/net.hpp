@@ -81,26 +81,58 @@ bool send_all(const Socket& socket, std::string_view bytes, std::string* error =
 using Deadline = std::chrono::steady_clock::time_point;
 inline Deadline no_deadline() { return Deadline::max(); }
 
+// The message layer (framing, chunking, hello, identity proof) is written against this interface and nothing else:
+// it moves bytes to and from one peer and does not know what carries them.
+class Transport {
+public:
+    virtual ~Transport() = default;
+    Transport(const Transport&) = delete;
+    Transport& operator=(const Transport&) = delete;
+
+    virtual bool send_all(std::string_view bytes, std::string* error, Deadline deadline) = 0;
+    virtual bool recv_exact(std::size_t count, std::string& out, std::string* error, Deadline deadline) = 0;
+    // Called once at the start of every message that is sent, before its first byte, with the deadline for that message.
+    // A transport that enforces a deadline through a per-connection setting applies it here. Default: nothing to do.
+    virtual bool prepare_send(Deadline deadline, std::string* error) { (void)deadline; (void)error; return true; }
+    // Cut the connection: called when the peer broke the protocol, so that nothing more is read from it.
+    virtual void shutdown() noexcept = 0;
+
+protected:
+    Transport() = default;
+};
+
+// The transport this node has always used: the bytes go straight onto a socket. It does not own the socket.
+class PlainTransport final : public Transport {
+public:
+    explicit PlainTransport(const Socket& socket) noexcept : socket_(socket) {}
+    bool send_all(std::string_view bytes, std::string* error, Deadline deadline) override;
+    bool recv_exact(std::size_t count, std::string& out, std::string* error, Deadline deadline) override;
+    bool prepare_send(Deadline deadline, std::string* error) override;
+    void shutdown() noexcept override;
+private:
+    const Socket& socket_;
+};
+
 // With a deadline, accept_one() waits only until then and reports a timeout instead of blocking for ever.
 bool accept_one(const Socket& listener, Socket& out, std::string* error = nullptr,
                 Deadline deadline = no_deadline());
 bool recv_exact(const Socket& socket, std::size_t count, std::string& out, std::string* error = nullptr,
                 Deadline deadline = no_deadline());
 
-bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error = nullptr,
+bool send_message(Transport& transport, std::uint8_t type, std::string_view payload, std::string* error = nullptr,
                   Deadline deadline = no_deadline());
-bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
+bool recv_message(Transport& transport, std::uint8_t& type, std::string& payload, std::string* error = nullptr,
                   Deadline deadline = no_deadline());
 
 // Compatibility-only chain handshake: checks framing and exchanges hello data, but does NOT authenticate a peer.
 // `send_first` must be true on exactly one of the two ends. Use exchange_authenticated_hello for key proof.
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first,
+bool exchange_hello(Transport& transport, const Hello& ours, Hello& theirs, bool send_first,
                     std::string* error = nullptr, Deadline deadline = no_deadline(),
                     std::string* their_raw_hello = nullptr);
 
 // Stronger handshake: both peers sign their fresh hello and prove control of that identity over
 // the transcript containing both exact hello frames. This authenticates keys, not peer authorization.
-bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivKey& private_seed,
+bool exchange_authenticated_hello(Transport& transport, Hello& ours, const PrivKey& private_seed,
                                    Hello& theirs, bool send_first, std::string* error = nullptr,
                                    Deadline deadline = no_deadline());
 

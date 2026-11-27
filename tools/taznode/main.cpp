@@ -459,7 +459,7 @@ int main(int argc, char** argv) {
         // chain.height() here instead would send one block too many whenever this node produced a block between
         // the hello and the send, and that extra block would sit in the socket and be read as the next
         // message — a protocol desync that looks like corruption.
-        auto send_blocks = [&](taz::Socket& sock, std::uint64_t from_height, std::uint64_t announced) -> bool {
+        auto send_blocks = [&](taz::Transport& sock, std::uint64_t from_height, std::uint64_t announced) -> bool {
             if (from_height > announced) {
                 std::cerr << "taznode: the peer's height (" << from_height
                           << ") is above the height we announced (" << announced << "); nothing to send\n";
@@ -493,7 +493,7 @@ int main(int argc, char** argv) {
                 std::cout << "taznode: " << (missing - send) << " block(s) left for the next sync\n";
             return true;
         };
-        auto receive_blocks = [&](taz::Socket& sock, std::uint64_t expected) -> bool {
+        auto receive_blocks = [&](taz::Transport& sock, std::uint64_t expected) -> bool {
             const std::uint64_t wanted = std::min(expected, kMaxBlocksPerSync);
             // A count is not a budget: 200 messages, each allowed to stall for the receive timeout, is ten
             // minutes of a node's life handed to one peer. Time and bytes are bounded too, and the next poll
@@ -569,7 +569,7 @@ int main(int argc, char** argv) {
         // on our chain or misbehaves; the caller decides whether that ends the program or just this peer.
         // Returns true only when the peer proved an identity (or none was required) and the exchange finished.
         // The serve loop counts that, not the bare fact that a socket opened.
-        auto handle_peer = [&](taz::Socket& sock, bool we_speak_first, taz::Deadline deadline) -> bool {
+        auto handle_peer = [&](taz::Transport& sock, bool we_speak_first, taz::Deadline deadline) -> bool {
             taz::Hello ours = taz::hello_for(chain);   // current height and a fresh nonce, every time
             taz::Hello theirs;
             if (require_identity) {
@@ -854,7 +854,8 @@ int main(int argc, char** argv) {
                     std::cerr << "taznode: " << net_err << "\n";
                 } else {
                     const auto auth_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-                    round_ok = handle_peer(socket, true, auth_deadline);
+                    taz::PlainTransport transport(socket);   // the bytes of this connection go straight onto the socket
+                    round_ok = handle_peer(transport, true, auth_deadline);
                     socket.close();
                 }
                 if (round_ok) {
@@ -904,7 +905,8 @@ int main(int argc, char** argv) {
                 }
                 // The ten seconds start when the connection is accepted, not at each read.
                 const auto auth_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-                if (handle_peer(peer, false, auth_deadline)) {
+                taz::PlainTransport transport(peer);   // the bytes of this connection go straight onto the socket
+                if (handle_peer(transport, false, auth_deadline)) {
                     ++served;
                     std::cout << "taznode: served " << served << " of " << wanted
                               << ", our height is now " << chain.height() << std::endl;

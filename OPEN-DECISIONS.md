@@ -174,3 +174,27 @@ They are not part of F10; address them together with the planned RWA-era Explore
 5. **Exit codes follow `--transfer`:** 2 usage, 3 cannot write, 5 the block was refused.
 6. **The same arguments again** (`--register-asset 1:<same hash>`) make a new asset each time (the id includes the nonce). A repeated command therefore registers a second asset. This is the chain's rule from part 1, not something the command can prevent.
 7. **No `--allow-anonymous`-style or producer options** were added: on a chain that declares producers the block is signed by the key, exactly as `--transfer` does.
+
+# Network layer: a Transport between the messages and the socket
+
+## Fixed behaviour (decided by the owner of the project)
+
+- `net.hpp` has an interface `Transport` (`send_all`, `recv_exact`) and `PlainTransport`, which does on a `Socket` exactly what the message layer used to do itself. The wire does not change by a single byte.
+- `send_message`, `recv_message`, `exchange_hello` and `exchange_authenticated_hello` take a `Transport&`. `taznode` and the tests call them through a `PlainTransport`.
+- This change adds a layer only: no new kind of transport, no new option, no change in what a node does.
+- The proof that behaviour is the same: the old tests pass with their assertions unchanged. In `test_net.cpp` and `test_hardening91.cpp` only the plumbing changed (a `PlainTransport x_t(x);` line per socket, and `x_t` in place of `x` as the first argument of the four functions); with those lines and the `_t` removed, both files are identical to what they were.
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **`Transport` has two members more than `send_all` / `recv_exact`:** `prepare_send(deadline, error)` and `shutdown()`.
+   - `shutdown()`: when the peer breaks the protocol (an announced length over the ceiling, a chunk stream out of order) the message layer cuts the connection. It did that with `::shutdown` on the socket; the layer can no longer touch a socket, so the transport does it.
+   - `prepare_send()`: before the first byte of a message the old code turned the exchange deadline into the socket's timeout, once per message (not once per frame). To keep that exact behaviour the layer calls `prepare_send` once per message and `PlainTransport` does what the old code did. Default for any other transport: nothing to do.
+2. **The raw `send_all(const Socket&, ...)` and `recv_exact(const Socket&, ...)` stay** as free functions. They are what `PlainTransport` is made of, and the HTTP API and the tests that write deliberately broken frames use them. The `Socket` overloads of the four message functions are **removed** (not kept as wrappers), so no path can reach the message layer without a `Transport`.
+3. **`PlainTransport` does not own the socket** (it holds a reference): the caller closes the socket, as before, and keeps it alive as long as the transport.
+4. **`PlainTransport::send_all` ignores its `deadline` argument.** A send was never bounded by the deadline except through the socket timeout that `prepare_send` sets, and that stays so.
+5. **The deadline is checked once per message before the first byte** (the old behaviour), although a comment in the old code said "every chunk". Making it per frame would be a behaviour change and was not done here.
+
+## Not done here, on purpose
+
+- No second transport and no command-line option for one.
+- `api.cpp` (the HTTP API) is not on the message layer and is unchanged.

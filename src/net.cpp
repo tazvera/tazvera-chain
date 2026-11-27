@@ -294,43 +294,39 @@ void shutdown_connection(const Socket& socket) {
 #endif
 }
 
-bool read_frame(const Socket& socket, std::uint8_t& type, std::string& payload,
+bool read_frame(Transport& transport, std::uint8_t& type, std::string& payload,
                 std::string* error, Deadline deadline) {
     std::string header;
-    if (!recv_exact(socket, 4, header, error, deadline)) return false;
+    if (!transport.recv_exact(4, header, error, deadline)) return false;
     const std::uint32_t length = get_u32(header);
     // The legacy length field counts payload bytes only; the type byte and prefix also consume wire space.
     if (static_cast<std::uint64_t>(length) + 5 > kMaxWireMessageBytes) {
         if (error) *error = "message too large";
-        shutdown_connection(socket);
+        transport.shutdown();
         return false;
     }
     std::string type_byte;
-    if (!recv_exact(socket, 1, type_byte, error, deadline)) return false;
+    if (!transport.recv_exact(1, type_byte, error, deadline)) return false;
     type = static_cast<std::uint8_t>(type_byte[0]);
     payload.clear();
     if (length == 0) return true;
-    if (!recv_exact(socket, length, payload, error, deadline)) return false;
+    if (!transport.recv_exact(length, payload, error, deadline)) return false;
     return true;
 }
 } // namespace
 
-bool send_message(const Socket& socket, std::uint8_t type, std::string_view payload, std::string* error,
+bool send_message(Transport& transport, std::uint8_t type, std::string_view payload, std::string* error,
                   Deadline deadline) {
-    // A logical message may span multiple bounded wire frames. Apply the same absolute deadline to every chunk.
+    // A logical message may span several bounded wire frames. The deadline is checked once, before the first byte, and
+    // handed to the transport once (prepare_send): the same as when this function wrote to a socket directly.
     if (deadline != no_deadline()) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
             if (error) *error = "the peer took longer than the time allowed for this exchange";
             return false;
         }
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
-        const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
-        if (!set_timeout_ms(socket, ms, nullptr)) {
-            if (error) *error = "could not set the socket timeouts";
-            return false;
-        }
     }
+    if (!transport.prepare_send(deadline, error)) return false;
     if (type == kMsgChunk || payload.size() > kMaxStreamBytes) {
         if (error) *error = "message too large";
         return false;
@@ -349,7 +345,7 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
         put_u32(frame, static_cast<std::uint32_t>(wire_payload.size()));
         frame.push_back(static_cast<char>(wire_type));
         frame.append(wire_payload.data(), wire_payload.size());
-        return send_all(socket, frame, error);
+        return transport.send_all(frame, error, deadline);
     };
 
     // Keep the legacy frame exactly as-is when it fits the wire ceiling.
@@ -382,15 +378,15 @@ bool send_message(const Socket& socket, std::uint8_t type, std::string_view payl
     return true;
 }
 
-bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload, std::string* error,
+bool recv_message(Transport& transport, std::uint8_t& type, std::string& payload, std::string* error,
                   Deadline deadline) {
     std::uint8_t wire_type = 0;
     std::string wire_payload;
-    if (!read_frame(socket, wire_type, wire_payload, error, deadline)) return false;
+    if (!read_frame(transport, wire_type, wire_payload, error, deadline)) return false;
     if (wire_type != kMsgChunk) {
         if (wire_payload.size() > kMaxStreamBytes) {
             if (error) *error = "message too large";
-            shutdown_connection(socket);
+            transport.shutdown();
             return false;
         }
         type = wire_type;
@@ -400,12 +396,12 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
 
     auto reject = [&](const char* reason) {
         if (error) *error = reason;
-        shutdown_connection(socket);
+        transport.shutdown();
         return false;
     };
     auto incomplete = [&]() {
         if (error) *error = "incomplete stream";
-        shutdown_connection(socket);
+        transport.shutdown();
         return false;
     };
     if (wire_payload.size() < kChunkMetadataBytes) return reject("message too large");
@@ -428,9 +424,9 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
     for (std::uint32_t expected = 1; expected < total_chunks; ++expected) {
         std::uint8_t next_type = 0;
         std::string next_payload;
-        if (!read_frame(socket, next_type, next_payload, error, deadline)) {
+        if (!read_frame(transport, next_type, next_payload, error, deadline)) {
             if (error && error->find("message too large") == 0) {
-                shutdown_connection(socket);
+                transport.shutdown();
                 return false;
             }
             return incomplete();
@@ -456,13 +452,13 @@ bool recv_message(const Socket& socket, std::uint8_t& type, std::string& payload
     return true;
 }
 
-bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool send_first, std::string* error,
+bool exchange_hello(Transport& transport, const Hello& ours, Hello& theirs, bool send_first, std::string* error,
                     Deadline deadline, std::string* their_raw_hello) {
     std::uint8_t type = 0;
     std::string payload;
-    auto send_ours = [&]() { return send_message(socket, kMsgHello, encode_hello(ours), error, deadline); };
+    auto send_ours = [&]() { return send_message(transport, kMsgHello, encode_hello(ours), error, deadline); };
     auto recv_theirs = [&]() {
-        if (!recv_message(socket, type, payload, error, deadline)) return false;
+        if (!recv_message(transport, type, payload, error, deadline)) return false;
         if (type != kMsgHello) {
             if (error) *error = "the peer did not start with a hello";
             return false;
@@ -480,7 +476,7 @@ bool exchange_hello(const Socket& socket, const Hello& ours, Hello& theirs, bool
     return recv_theirs() && send_ours();
 }
 
-bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivKey& private_seed,
+bool exchange_authenticated_hello(Transport& transport, Hello& ours, const PrivKey& private_seed,
                                   Hello& theirs, bool send_first, std::string* error, Deadline deadline) {
     auto fail = [&](const std::string& reason) {
         if (error) *error = reason;
@@ -496,7 +492,7 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
 
     const std::string our_raw_hello = encode_hello(ours);
     std::string their_raw_hello;
-    if (!exchange_hello(socket, ours, theirs, send_first, error, deadline, &their_raw_hello)) return false;
+    if (!exchange_hello(transport, ours, theirs, send_first, error, deadline, &their_raw_hello)) return false;
 
     const HandshakeDecision decision = check_peer(ours, theirs);
     if (!decision.ok) return fail("peer hello refused: " + decision.reason);
@@ -509,11 +505,11 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
 
     AuthMessage our_auth;
     if (!sign_auth(our_auth, private_seed, transcript)) return fail("could not sign the authentication transcript");
-    if (!send_message(socket, kMsgAuth, encode_auth(our_auth), error, deadline)) return false;
+    if (!send_message(transport, kMsgAuth, encode_auth(our_auth), error, deadline)) return false;
 
     std::uint8_t type = 0;
     std::string payload;
-    if (!recv_message(socket, type, payload, error, deadline)) return false;
+    if (!recv_message(transport, type, payload, error, deadline)) return false;
     if (type != kMsgAuth) return fail("the peer did not send an authentication proof");
 
     AuthMessage their_auth;
@@ -523,5 +519,27 @@ bool exchange_authenticated_hello(const Socket& socket, Hello& ours, const PrivK
     if (!auth_ok(their_auth, transcript)) return fail("the peer's connection-bound identity proof is invalid");
     return true;
 }
+
+
+// ---- PlainTransport: the bytes go straight onto a socket, exactly as the message layer used to do itself ----
+bool PlainTransport::send_all(std::string_view bytes, std::string* error, Deadline) {
+    return ::taz::send_all(socket_, bytes, error);   // as before: the per-call socket timeout bounds a send; prepare_send applied the deadline
+}
+bool PlainTransport::recv_exact(std::size_t count, std::string& out, std::string* error, Deadline deadline) {
+    return ::taz::recv_exact(socket_, count, out, error, deadline);
+}
+bool PlainTransport::prepare_send(Deadline deadline, std::string* error) {
+    if (deadline == no_deadline()) return true;
+    // The time that is left (at most the usual per-call timeout) becomes the socket's timeout for this message.
+    const auto now = std::chrono::steady_clock::now();
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    const int ms = static_cast<int>(std::min<long long>(left <= 0 ? 1 : left, kTimeoutMs));
+    if (!set_timeout_ms(socket_, ms, nullptr)) {
+        if (error) *error = "could not set the socket timeouts";
+        return false;
+    }
+    return true;
+}
+void PlainTransport::shutdown() noexcept { shutdown_connection(socket_); }
 
 }  // namespace taz
