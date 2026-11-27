@@ -1,48 +1,48 @@
-# दो मशीनों पर TAZVERA node चलाने की गाइड
+# Guide to Running TAZVERA Nodes on Two Machines
 
-यह गाइड भरोसेमंद, एक ही घर के LAN/Wi-Fi पर testnet की तैयारी के लिए है। अभी **दो अलग मशीनों के बीच peer connection उपलब्ध नहीं है**: `--peer` केवल `127.0.0.1` से जुड़ता है; उसमें remote address देने का विकल्प अभी बना नहीं है। तब तक दोनों नोड **एक ही मशीन पर** चलाकर देखें। सार्वजनिक इंटरनेट पर port न खोलें।
+This guide is for preparing a testnet on a trusted LAN/Wi-Fi in the same home. **Peer connections between two separate machines are not currently available**: `--peer` connects only to `127.0.0.1`; an option to provide a remote address has not been implemented. Until then, run both nodes on **the same machine**. Do not open a port to the public internet.
 
-## अभी की सीमा
+## Current limitation
 
-- `--listen-on ADDRESS` मौजूद है और `--serve PORT` के साथ A के LAN interface पर bind करने के लिए है।
-- `--peer` अभी केवल localhost port लेता है; `--peer A_LAN_IP:PORT` अभी काम करने वाला remote-peer command नहीं है।
-- इसलिए नीचे दिए गए A/B LAN commands **आगे के remote-peer विकल्प के लिए अपेक्षित syntax** हैं, अभी चलने वाले test के निर्देश नहीं। Remote peer address support merge होने और test होने तक localhost test ही करें।
+- `--listen-on ADDRESS` exists and is for binding to machine A's LAN interface with `--serve PORT`.
+- `--peer` currently accepts only a localhost port; `--peer A_LAN_IP:PORT` is not a working remote-peer command yet.
+- Therefore, the A/B LAN commands below are **expected syntax for a future remote-peer option**, not instructions for a test that works today. Until remote peer address support is merged and tested, use only the localhost test.
 
-## LAN address कैसे पता करें
+## Find the LAN address
 
-Windows A पर Command Prompt में `ipconfig` चलाएँ और Wi-Fi adapter का IPv4 Address लिखें (उदाहरण: `192.168.1.25`)। Linux पर `ip addr` चलाएँ और connected Wi-Fi interface का `inet` address लें। `127.0.0.1`, VPN या virtual adapter का पता न लें। दोनों मशीनें भरोसेमंद उसी LAN पर हों; guest Wi-Fi/client isolation रोक सकता है।
+On Windows machine A, run `ipconfig` in Command Prompt and note the Wi-Fi adapter's IPv4 Address (for example, `192.168.1.25`). On Linux, run `ip addr` and use the `inet` address of the connected Wi-Fi interface. Do not use `127.0.0.1`, a VPN address, or a virtual adapter address. Both machines must be on the same trusted LAN; guest Wi-Fi/client isolation may block connections.
 
-## अपेक्षित दो-मशीन commands — remote `--peer` support आने के बाद
+## Expected two-machine commands — after remote `--peer` support is available
 
-दोनों मशीनों पर compatible, उसी commit से बने binaries और समान genesis pin इस्तेमाल करें। `<pin>` और IP placeholders को वास्तविक values से बदलें।
+Use compatible binaries built from the same commit and the same genesis pin on both machines. Replace `<pin>` and the IP placeholders with real values.
 
-**मशीन A — server:**
-
-```sh
-taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
-```
-
-A की terminal खुली रखें। LAN address वही दें जो A के connected LAN interface पर है। Port 7001 उपलब्ध होना चाहिए।
-
-**मशीन B — peer:**
+**Machine A — server:**
 
 ```sh
-taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
+taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A LAN address>
 ```
 
-**महत्वपूर्ण:** B से A तक जाने के लिए `--peer` में address वाला विकल्प अभी बना नहीं है। Remote-peer support merge होने, `--help` में दिखने और test होने से पहले ऊपर की B command न चलाएँ। तब तक दोनों नोड एक ही मशीन पर चलाकर देखें; उस test में server `--serve 7001` और peer `--peer 7001` इस्तेमाल करता है।
+Keep A's terminal open. Use the LAN address of A's connected LAN interface. Port 7001 must be available.
 
-## Remote peer support आने पर LAN checks
+**Machine B — peer:**
 
-1. B से A का सही LAN IPv4 address ping करें। Ping failure पर Wi-Fi/SSID, guest network, subnet, VPN और router client/AP isolation जाँचें; ping block होना अकेले TCP failure साबित नहीं करता।
-2. A पर node `--serve 7001 --listen-on <A का LAN पता>` के साथ चल रहा हो और log में bind/listen सफल दिखे।
-3. A के Windows Firewall में केवल भरोसेमंद Private network पर TCP 7001 inbound allow करें। Firewall पूरी तरह बंद न करें; test के बाद temporary rule हटाएँ।
-4. B की command में A का सही LAN IP और वही port दें। Router पर internet port-forwarding न करें।
-5. Connection न बने तो क्रम से: node चल रहा है? LAN IP सही है? port समान/free है? firewall rule सही profile/port पर है? binaries एक ही compatible commit के हैं? फिर दोनों logs देखें।
+```sh
+taznode --chain b.json --expect-genesis <pin> --peer <A LAN address>:7001
+```
 
-## एक ही मशीन पर अभी का supported test
+**Important:** The address-taking option for `--peer` to connect from B to A has not been implemented yet. Do not run the B command above until remote-peer support is merged, appears in `--help`, and is tested. Until then, run both nodes on the same machine; that test uses server `--serve 7001` and peer `--peer 7001`.
 
-दो terminals खोलें और chain की अलग copies इस्तेमाल करें।
+## LAN checks after remote peer support is available
+
+1. Ping A's correct LAN IPv4 address from B. If ping fails, check Wi-Fi/SSID, guest network, subnet, VPN, and router client/AP isolation; ping being blocked alone does not prove TCP failure.
+2. Run the node on A with `--serve 7001 --listen-on <A LAN address>` and confirm the log shows a successful bind/listen.
+3. In A's Windows Firewall, allow inbound TCP 7001 only on the trusted Private network. Do not turn off the firewall entirely; remove the temporary rule after testing.
+4. In B's command, provide A's correct LAN IP and the same port. Do not configure internet port forwarding on the router.
+5. If the connection fails, check in order: is the node running? Is the LAN IP correct? Is the port the same and available? Is the firewall rule on the correct profile/port? Are the binaries from the same compatible commit? Then check both logs.
+
+## Currently supported test on one machine
+
+Open two terminals and use separate copies of the chain.
 
 Server terminal:
 ```sh
@@ -54,8 +54,8 @@ Peer terminal:
 taznode --chain b.json --expect-genesis <pin> --peer 7001
 ```
 
-दोनों terminals पर सफल connection/sync logs देखें। B की height तभी बढ़ेगी जब A के पास B से आगे के blocks हों। दोनों files का genesis pin समान होना चाहिए। Exact executable path आपके build पर निर्भर है; Windows पर सामान्यतः `build/taznode.exe` इस्तेमाल करें।
+Check for successful connection/sync logs in both terminals. B's height will increase only when A has blocks beyond B's. Both files must have the same genesis pin. The exact executable path depends on your build; on Windows, normally use `build/taznode.exe`.
 
-## सुरक्षा
+## Security
 
-यह development test है: balances/transactions केवल test data हैं, आर्थिक मूल्य या payment service नहीं। Private keys/seed साझा न करें। TLS अभी wired नहीं है; plaintext traffic को भरोसेमंद LAN तक सीमित रखें। Public Wi-Fi या public internet पर node expose न करें।
+This is a development test: balances/transactions are test data only, with no economic value and no payment service. Do not share private keys/seeds. TLS is not wired in yet; keep plaintext traffic on a trusted LAN. Do not expose the node on public Wi-Fi or the public internet.

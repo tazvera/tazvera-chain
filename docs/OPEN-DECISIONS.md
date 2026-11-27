@@ -1,20 +1,20 @@
-# CHAIN REQUIREMENTS — कोड-जाँच में मिली सुधारें
+# CHAIN REQUIREMENTS — Corrections found during code review
 # Corrections found while checking the master checklist
 
-## 1. Chain ID और genesis commitment
+## 1. Chain ID and genesis commitment
 
-मूल सूची में कहा गया कि chain_id genesis से बंधा नहीं है। यह हिस्सा सही नहीं: genesis_commitment_of(...) में fixed CHAIN_ID शामिल है, और loader file का chain_id तथा pinned genesis commitment जाँचता है। Transaction/hello identity में भी chain ID/genesis commitment शामिल हैं।
+The original list said that chain_id is not bound to genesis. This is not correct: genesis_commitment_of(...) includes the fixed CHAIN_ID, and the loader checks the file's chain_id and pinned genesis commitment. Transaction/hello identity also includes the chain ID/genesis commitment.
 
-सही स्थिति: chain_id genesis commitment से बंधा है, लेकिन अभी compile-time fixed tazvera-local-prototype-v1 है; अलग network के लिए configure करने का विकल्प नहीं। इसलिए checklist में इसे आंशिक लिखा है।
+Correct status: chain_id is bound to the genesis commitment, but it is currently compile-time fixed to tazvera-local-prototype-v1; there is no option to configure it for a separate network. Therefore, the checklist marks this as partial.
 
 ## 2. Peer addressing
 
---listen-on <IPv4> से node specified address पर inbound connections सुन सकता है, जिसमें 0.0.0.0 भी शामिल है। लेकिन --peer अभी केवल port लेता है और connect_loopback() के जरिए 127.0.0.1 से connect करता है। इसलिए बाहरी inbound सुनना मौजूद है, पूर्ण two-way remote peer addressing नहीं।
+With --listen-on <IPv4>, a node can listen for inbound connections on the specified address, including 0.0.0.0. However, --peer currently accepts only a port and connects to 127.0.0.1 through connect_loopback(). Therefore, external inbound listening exists, but complete two-way remote peer addressing does not.
 
-## 3. API और Explorer
+## 3. API and Explorer
 
-API read-only है और 127.0.0.1 पर bind होती है; node help में GET-only लिखा है। POST /tx मौजूद नहीं। Explorer चुनी हुई JSON file verify करता है; यह live API explorer नहीं है।
+The API is read-only and binds to 127.0.0.1; node help says GET-only. POST /tx does not exist. The Explorer verifies a selected JSON file; it is not a live API explorer.
 
 ## Scope
 
-यह correction log docs/ में रखा गया है ताकि इस PR में केवल docs/ paths बदलें। Root-level OPEN-DECISIONS.md को इस docs-only PR में नहीं बदला गया।
+This correction log is kept in docs/ so that this PR changes only docs/ paths. The root-level OPEN-DECISIONS.md was not changed in this docs-only PR.

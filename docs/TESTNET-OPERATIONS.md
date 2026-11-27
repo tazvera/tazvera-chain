@@ -1,121 +1,108 @@
-# टेस्टनेट नोड चलाने की गाइड
-<small>Testnet node operations guide</small>
+# Testnet node operations guide
 
-**यह गाइड चल रहे टेस्टनेट नोड में आम समस्याओं को पहचानने और सुरक्षित तरीके से संभालने के लिए है।**  
-<small>Use this guide to diagnose common testnet node problems and recover safely.</small>
+**This guide helps identify and safely handle common problems on a running testnet node.**
 
-**सबसे पहले:** कोई भी समस्या आए तो नोड की स्क्रीन/लॉग, समय, chain file का path और आख़िरी सफल height नोट करें।  
-<small>First record the logs, time, chain-file path, and last known height.</small>
+**First:** When any problem occurs, record the node screen/logs, time, chain-file path, and last successful height.
 
-**चेन file को हाथ से edit, delete या दूसरी मशीन की file से replace न करें।**  
-<small>Never manually edit, delete, or replace a chain file.</small>
+**Never manually edit or delete a chain file, or replace it with a file from another machine.**
 
-**टेस्टनेट में data बचाना भी ज़रूरी है; recovery से पहले नोड को साफ़ तरीके से रोकें और file की backup copy रखें।**  
-<small>Stop cleanly and back up before recovery.</small>
+**Preserving data matters on a testnet too; stop the node cleanly and keep a backup copy of the file before recovery.**
 
-**ये कदम मौजूदा prototype के लिए हैं; यह production recovery procedure नहीं है।**  
-<small>These steps are for the prototype, not production recovery.</small>
+**These steps are for the current prototype; this is not a production recovery procedure.**
 
-## 1. Block बनना रुक गया — height नहीं बढ़ रही
-<small>Block production stopped — height is not increasing</small>
+## 1. Block production stopped — height is not increasing
 
-**लक्षण**
-- Height कुछ समय से वही है।
-- नया block नहीं दिख रहा या producer की activity बंद है।
+**Symptoms**
+- Height has remained unchanged for some time.
+- No new block appears or producer activity has stopped.
 
-**संभावित कारण और क्या करें**
-- **Producer बंद है या node केवल sync/listen mode में है:** process और startup command देखें। अगर producer अलग से चलाया जाता है, उसकी स्थिति और logs जाँचें। Producer चालू करने के लिए सिर्फ़ वही documented command इस्तेमाल करें जो आपके binary में मौजूद है; अनुमान से नया flag न जोड़ें।
-- **मशीन की clock पीछे है:** सिस्टम का समय और timezone जाँचें। Clock सही करें (नीचे समस्या 2 देखें), फिर node/producer के logs देखें।
-- **Disk भर गई है:** chain file जिस drive पर है वहाँ free space देखें। सुरक्षित जगह खाली करें; chain file को न हटाएँ। फिर node को cleanly रोककर restart करें और logs में write error देखें।
-- **दूसरा node आगे है या network sync रुका है:** peer connection, peer logs और दोनों nodes की height/hash compare करें। Fork का शक हो तो समस्या 4 के कदम अपनाएँ।
+**Possible causes and actions**
+- **Producer is stopped or the node is only in sync/listen mode:** Check the process and startup command. If the producer runs separately, check its status and logs. To start a producer, use only a documented command available in your binary; do not guess a new flag.
+- **The machine clock is behind:** Check the system time and time zone. Correct the clock (see issue 2 below), then check node/producer logs.
+- **Disk is full:** Check free space on the drive containing the chain file. Safely free space; do not delete the chain file. Then stop and restart the node cleanly and check the logs for write errors.
+- **Another node is ahead or network sync has stopped:** Check the peer connection, peer logs, and the heights/hashes of both nodes. If a fork is suspected, follow issue 4.
 
-Height का न बढ़ना अकेले यह साबित नहीं करता कि chain खराब है। पहले producer, clock, disk और peer स्थिति जाँचें।
+An unchanged height by itself does not prove that the chain is broken. First check the producer, clock, disk, and peer status.
 
-## 2. “timestamp beyond this clock” जैसी चेतावनी
-<small>Timestamp is ahead of this node’s clock</small>
+## 2. Warning such as “timestamp beyond this clock”
 
-**लक्षण:** node किसी block का timestamp अपनी मशीन की मौजूदा घड़ी से आगे बताकर उसे स्वीकार नहीं करता या warning देता है।
+**Symptom:** The node reports that a block timestamp is ahead of the machine's current clock and refuses to accept it or prints a warning.
 
-**कारण:** दो मशीनों की system clock में फ़र्क़ हो सकता है—एक मशीन तेज़ चल रही हो, दूसरी पीछे हो, या timezone/NTP configuration गलत हो।
+**Cause:** The system clocks on two machines may differ—one machine may be fast, the other behind, or the time-zone/NTP configuration may be wrong.
 
-**क्या करें**
-1. दोनों मशीनों पर तारीख, समय और timezone देखें। केवल timezone बदलने से UTC समय ठीक हो यह ज़रूरी नहीं—घड़ी का वास्तविक समय भी जाँचें।
-2. दोनों मशीनों पर automatic time synchronization चालू करें (Windows: Settings → Time & language → Date & time → Set time automatically → Sync now; Linux: अपने system का NTP/chrony service जाँचें)।
-3. कुछ समय बाद logs दोबारा देखें। फिर भी warning आए तो दोनों मशीनों के UTC समय और block timestamp को नोट करें; block या chain file को हाथ से बदलकर warning हटाने की कोशिश न करें।
-4. जिस node की घड़ी गलत थी, उसे सही समय पर लाकर normal sync/restart करें। पुराने block को manually rewrite न करें।
+**Actions**
+1. Check the date, time, and time zone on both machines. Changing only the time zone does not necessarily correct UTC time—check the actual clock too.
+2. Enable automatic time synchronization on both machines (Windows: Settings → Time & language → Date & time → Set time automatically → Sync now; Linux: check your system's NTP/chrony service).
+3. Check the logs again after some time. If the warning remains, record both machines' UTC times and the block timestamp; do not try to remove the warning by manually changing a block or chain file.
+4. Correct the clock on the affected node, then resume normal sync/restart. Do not manually rewrite an old block.
 
-## 3. Node exit code 3 से बंद हो गया — chain file लिख नहीं रही
-<small>Node exited with code 3 — chain file could not be written</small>
+## 3. Node exited with code 3 — chain file could not be written
 
-**लक्षण:** process बंद हो जाता है और terminal में `cannot write`, `cannot load` या file-related error दिख सकता है।
+**Symptom:** The process stops and the terminal may show `cannot write`, `cannot load`, or a file-related error.
 
-**ध्यान दें:** exit code 3 केवल disk-write failure का संकेत नहीं है। मौजूदा node startup में chain load/refusal errors भी code 3 दे सकते हैं। Terminal का पूरा error message पढ़ें।
+**Important:** Exit code 3 does not indicate only a disk-write failure. During current node startup, chain-load/refusal errors can also return code 3. Read the complete terminal error message.
 
-**संभावित कारण**
-- Disk या volume भर गया है।
-- Node के पास उस folder में write permission नहीं है।
-- File किसी दूसरे process, backup tool या sync tool द्वारा lock की गई है।
-- Path गलत है, drive unmounted है, या filesystem read-only हो गया है।
-- Chain file unreadable/corrupt है या trusted genesis pin उससे मेल नहीं खाता।
+**Possible causes**
+- Disk or volume is full.
+- The node does not have write permission in that folder.
+- The file is locked by another process, backup tool, or sync tool.
+- The path is wrong, the drive is unmounted, or the filesystem has become read-only.
+- The chain file is unreadable/corrupt or does not match the trusted genesis pin.
 
-**क्या करें**
-1. पूरा error message और chain file का exact path लिख लें।
-2. Free disk space, folder permission, mounted drive और file lock जाँचें। यदि कोई backup/sync tool file को पकड़े है, उसे सुरक्षित रूप से पूरा/रोकें।
-3. Node को cleanly रोकें। Chain file को text editor में खोलकर सुधारना, truncate करना, delete करना या दूसरी file से overwrite करना **न करें**।
-4. Storage/permission समस्या ठीक करने के बाद, backup copy सुरक्षित रखकर node को उसी trusted chain file और genesis pin के साथ दोबारा शुरू करें।
-5. Error “wrong chain/genesis” या load/parse failure हो तो file बदलने के बजाय सही trusted pin/path की पुष्टि करें। संदेह हो तो आगे लिखना रोकें और maintainer को logs दें।
+**Actions**
+1. Record the complete error message and exact chain-file path.
+2. Check free disk space, folder permissions, mounted drive, and file locks. If a backup/sync tool has the file open, let it finish or stop it safely.
+3. Stop the node cleanly. **Do not** open the chain file in a text editor to repair it, truncate it, delete it, or overwrite it with another file.
+4. After fixing storage/permission problems, keep a backup copy and restart the node with the same trusted chain file and genesis pin.
+5. If the error is “wrong chain/genesis” or a load/parse failure, confirm the correct trusted pin/path instead of replacing the file. If in doubt, stop further writes and give the logs to the maintainer.
 
-## 4. दो node एक ही chain पर block बना रहे हैं — fork race
-<small>Two nodes produce blocks on the same chain — fork race</small>
+## 4. Two nodes are producing blocks on the same chain — fork race
 
-**लक्षण:** दोनों nodes की height अलग हो जाती है, या height समान होने पर latest block hash अलग होता है। दोनों की logs में एक ही समय के आसपास अलग blocks बनते दिख सकते हैं।
+**Symptoms:** The two nodes have different heights, or the same height but different latest block hashes. Their logs may show different blocks being produced at around the same time.
 
-**कारण:** दो producers एक ही chain state से block बनाने की कोशिश कर रहे हैं। यह race अलग-अलग valid-looking branches बना सकती है; सिर्फ़ सबसे ऊँची height देखकर सही branch तय न करें।
+**Cause:** Two producers are trying to create blocks from the same chain state. This race can create separate valid-looking branches; do not choose the correct branch by looking only at the highest height.
 
-**क्या करें**
-1. दोनों producers को रोकें; chain files को न हटाएँ और न एक-दूसरे पर copy करें।
-2. दोनों nodes की height, latest block hash, genesis commitment और logs सुरक्षित रखें। किस block से divergence शुरू हुई, यह पता करें।
-3. Network/peer sync की स्थिति जाँचें। किसी एक branch को चुनने के लिए केवल documented fork-selection/recovery procedure या maintainer की पुष्टि इस्तेमाल करें।
-4. जब तक canonical branch स्पष्ट न हो, दोनों files की अलग backup रखें और किसी node से नए blocks न बनवाएँ।
-5. चुनी गई branch पर लौटने का तरीका उपलब्ध न हो तो chain files को manually edit न करें; maintainer को दोनों hashes और logs भेजें।
+**Actions**
+1. Stop both producers; do not delete the chain files or copy one over the other.
+2. Preserve both nodes' heights, latest block hashes, genesis commitment, and logs. Identify the block where divergence began.
+3. Check network/peer sync status. To choose a branch, use only a documented fork-selection/recovery procedure or confirmation from the maintainer.
+4. Until the canonical branch is clear, keep separate backups of both files and do not produce new blocks on either node.
+5. If no method is available to return to the selected branch, do not edit chain files manually; send both hashes and logs to the maintainer.
 
-## 5. पुरानी chain file को नए binary से खोलना
-<small>Opening an old chain file with a newer binary</small>
+## 5. Opening an old chain file with a new binary
 
-**लक्षण:** नया binary chain file load करने से मना करता है, version/format/parse error देता है, या trusted genesis commitment मेल नहीं खाता।
+**Symptoms:** The new binary refuses to load the chain file, reports a version/format/parse error, or the trusted genesis commitment does not match.
 
-**कारण:** protocol version या persisted file format बदल गया हो सकता है। नया binary पुराने data को पढ़ सकेगा, यह अपने-आप में तय नहीं है। Genesis pin mismatch का अर्थ यह भी हो सकता है कि गलत chain file चुनी गई है।
+**Cause:** The protocol version or persisted file format may have changed. A new binary is not automatically guaranteed to read old data. A genesis-pin mismatch may also mean that the wrong chain file was selected.
 
-**क्या करें**
-1. पुरानी chain file की अलग backup copy रखें; original पर migration की कोशिश न करें।
-2. Release notes और migration निर्देश देखें: क्या नया binary पुराने format को support करता है और क्या explicit migration आवश्यक है।
-3. वही trusted genesis commitment इस्तेमाल करें जो उस chain के लिए जारी किया गया था। Pin mismatch को bypass न करें।
-4. यदि compatible format या migration tool उपलब्ध नहीं है, पुराने binary से backup copy पर chain खोलें और maintainer से migration निर्देश लें। पुराने binary से बनी file को नए binary पर बार-बार लिखने की कोशिश न करें।
-5. केवल protocol version बदलने से chain की पहचान/genesis नहीं बदलती; लेकिन file format/validation नियम बदल सकते हैं। Upgrade से पहले compatibility स्पष्ट होना ज़रूरी है।
+**Actions**
+1. Keep a separate backup copy of the old chain file; do not attempt migration on the original.
+2. Check release notes and migration instructions: does the new binary support the old format, and is an explicit migration required?
+3. Use the same trusted genesis commitment that was issued for that chain. Do not bypass a pin mismatch.
+4. If no compatible format or migration tool is available, open a backup copy with the old binary and ask the maintainer for migration instructions. Do not repeatedly try to write a file created by the old binary using the new binary.
+5. Changing only the protocol version does not change the chain identity/genesis; however, file-format/validation rules may change. Compatibility must be clear before upgrading.
 
-## 6. Node सही तरीके से बंद करना
-<small>How to stop a node safely</small>
+## 6. Stop a node correctly
 
-**सही तरीका — Ctrl+C**
-1. उसी terminal में जाएँ जहाँ node चल रहा है।
-2. `Ctrl+C` एक बार दबाएँ और process को बंद होने दें।
-3. Terminal में shutdown/exit पूरा होने का इंतज़ार करें। फिर जरूरत हो तो chain file की backup लें।
+**Correct method — Ctrl+C**
+1. Go to the terminal where the node is running.
+2. Press `Ctrl+C` once and let the process stop.
+3. Wait for shutdown/exit to finish in the terminal. Then, if needed, back up the chain file.
 
-**गलत तरीके**
-- `kill -9` या force-kill से process को अचानक मारना।
-- Node के लिखते समय कंप्यूटर को power off करना या plug निकालना।
-- Chain file को process चलते हुए copy/replace करना।
+**Incorrect methods**
+- Killing the process suddenly with `kill -9` or force-kill.
+- Powering off the computer or unplugging it while the node is writing.
+- Copying/replacing the chain file while the process is running.
 
-अचानक बंद होने पर आख़िरी बदलाव disk पर पूरा न लिखा गया हो सकता है। इससे हर बार corruption होगी ऐसा नहीं, लेकिन recovery की गारंटी भी नहीं है। Restart पर error आए तो file को हाथ से ठीक न करें—पहले backup रखें और logs के साथ मदद लें।
+After an abrupt stop, the latest change may not have been fully written to disk. This does not mean corruption will happen every time, but recovery is not guaranteed either. If an error appears on restart, do not repair the file manually—keep a backup first and ask for help with the logs.
 
 ---
 
-## छोटी जाँच सूची
-<small>Quick checklist</small>
+## Quick checklist
 
-- [ ] सही node/binary और सही chain file चल रही है।
-- [ ] Producer चालू है; clock synchronized है।
-- [ ] Disk में जगह है और process को file पर सही permission है।
-- [ ] दोनों nodes का genesis commitment एक जैसा है।
-- [ ] Height के साथ latest block hash भी compare किया है।
-- [ ] Shutdown Ctrl+C से किया और chain file की backup सुरक्षित रखी है।
+- [ ] The correct node/binary and correct chain file are running.
+- [ ] The producer is running; the clock is synchronized.
+- [ ] There is disk space and the process has the correct file permissions.
+- [ ] Both nodes have the same genesis commitment.
+- [ ] The latest block hash has been compared along with the height.
+- [ ] Shutdown was done with Ctrl+C and a backup of the chain file is safe.

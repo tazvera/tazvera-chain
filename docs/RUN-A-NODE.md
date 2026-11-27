@@ -1,13 +1,13 @@
-# अपनी मशीन पर TAZVERA node चलाना
+# Run a TAZVERA node on your machine
 
-यह guide node को repository source से CMake द्वारा build करने के लिए है; अभी कोई downloadable release जारी नहीं हुई है।
-वर्तमान CLI में `--produce-every` उपलब्ध है; यह `--serve` के साथ हर N seconds में block बनाने के लिए है। `--tls` flag/transport अभी implement नहीं है।
-ध्यान दें: `--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
-यह local development prototype है, public testnet या payment service नहीं। यहाँ के balances/transactions test data हैं, आर्थिक मूल्य नहीं। Private keys/seed साझा न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
+This guide builds the node from repository source using CMake; no downloadable release has been published yet.
+The current CLI provides `--produce-every`; with `--serve`, it attempts to produce a block every N seconds. The `--tls` flag/transport is not implemented yet.
+Note: `--every <seconds>` is only the `--peer` reconnect interval, not the block-production interval.
+This is a local development prototype, not a public testnet or payment service. Balances/transactions here are test data, not economic value. Do not share private keys/seeds. In this guide, both nodes run **on the same computer**.
 
-## 1. Source से build करें
+## 1. Build from source
 
-अभी कोई release binary डाउनलोड करने के लिए उपलब्ध नहीं है। Repository का source clone करके CMake से binary बनाएं। दो मशीनों के test में दोनों पर compatible binaries उसी commit से बननी चाहिए।
+No release binary is currently available to download. Clone the repository source and build the binary with CMake. For a two-machine test, compatible binaries must be built from the same commit on both machines.
 
 Linux:
 ```sh
@@ -19,78 +19,78 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-Windows 10/11 पर MSYS2 UCRT64 terminal खोलकर project की Windows build instructions के अनुसार dependencies install करें, फिर CMake configure/build/test चलाएँ। Compiler को C++26 support करना होगा। Build/test fail हो तो आगे न बढ़ें।
+On Windows 10/11, open an MSYS2 UCRT64 terminal and install dependencies according to the project's Windows build instructions, then run CMake configure/build/test. The compiler must support C++26. Do not continue if build/tests fail.
 
-## 2. Test keys और genesis बनाएं
+## 2. Create test keys and genesis
 
-Project root से दो test keys बनाएं:
+Create two test keys from the project root:
 ```sh
 ./build/taznode --new-key node-a.key
 ./build/taznode --new-key node-b.key
 ```
-Windows पर executable `build/taznode.exe` है। छपे हुए दोनों public addresses नोट करें। Private key files साझा न करें।
+On Windows, the executable is `build/taznode.exe`. Note both printed public addresses. Do not share the private key files.
 
-एक नई chain बनाएं; addresses को वास्तविक test addresses से बदलें:
+Create a new chain; replace the addresses with the actual test addresses:
 ```sh
 ./build/taznode --chain local-chain.json --init-genesis ADDRESS_A:100000000 --init-genesis ADDRESS_B:100000000
 ```
-Genesis commitment/pin को ज्यों का त्यों सुरक्षित लिख लें। अलग addresses, balances या options से pin अलग होगा। Existing chain file overwrite नहीं होती; जरूरत हो तो नई filename लें।
+Safely record the genesis commitment/pin exactly as printed. Different addresses, balances, or options produce a different pin. An existing chain file is not overwritten; use a new filename if needed.
 
-## 3. Pin verify करें
+## 3. Verify the pin
 
 ```sh
 ./build/taznode --chain local-chain.json --expect-genesis <pin>
 ```
-`<pin>` को पूरे genesis commitment से बदलें। सही pin पर chain load होनी चाहिए; गलत pin पर आगे न बढ़ें।
+Replace `<pin>` with the complete genesis commitment. The chain should load with the correct pin; do not continue if the pin is wrong.
 
-## 4. Block producer चलाएं
+## 4. Run a block producer
 
-`--produce-every` उपलब्ध है। Producer को `--serve` और trusted genesis pin के साथ चलाएं। Producer-enabled chain पर `--key-file` में उसी chain के configured producer की private key होनी चाहिए।
+`--produce-every` is available. Run the producer with `--serve` and a trusted genesis pin. On a producer-enabled chain, `--key-file` must contain the private key of a producer configured in that chain.
 
-उदाहरण — हर 5 सेकंड में block बनाने की कोशिश:
+Example — attempt to produce a block every 5 seconds:
 ```sh
 taznode --chain a.json --expect-genesis <pin> --key-file a.key --serve 7001 --produce-every 5
 ```
-`<pin>` को वास्तविक trusted genesis pin से बदलें। `a.key` उसी producer की key होनी चाहिए जिसे chain में producer के रूप में तय किया गया है। यह command लगातार चलती रहेगी; रोकने के लिए Ctrl+C दबाएं।
+Replace `<pin>` with the actual trusted genesis pin. `a.key` must be the key of the producer configured in the chain. This command keeps running; press Ctrl+C to stop it.
 
-**सीमाएँ / जरूरी व्यवहार:**
-- Block हर N सेकंड में schedule होता है, लेकिन समय थोड़ा खिसक सकता है। Node single-threaded है; peer का लंबा काम अगला tick देर से करा सकता है।
-- ये blocks खाली होंगे। `taznode` में mempool नहीं है, इसलिए pending transactions अपने-आप इन blocks में शामिल नहीं होतीं।
-- जिस chain में producers तय हैं, block बनाने के लिए उसी configured producer की key चाहिए। दूसरे producer की key से tick refuse/skip हो सकता है।
-- यदि tip का timestamp local clock से 120 सेकंड या अधिक आगे है, node warning देता है और उस tick को छोड़ देता है; clock catch up होने तक इंतजार करता है।
-- Block chain file में save न हो सके तो node exit code 3 से बंद होगा।
-- `--produce-every` को `--serve` के बिना देना usage error है (exit code 2)।
-- एक ही chain पर दो producer चलाना fork race पैदा कर सकता है। इस option का intended setup एक producer और followers हैं; यह consensus/finality नहीं है।
+**Limitations / required behavior:**
+- Blocks are scheduled every N seconds, but timing may drift. The node is single-threaded; lengthy peer work can delay the next tick.
+- These blocks will be empty. `taznode` has no mempool, so pending transactions are not automatically included in these blocks.
+- On a chain with configured producers, the configured producer's key is required to produce blocks. A tick may be refused/skipped with another producer's key.
+- If the tip timestamp is 120 seconds or more ahead of the local clock, the node prints a warning and skips that tick; it waits for the clock to catch up.
+- If the block cannot be saved to the chain file, the node exits with code 3.
+- Supplying `--produce-every` without `--serve` is a usage error (exit code 2).
+- Running two producers on the same chain can create a fork race. The intended setup for this option is one producer and followers; this is not consensus/finality.
 
-## 5. दो नोड एक ही मशीन पर चलाएं
+## 5. Run two nodes on the same machine
 
-दो terminals खोलें। Peer node के लिए chain file की अलग copy बनाएं:
+Open two terminals. Make a separate copy of the chain file for the peer node:
 
 ```sh
 cp local-chain.json peer-chain.json
 ```
 
-Windows Command Prompt में `copy local-chain.json peer-chain.json` चलाएं।
+In Windows Command Prompt, run `copy local-chain.json peer-chain.json`.
 
-**Terminal 1 — server/producer:** ऊपर दिए गए producer command में `a.json` को `local-chain.json` और port को `7001` रखें।
+**Terminal 1 — server/producer:** In the producer command above, use `local-chain.json` instead of `a.json` and keep port `7001`.
 
 **Terminal 2 — peer:**
 ```sh
 ./build/taznode --chain peer-chain.json --expect-genesis <pin> --peer 7001
 ```
 
-Windows पर executable के लिए `build/taznode.exe` लिखें। Server और peer दोनों terminals खुली रखें; logs में connection/sync देखें। Peer को producer की अलग chain-file copy दें; एक ही file को दो processes से लिखवाएं नहीं।
+On Windows, use `build/taznode.exe` as the executable. Keep both server and peer terminals open; check the logs for connection/sync. Give the peer a separate copy of the producer's chain file; do not let two processes write to the same file.
 
-## 6. अलग मशीनों के बारे में जरूरी बात
+## 6. Important note about separate machines
 
-`--listen-on <IPv4-address>` मौजूद है; इसे `--serve <port>` या `--listen <port>` के साथ दें। Default listener address `127.0.0.1` है। `--peer <port>` अभी केवल `127.0.0.1:<port>` पर connect करता है; `--peer <address>:<port>` वाला remote-address विकल्प अभी उपलब्ध नहीं है। इसलिए दो नोड एक ही मशीन पर चलाएं।
+`--listen-on <IPv4-address>` is available; use it with `--serve <port>` or `--listen <port>`. The default listener address is `127.0.0.1`. `--peer <port>` currently connects only to `127.0.0.1:<port>`; the remote-address option `--peer <address>:<port>` is not available yet. Therefore, run two nodes on the same machine.
 
-## 7. आम गलतियाँ
+## 7. Common mistakes
 
-- **Genesis pin mismatch:** दोनों nodes में वही पूरा pin दें; genesis inputs भी समान हों।
-- **Port busy / bind failed:** पुराना node रोकें या खाली port चुनें; दोनों commands में वही port रखें।
-- **Unknown flag:** सही commit से binary rebuild करें और `--help` देखें।
-- **Height नहीं बढ़ती:** producer की logs देखें; configured producer key, clock warning और chain-file write errors जाँचें।
-- **Chain load/parse error:** node रोकें, logs सुरक्षित करें; chain file हाथ से edit न करें। केवल disposable test data के लिए नई filename से genesis बनाएं।
+- **Genesis pin mismatch:** Use the same complete pin on both nodes; genesis inputs must also match.
+- **Port busy / bind failed:** Stop the old node or choose an unused port; use the same port in both commands.
+- **Unknown flag:** Rebuild the binary from the correct commit and check `--help`.
+- **Height does not increase:** Check the producer logs; verify the configured producer key, clock warnings, and chain-file write errors.
+- **Chain load/parse error:** Stop the node and preserve the logs; do not edit the chain file manually. Create genesis with a new filename only for disposable test data.
 
-Test खत्म होने पर node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।
+When the test is finished, stop the node terminals with **Ctrl+C**. Do not modify the chain file manually or share private keys.
