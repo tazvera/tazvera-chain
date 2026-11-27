@@ -135,13 +135,14 @@ int main() {
     // 4. a chain that declares producers: no key, or a key that is not a producer, is a usage error; the right key signs
     {
         const std::string chain = dir + "/prod.json", log = dir + "/prod.log";
-        { Chain c; std::string e4; CHECK(load_chain_json(pristine, c, &e4)); CHECK(c.set_producers({address_from_pubkey(pk)}).ok); CHECK(save_chain_json(c, chain, &e4)); }
+        std::string pin2;   // declaring producers changes the genesis commitment, so this chain has its own pin
+        { Chain c; std::string e4; CHECK(load_chain_json(pristine, c, &e4)); CHECK(c.set_producers({address_from_pubkey(pk)}).ok); CHECK(save_chain_json(c, chain, &e4)); pin2 = to_hex(c.genesis_commitment()); }
         const std::string before = slurp(chain);
-        const std::string base = exe + " --chain " + q(chain) + " --expect-genesis " + pin + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 2";
+        const std::string base = exe + " --chain " + q(chain) + " --expect-genesis " + pin2 + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 2";
         CHECK(run(base) == 2);                                              // nobody to sign with
         CHECK(run(base + " --key-file " + q(other_key)) == 2);              // a key that is not a declared producer
         CHECK(slurp(chain) == before);
-        const int rc = run(exe + " --chain " + q(chain) + " --expect-genesis " + pin + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 5 --key-file " + q(key_file) + " > " + q(log) + " 2>&1");
+        const int rc = run(exe + " --chain " + q(chain) + " --expect-genesis " + pin2 + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 5 --key-file " + q(key_file) + " > " + q(log) + " 2>&1");
         CHECK(rc == 0);
         Chain c; std::string e5; CHECK(load_chain_json(chain, c, &e5));   // the loader checks every signature and the round robin
         CHECK(c.height() >= 2 && strictly_increasing(c));
