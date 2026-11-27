@@ -53,7 +53,8 @@ constexpr const char* kUsage =
     "  --api-allow-origin <origin> allow exact browser Origin (repeatable; default: none)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
     "  --serve-timeout <s>       stop waiting for peers after this many seconds (default: no limit)\n"
-    "  --peer <port>             connect to 127.0.0.1:<port>, sync, then stop\n"
+    "  --peer <address>:<port>   connect to that IPv4 address and port, sync, then stop (gives up on an address that\n"
+    "                            does not answer after 10 seconds); a bare <port> means 127.0.0.1:<port>\n"
     "  --every <seconds>         with --peer: keep reconnecting at that interval (poll gossip)\n"
     "  --retries <n>             with --every: how many failures to survive before giving up (default 3, 0 = forever)\n"
     "  --identity <keyfile>      sign the handshake with this key, so a peer knows which key is speaking\n"
@@ -179,7 +180,8 @@ int main(int argc, char** argv) {
     std::set<std::string> allowed_peers;
     bool allowlist_enabled = false;
     bool require_identity = false;
-    std::string peer_port;
+    std::string peer_port;       // --peer as given: "<port>" or "<address>:<port>"
+    bool seen_peer = false;
     bool seen_chain = false, seen_pin = false, seen_key = false, seen_transfer = false, seen_api = false;
     bool seen_register = false, seen_transfer_asset = false;
     std::string new_key_file;
@@ -235,7 +237,12 @@ int main(int argc, char** argv) {
         if (a == "--allow-peer" && i + 1 < argc) { allowlist_enabled = true; allow_peer_texts.emplace_back(argv[++i]); continue; }
         if (a == "--allow-peer-file" && i + 1 < argc) { allowlist_enabled = true; allow_peer_files.emplace_back(argv[++i]); continue; }
         if (a == "--require-identity") { require_identity = true; continue; }
-        if (a == "--peer" && i + 1 < argc) { peer_port = argv[++i]; continue; }
+        if (a == "--peer" && i + 1 < argc) {
+            if (seen_peer) return usage_error("--peer was given twice");
+            seen_peer = true; peer_port = argv[++i];
+            if (peer_port.empty()) return usage_error("--peer wants <address>:<port> or a port, not nothing");
+            continue;
+        }
         if (a == "--transfer" && i + 1 < argc) {
             if (seen_transfer) return usage_error("--transfer was given twice");
             seen_transfer = true; transfer_spec = argv[++i]; continue;
@@ -440,7 +447,18 @@ int main(int argc, char** argv) {
             return true;
         };
         std::uint16_t port = 0;
-        const std::string& port_text = !listen_port.empty() ? listen_port : (!serve_port.empty() ? serve_port : peer_port);
+        std::string port_text = !listen_port.empty() ? listen_port : (!serve_port.empty() ? serve_port : peer_port);
+        std::string peer_address = "127.0.0.1";   // what the old form, --peer <port>, always meant
+        if (!peer_port.empty()) {
+            const std::size_t colon = peer_port.rfind(':');
+            if (colon != std::string::npos) {
+                // The strict check from --listen-on, so both flags mean the same by "an IPv4 address".
+                peer_address = peer_port.substr(0, colon);
+                port_text = peer_port.substr(colon + 1);
+                if (!taz::is_ipv4_address(peer_address))
+                    return usage_error("--peer wants <address>:<port> with a dotted-quad IPv4 address such as 192.0.2.10:7001, not \"" + peer_port + "\"");
+            }
+        }
         if (!parse_port(port_text, port)) return usage_error("the port must be a number between 1 and 65535");
 
         std::uint64_t serve_timeout = 0;      // 0 = wait for ever, as a real node does
@@ -901,10 +919,13 @@ int main(int argc, char** argv) {
             // wait, repeat. It is not gossip in the academic sense and it does not scale, but it means a new
             // block reaches the other node without anyone typing a command — which is the point.
             std::uint64_t round = 0, failures = 0;
+            if (peer_address.compare(0, 4, "127.") != 0)
+                std::cerr << "taznode: warning: connecting to " << peer_address << ":" << port << "; the connection is not encrypted, "
+                             "so consider --identity (and --allow-peer) to know who answers\n";
             for (;;) {
                 ++round;
                 taz::Socket socket;
-                bool round_ok = taz::connect_loopback(port, socket, &net_err);
+                bool round_ok = taz::connect_to(peer_address, port, socket, &net_err);
                 if (!round_ok) {
                     std::cerr << "taznode: " << net_err << "\n";
                 } else {
