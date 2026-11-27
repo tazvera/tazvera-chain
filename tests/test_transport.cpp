@@ -256,6 +256,8 @@ static void t7_recv_deadline_reaches_every_read() {
 }
 
 int main() {
+    std::string startup_error;
+    if (!net_startup(&startup_error)) { std::cerr << "net_startup failed: " << startup_error << "\n"; return EXIT_FAILURE; }   // Winsock on Windows; nothing on Linux
     t1_plain_transport_over_a_socket();
     t2_messages_over_memory();
     t3_hello_over_memory();
@@ -263,6 +265,7 @@ int main() {
     t5_shutdown_only_on_protocol_violations();
     t6_prepare_send_once_per_message();
     t7_recv_deadline_reaches_every_read();
+    net_cleanup();
     if (failures) { std::cerr << failures << " check(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "transport tests: all passed (7 cases)\n";
     return EXIT_SUCCESS;
