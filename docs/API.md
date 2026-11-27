@@ -1,6 +1,6 @@
 # TAZVERA Chain HTTP API
 
-The optional HTTP API is **read-only** and is intended for local tools and wallet development. It is disabled unless the node is started with `--api <port>`.
+The optional HTTP API is **read-only** and intended for local tools and wallet development. It is disabled unless the node is started with `--api <port>`.
 
 ## Start and network safety
 
@@ -79,24 +79,23 @@ Examples include `height`, `balance`, `nonce`, `created_at`, and the 64-bit inte
 
 Error responses use JSON: `{"error":"description"}`. The API does not expose write endpoints.
 
-## Wallet बनाने वालों के लिए
+## Wallet integration
 
-वॉलेट में अभी उपलब्ध read-only API से ये जानकारी दिखाई जा सकती है:
+Wallets can use the current read-only API to display:
 
-- **बैलेंस और nonce:** `GET /balance/{address}` — दिए गए 40-character address का balance और अगला nonce लौटाता है। दोनों 64-bit मान JSON strings हैं।
-- **किसी address की संपत्तियाँ:** `GET /assets/{address}` — उस address के स्वामित्व वाली संपत्तियों की सूची लौटाता है।
-- **पूरी registry की संपत्तियाँ:** `GET /assets?limit=100` — सभी registered संपत्तियों को पेज के रूप में दिखाता है। अगला पेज लेने के लिए पिछले जवाब का `next_after` इस तरह भेजें: `GET /assets?after=<next_after>&limit=100`।
+- **Balance and nonce:** `GET /balance/{address}` returns the balance and next nonce for the supplied 40-character address. Both 64-bit values are JSON strings.
+- **Assets owned by an address:** `GET /assets/{address}` returns the assets owned by that address.
+- **Registry-wide assets:** `GET /assets?limit=100` returns registered assets in pages. To request the next page, pass the previous response's `next_after` value: `GET /assets?after=<next_after>&limit=100`.
 
-### संपत्ति का मालिक बदलना
+### Transferring asset ownership
 
-मालिकाना बदलने के लिए `TransferAsset` transaction बनाना और मौजूदा मालिक के अधिकार से उसे sign करना आवश्यक है। **अभी यह काम taznode के माध्यम से ही किया जा सकता है; वॉलेट में transaction बनाने/भेजने की सुविधा अभी उपलब्ध नहीं है।**
+Changing ownership requires creating a `TransferAsset` transaction and signing it with the current owner's authority. **This can currently be done only through `taznode`; wallet transaction creation and submission are not available.**
 
-**महत्वपूर्ण:** यह HTTP API केवल पढ़ने के लिए है। इसमें कोई write endpoint नहीं है — वॉलेट इस API से balance और संपत्तियाँ पढ़ सकता है, लेकिन इससे transfer या कोई अन्य transaction submit नहीं कर सकता।
+**Important:** This HTTP API is read-only. It has no write endpoint. A wallet can read balances and assets through this API, but cannot submit a transfer or any other transaction through it.
 
+## Known limitations
 
-## जानी हुई सीमाएँ
-
-- HTTP API केवल पढ़ने के लिए है; लिखने या transaction भेजने का कोई endpoint नहीं है।
-- CORS डिफ़ॉल्ट रूप से बंद है।
-- API केवल `127.0.0.1` पर सुनता है; LAN या सार्वजनिक नेटवर्क से उपलब्ध नहीं है।
-- सभी 64-bit integer मान JSON number के बजाय string में लौटते हैं।
+- The HTTP API is read-only; it has no write or transaction-submission endpoint.
+- CORS is disabled by default.
+- The API listens only on `127.0.0.1`; it is not available over a LAN or public network.
+- All 64-bit integer values are returned as strings rather than JSON numbers.
