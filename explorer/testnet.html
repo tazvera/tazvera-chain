@@ -1,218 +1,713 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0A0C0B">
-  <title>Tazvera Testnet</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAZVERA — Testnet Prototype</title>
   <style>
+    /* ================= LOCAL FONTS ================= */
     @font-face {
-      font-family: "Space Grotesk";
-      src: url("./fonts/SpaceGrotesk-Medium.ttf") format("truetype");
-      font-style: normal; font-weight: 500; font-display: swap;
+      font-family: 'Space Grotesk';
+      src: url('fonts/SpaceGrotesk-Medium.ttf') format('truetype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
     }
     @font-face {
-      font-family: "Space Grotesk";
-      src: url("./fonts/SpaceGrotesk-Bold.ttf") format("truetype");
-      font-style: normal; font-weight: 700; font-display: swap;
+      font-family: 'Space Grotesk';
+      src: url('fonts/SpaceGrotesk-Bold.ttf') format('truetype');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
     }
     @font-face {
-      font-family: "Mukta";
-      src: url("./fonts/Mukta-Regular.ttf") format("truetype");
-      font-style: normal; font-weight: 400; font-display: swap;
+      font-family: 'Mukta';
+      src: url('fonts/Mukta-Regular.ttf') format('truetype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
     }
     @font-face {
-      font-family: "Mukta";
-      src: url("./fonts/Mukta-Bold.ttf") format("truetype");
-      font-style: normal; font-weight: 700; font-display: swap;
+      font-family: 'Mukta';
+      src: url('fonts/Mukta-Bold.ttf') format('truetype');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
     }
     @font-face {
-      font-family: "IBM Plex Mono";
-      src: url("./fonts/IBMPlexMono-Regular.ttf") format("truetype");
-      font-style: normal; font-weight: 400; font-display: swap;
+      font-family: 'IBM Plex Mono';
+      src: url('fonts/IBMPlexMono-Regular.ttf') format('truetype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
     }
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      src: url('fonts/IBMPlexMono-Regular.ttf') format('truetype');
+      font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    /* ================= VARIABLES & RESET ================= */
     :root {
-      color-scheme: dark;
-      --black: #0A0C0B;
-      --white: #FFFFFF;
-      --green: #4CF27E;
-      --gray: #8C9B94;
-      --panel: #111713;
-      --line: #26332B;
-      --body-font: "Space Grotesk", sans-serif;
+      --bg-base: #050806;
+      --bg-surface: #0A100D;
+      --bg-elevated: #0F1713;
+      --green-bright: #4CF27E;
+      --green-deep: #016B57;
+      --text-white: #FFFFFF;
+      --text-muted: #8C9B94;
+      --text-on-green: #04120A;
+      --border-subtle: rgba(140, 155, 148, 0.14);
+      --border-green: rgba(76, 242, 126, 0.28);
+      --font-en: 'Space Grotesk', sans-serif;
+      --font-hi: 'Mukta', sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
     }
-    * { box-sizing: border-box; }
-    html { background: var(--black); }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
-      margin: 0; min-height: 100vh; background: var(--black); color: var(--white);
-      font-family: var(--body-font); line-height: 1.55;
-      padding: 24px 20px 64px;
+      background-color: var(--bg-base);
+      color: var(--text-white);
+      font-family: var(--font-en);
+      line-height: 1.6;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(circle at 80% 10%, rgba(1, 107, 87, 0.18) 0%, transparent 45%),
+        radial-gradient(circle at 15% 60%, rgba(76, 242, 126, 0.04) 0%, transparent 40%),
+        linear-gradient(rgba(140, 155, 148, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(140, 155, 148, 0.04) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+      -webkit-font-smoothing: antialiased;
     }
-    body[data-language="hi"] { --body-font: "Mukta", sans-serif; }
-    .wrap { width: min(100%, 920px); margin: 0 auto; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding: 4px 0 28px; }
-    #brand-logo { width: 44px; height: 44px; flex: 0 0 44px; border: 1px dashed var(--line); border-radius: 8px; }
-    .eyebrow { color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-    .language { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; }
-    .language button { border:0; background:transparent; color:var(--gray); padding:4px 2px; font:inherit; cursor:pointer; }
-    .language button[aria-pressed="true"] { color:var(--green); font-weight:700; }
-    .language span { color:var(--gray); }
-    h1 { margin:12px 0 10px; font-size:clamp(38px,7vw,66px); line-height:1.04; letter-spacing:-.055em; }
-    h2 { margin:0; font-size:19px; letter-spacing:-.02em; }
-    p { margin:0; }
-    .tagline { max-width:650px; color:var(--gray); font-size:18px; }
-    .status { margin-top:34px; padding:22px; border:1px solid var(--line); border-radius:18px; background:var(--panel); }
-    .status-head { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; }
-    .pill { display:inline-flex; align-items:center; gap:8px; color:var(--green); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-    .dot { width:8px; height:8px; border-radius:50%; background:var(--green); }
-    .demo { color:var(--black); background:var(--green); border-radius:5px; padding:4px 8px; font-size:11px; font-weight:800; letter-spacing:.08em; }
-    .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:22px; }
-    .stat { min-width:0; padding:14px; background:var(--black); border:1px solid var(--line); border-radius:12px; }
-    .stat-label { color:var(--gray); font-size:12px; }
-    .stat-value { margin-top:5px; font-size:20px; font-weight:700; overflow-wrap:anywhere; }
-    .mono { font-family:"IBM Plex Mono",monospace; font-size:12px; overflow-wrap:anywhere; }
-    .section { margin-top:38px; }
-    .section-title { margin-bottom:16px; }
-    .steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-    .step { padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
-    .step-no { color:var(--green); font-family:"IBM Plex Mono",monospace; font-size:12px; }
-    .step h2 { margin:12px 0 7px; }
-    .step p { color:var(--gray); font-size:14px; }
-    .warning { margin-top:30px; padding:20px; border:1px solid #526052; border-left:4px solid var(--green); border-radius:12px; background:#101510; }
-    .warning h2 { margin-bottom:8px; }
-    .warning p { color:var(--gray); font-size:14px; }
-    .warning ul { margin:12px 0 0; padding-left:20px; color:var(--white); font-size:14px; }
-    .warning li + li { margin-top:5px; }
-    .footer { margin-top:28px; color:var(--gray); font-size:12px; }
-    .lang-hi { font-family:"Mukta",sans-serif; }
-    button:focus-visible { outline:2px solid var(--green); outline-offset:4px; }
-    @media (max-width:650px) {
-      body { padding:18px 16px 48px; }
-      .stats,.steps { grid-template-columns:1fr; }
-      .stat-value { font-size:18px; }
-      .status { padding:16px; }
+
+    body.lang-hi {
+      font-family: var(--font-hi);
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+    }
+
+    /* ================= LAYOUT CONTAINER ================= */
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ================= TOP BAR ================= */
+    header {
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(5, 8, 6, 0.85);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .nav-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 72px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand svg{width:26px;height:auto;display:block;flex:0 0 auto}
+    .wordmark {
+      font-family: var(--font-en);
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: var(--text-white);
+    }
+
+    .nav-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(1, 107, 87, 0.25);
+      border: 1px solid var(--green-deep);
+      color: var(--green-bright);
+      letter-spacing: 0.06em;
+    }
+
+    /* Language Switcher */
+    .lang-switch {
+      display: inline-flex;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .lang-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-en);
+      font-size: 0.85rem;
+      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .lang-btn.hi-label {
+      font-family: var(--font-hi);
+      font-size: 0.92rem;
+    }
+
+    .lang-btn.active {
+      background: var(--green-bright);
+      color: var(--text-on-green);
+    }
+
+    /* ================= HERO + LIVE STATUS SPLIT ================= */
+    .hero-section {
+      padding: 64px 0 48px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--green-bright);
+      margin-bottom: 20px;
+      letter-spacing: 0.05em;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--green-bright);
+      box-shadow: 0 0 10px var(--green-bright);
+    }
+
+    h1 {
+      font-size: clamp(2.5rem, 5vw, 3.85rem);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 20px;
+      color: var(--text-white);
+    }
+
+    body.lang-hi h1 {
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .hero-desc {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 480px;
+      margin-bottom: 32px;
+    }
+
+    .hero-meta-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .meta-chip {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+
+    .meta-chip span {
+      color: var(--text-white);
+    }
+
+    /* ================= CHAIN STATUS CARD ================= */
+    .status-card {
+      background: linear-gradient(165deg, var(--bg-elevated) 0%, var(--bg-surface) 100%);
+      border: 1px solid var(--border-green);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+    }
+
+    .status-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .status-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-white);
+    }
+
+    .demo-pill {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: var(--green-bright);
+      color: var(--text-on-green);
+      padding: 3px 9px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .stat-box {
+      background: rgba(5, 8, 6, 0.65);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 14px;
+    }
+
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 1.05rem;
+      font-weight: 500;
+      color: var(--text-white);
+    }
+
+    .stat-value.accent {
+      color: var(--green-bright);
+    }
+
+    .genesis-box {
+      background: rgba(5, 8, 6, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 14px;
+    }
+
+    .genesis-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .copy-btn {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      background: rgba(1, 107, 87, 0.3);
+      color: var(--green-bright);
+      border: 1px solid var(--green-deep);
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .copy-btn:hover {
+      background: var(--green-bright);
+      color: var(--text-on-green);
+    }
+
+    .hash-text {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      line-height: 1.5;
+    }
+
+    /* ================= HOW TO JOIN SECTION ================= */
+    .section-block {
+      padding: 40px 0;
+    }
+
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 24px;
+    }
+
+    .section-heading h2 {
+      font-size: 1.65rem;
+      font-weight: 700;
+    }
+
+    .explorer-note {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      border: 1px dashed var(--green-deep);
+      padding: 5px 12px;
+      border-radius: 6px;
+    }
+
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .step-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 24px;
+      transition: border-color 0.2s ease;
+    }
+
+    .step-card:hover {
+      border-color: var(--green-deep);
+    }
+
+    .step-num {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--green-bright);
+      color: var(--text-on-green);
+      padding: 3px 10px;
+      border-radius: 5px;
+      margin-bottom: 16px;
+    }
+
+    .step-card h3 {
+      font-size: 1.15rem;
+      margin-bottom: 8px;
+      color: var(--text-white);
+    }
+
+    .step-card p {
+      font-size: 0.94rem;
+      color: var(--text-muted);
+    }
+
+    /* ================= WARNING BLOCK ================= */
+    .warning-box {
+      margin: 24px 0 48px;
+      background: rgba(1, 107, 87, 0.08);
+      border: 1px solid var(--green-deep);
+      border-left: 4px solid var(--green-bright);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .warn-tag {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: var(--green-bright);
+      color: var(--text-on-green);
+      padding: 4px 10px;
+      border-radius: 4px;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+
+    .warn-content h4 {
+      font-size: 1rem;
+      margin-bottom: 4px;
+      color: var(--text-white);
+    }
+
+    .warn-content p {
+      font-size: 0.92rem;
+      color: var(--text-muted);
+    }
+
+    /* ================= FOOTER ================= */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 24px 0;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* ================= LANGUAGE VISIBILITY ================= */
+    [data-lang="hi"] {
+      display: none;
+    }
+    body.lang-hi [data-lang="en"] {
+      display: none;
+    }
+    body.lang-hi [data-lang="hi"] {
+      display: block;
+    }
+    body.lang-hi span[data-lang="hi"] {
+      display: inline;
+    }
+
+    /* ================= RESPONSIVE (MOBILE 1-COLUMN) ================= */
+    @media (max-width: 860px) {
+      .hero-section {
+        grid-template-columns: 1fr;
+        padding: 40px 0 32px;
+        gap: 32px;
+      }
+      .steps-grid {
+        grid-template-columns: 1fr;
+      }
+      .section-heading {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .warning-box {
+        flex-direction: column;
+        gap: 10px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+      .wordmark {
+        font-size: 1.15rem;
+      }
     }
   </style>
 </head>
-<body data-language="en">
-  <main class="wrap">
-    <nav class="topbar" aria-label="Page controls">
-      <div id="brand-logo"></div>
-      <div class="language" role="group" aria-label="Language">
-        <button type="button" id="lang-en" aria-pressed="true">EN</button>
-        <span aria-hidden="true">|</span>
-        <button type="button" id="lang-hi" aria-pressed="false">हिंदी</button>
-      </div>
-    </nav>
+<body>
 
-    <header>
-      <div class="eyebrow" data-i18n="eyebrow"></div>
-      <h1 data-i18n="title"></h1>
-      <p class="tagline" data-i18n="tagline"></p>
-    </header>
+  <!-- TOP BAR -->
+  <header>
+    <div class="container nav-inner">
+      <div class="brand">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -24 213.0 207.6" role="img" aria-label="Tazvera"><title>Tazvera</title><path fill="#4CF27E" d="M164.6,39.2 L157.9,45.1 L138.9,63.6 L137.0,65.0 L102.0,65.1 L101.1,65.6 L100.6,92.5 L100.8,155.9 L101.4,158.0 L103.9,159.5 L113.9,159.5 L115.8,158.6 L146.6,128.2 L164.0,110.2 L164.9,108.2Z M0.2,39.2 L0.1,108.5 L0.6,109.9 L2.2,112.1 L10.4,120.6 L47.9,158.2 L49.9,159.4 L60.2,159.5 L61.8,159.1 L63.2,157.8 L63.9,155.9 L63.6,65.5 L62.2,65.1 L30.5,65.2 L27.5,64.9 L1.0,39.4Z M0.1,29.1 L0.4,30.9 L2.9,33.6 L7.8,37.5 L11.9,39.5 L63.8,39.9 L67.0,40.9 L70.8,42.9 L75.9,48.1 L79.1,54.0 L81.8,61.9 L82.5,62.9 L86.0,52.9 L88.2,49.0 L92.8,43.9 L95.5,41.8 L97.9,40.8 L101.4,39.9 L152.6,39.6 L156.0,38.4 L158.8,36.4 L163.0,32.6 L164.9,30.1 L164.8,28.6 L163.8,27.1 L140.0,2.6 L136.6,0.0 L29.0,0.0 L27.9,0.4 L5.2,23.1 L0.5,28.1Z"/></svg>
+        <span class="wordmark">TAZVERA</span>
+        <span class="nav-badge">TESTNET</span>
+      </div>
 
-    <section class="status" aria-labelledby="status-title">
-      <div class="status-head">
-        <div class="pill"><span class="dot" aria-hidden="true"></span><span data-i18n="statusLabel"></span></div>
-        <span class="demo" data-i18n="demoBadge"></span>
+      <div class="lang-switch" role="group" aria-label="Language Switch">
+        <button class="lang-btn active" id="btn-en" onclick="setLang('en')">EN</button>
+        <button class="lang-btn hi-label" id="btn-hi" onclick="setLang('hi')">हिंदी</button>
       </div>
-      <div class="stats">
-        <article class="stat">
-          <div class="stat-label" id="status-title" data-i18n="networkLabel"></div>
-          <div class="stat-value">TAZVERA TESTNET</div>
-        </article>
-        <article class="stat">
-          <div class="stat-label" data-i18n="heightLabel"></div>
-          <div class="stat-value">1,284</div>
-        </article>
-        <article class="stat">
-          <div class="stat-label" data-i18n="validatorsLabel"></div>
-          <div class="stat-value">21</div>
-        </article>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- HERO & STATUS SPLIT -->
+    <section class="hero-section">
+      <!-- Left: Headline & Description -->
+      <div>
+        <div class="eyebrow">
+          <span class="pulse-dot"></span>
+          <span data-lang="en">INDEPENDENT LAYER-1 PROTOTYPE</span>
+          <span data-lang="hi">स्वतंत्र लेयर-1 प्रोटोटाइप</span>
+        </div>
+
+        <h1 data-lang="en">Your network.<br>Your rules.</h1>
+        <h1 data-lang="hi">आपका नेटवर्क।<br>आपके नियम।</h1>
+
+        <p class="hero-desc" data-lang="en">
+          A deterministic prototype blockchain engineered for verifiable on-chain asset records.
+        </p>
+        <p class="hero-desc" data-lang="hi">
+          ऑन-चेन एसेट रिकॉर्ड्स को सुरक्षित और प्रमाणित करने के लिए बनाया गया एक प्रोटोटाइप ब्लॉकचेन।
+        </p>
+
+        <div class="hero-meta-strip">
+          <div class="meta-chip">
+            <span data-lang="en">Architecture:</span>
+            <span data-lang="hi">आर्किटेक्चर:</span> Non-EVM Custom
+          </div>
+          <div class="meta-chip">
+            <span data-lang="en">Explorer:</span>
+            <span data-lang="hi">एक्सप्लोरर:</span>
+            <span data-lang="en">In Development</span>
+            <span data-lang="hi">निर्माणाधीन</span>
+          </div>
+        </div>
       </div>
-      <div class="section">
-        <div class="stat-label" data-i18n="genesisLabel"></div>
-        <p class="mono">0x7a91c3e8d42f6b105e9a4c71f0832d6b</p>
-      </div>
-      <p class="footer" data-i18n="demoNotice"></p>
+
+      <!-- Right: Sample Chain Status Card -->
+      <aside class="status-card" aria-label="Chain Status">
+        <div class="status-header">
+          <span class="status-title" data-lang="en">Chain Telemetry</span>
+          <span class="status-title" data-lang="hi">चेन स्टेटस</span>
+          <span class="demo-pill" data-lang="en">SAMPLE / DEMO</span>
+          <span class="demo-pill" data-lang="hi">सैंपल / डेमो</span>
+        </div>
+
+        <div class="status-grid">
+          <div class="stat-box">
+            <div class="stat-label" data-lang="en">Network Name</div>
+            <div class="stat-label" data-lang="hi">नेटवर्क का नाम</div>
+            <div class="stat-value accent">tazvera-testnet-01</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-label" data-lang="en">Block Height</div>
+            <div class="stat-label" data-lang="hi">ब्लॉक हाइट</div>
+            <div class="stat-value">142,890</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-label" data-lang="en">Active Validators</div>
+            <div class="stat-label" data-lang="hi">सक्रिय वैलिडेटर्स</div>
+            <div class="stat-value">07</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-label" data-lang="en">Explorer Status</div>
+            <div class="stat-label" data-lang="hi">एक्सप्लोरर स्थिति</div>
+            <div class="stat-value" data-lang="en">Local only</div>
+            <div class="stat-value" data-lang="hi">केवल लोकल</div>
+          </div>
+        </div>
+
+        <div class="genesis-box">
+          <div class="genesis-header">
+            <span class="stat-label" data-lang="en">Genesis Commitment (Sample 64-Hex)</span>
+            <span class="stat-label" data-lang="hi">जेनेसिस कमिटमेंट (सैंपल 64-हेक्स)</span>
+            <button class="copy-btn" id="copyBtn" onclick="copyHash()">COPY</button>
+          </div>
+          <div class="hash-text" id="genesisHash">8f4e9b2c71a04d6e35b8c9f1024a7d8e5c3b1a9f6e4d2c8b0a7f5e3d1c9b8a42</div>
+        </div>
+      </aside>
     </section>
 
-    <section class="section" aria-labelledby="join-title">
-      <div class="section-title"><h2 id="join-title" data-i18n="joinTitle"></h2></div>
-      <div class="steps">
-        <article class="step"><div class="step-no">01</div><h2 data-i18n="step1Title"></h2><p data-i18n="step1Body"></p></article>
-        <article class="step"><div class="step-no">02</div><h2 data-i18n="step2Title"></h2><p data-i18n="step2Body"></p></article>
-        <article class="step"><div class="step-no">03</div><h2 data-i18n="step3Title"></h2><p data-i18n="step3Body"></p></article>
+    <!-- HOW TO JOIN -->
+    <section class="section-block">
+      <div class="section-heading">
+        <h2 data-lang="en">How to join the testnet</h2>
+        <h2 data-lang="hi">टेस्टनेट से कैसे जुड़ें</h2>
+        <div class="explorer-note" data-lang="en">Public Explorer & RPC endpoints opening soon</div>
+        <div class="explorer-note" data-lang="hi">पब्लिक एक्सप्लोरर और RPC जल्द ही उपलब्ध होंगे</div>
+      </div>
+
+      <div class="steps-grid">
+        <div class="step-card">
+          <span class="step-num">01</span>
+          <h3 data-lang="en">Build the node</h3>
+          <h3 data-lang="hi">नोड बनाइए</h3>
+          <p data-lang="en">Clone the repository and build taznode from source with CMake. No prebuilt release is published yet.</p>
+          <p data-lang="hi">रिपॉज़िटरी क्लोन कीजिए और CMake से taznode खुद बनाइए। अभी कोई तैयार रिलीज़ जारी नहीं हुई है।</p>
+        </div>
+
+        <div class="step-card">
+          <span class="step-num">02</span>
+          <h3 data-lang="en">Load Genesis Config</h3>
+          <h3 data-lang="hi">जेनेसिस कॉन्फ़िगरेशन लोड करें</h3>
+          <p data-lang="en">Point your node configuration to the sample genesis commitment hash and configure peer discovery.</p>
+          <p data-lang="hi">अपने नोड कॉन्फ़िगरेशन को सैंपल जेनेसिस कमिटमेंट हैश से जोड़ें और पीयर डिस्कवरी सेट करें।</p>
+        </div>
+
+        <div class="step-card">
+          <span class="step-num">03</span>
+          <h3 data-lang="en">Sync & Verify Records</h3>
+          <h3 data-lang="hi">सिंक करें और रिकॉर्ड जांचें</h3>
+          <p data-lang="en">Start the node daemon to sync blocks locally and test submitting sample on-chain asset records.</p>
+          <p data-lang="hi">लोकल स्तर पर ब्लॉक सिंक करने के लिए नोड शुरू करें और सैंपल ऑन-चेन एसेट रिकॉर्ड सबमिट करके देखें।</p>
+        </div>
       </div>
     </section>
 
-    <aside class="warning" role="note">
-      <h2 data-i18n="warningTitle"></h2>
-      <p data-i18n="warningIntro"></p>
-      <ul>
-        <li data-i18n="warning1"></li>
-        <li data-i18n="warning2"></li>
-        <li data-i18n="warning3"></li>
-        <li data-i18n="warning4"></li>
-      </ul>
-    </aside>
-    <p class="footer" data-i18n="footer"></p>
+    <!-- EXPERIMENTAL WARNING BLOCK -->
+    <section class="warning-box" role="alert">
+      <span class="warn-tag" data-lang="en">NOTICE</span>
+      <span class="warn-tag" data-lang="hi">चेतावनी</span>
+      <div class="warn-content">
+        <h4 data-lang="en">Experimental Prototype Environment</h4>
+        <h4 data-lang="hi">प्रायोगिक प्रोटोटाइप वातावरण (Experimental Prototype)</h4>
+        <p data-lang="en">
+          This network is an early-stage experimental prototype. It involves no real money or financial value, operates without TLS encryption, and contains no payment path. Do not transmit sensitive data or real assets.
+        </p>
+        <p data-lang="hi">
+          यह नेटवर्क एक शुरुआती प्रायोगिक प्रोटोटाइप है। इसमें कोई वास्तविक पैसा या वित्तीय मूल्य शामिल नहीं है, यह बिना TLS एन्क्रिप्शन के चलता है, और इसमें कोई पेमेंट पाथ नहीं है। कृपया कोई भी संवेदनशील डेटा या असली संपत्ति न भेजें।
+        </p>
+      </div>
+    </section>
   </main>
 
+  <!-- FOOTER -->
+  <footer>
+    <div class="container footer-inner">
+      <span class="mono">TAZVERA PROTOCOL // TESTNET PROTOTYPE</span>
+      <span data-lang="en">On-chain asset record verification</span>
+      <span data-lang="hi">ऑन-चेन एसेट रिकॉर्ड सत्यापन</span>
+    </div>
+  </footer>
+
   <script>
-    "use strict";
-    const T = {
-      eyebrow: { en: "THE TAZVERA NETWORK", hi: "ताज़वेरा नेटवर्क" },
-      title: { en: "Your network. Your rules.", hi: "आपका नेटवर्क। आपके नियम।" },
-      tagline: { en: "Explore the Tazvera testnet and learn how to take part in the network.", hi: "Tazvera testnet देखें और जानें कि नेटवर्क में कैसे भाग लें।" },
-      statusLabel: { en: "Sample network status", hi: "नेटवर्क की नमूना स्थिति" },
-      demoBadge: { en: "DEMO DATA", hi: "डेमो डेटा" },
-      networkLabel: { en: "Network", hi: "नेटवर्क" },
-      heightLabel: { en: "Block height", hi: "Block height" },
-      validatorsLabel: { en: "Validators (sample)", hi: "Validators (नमूना)" },
-      genesisLabel: { en: "Genesis hash (sample)", hi: "Genesis hash (नमूना)" },
-      demoNotice: { en: "Illustrative sample values only. This page is not connected to a live node.", hi: "ये केवल उदाहरण के लिए नमूना मान हैं। यह पेज किसी live node से जुड़ा नहीं है।" },
-      joinTitle: { en: "How to join", hi: "कैसे जुड़ें" },
-      step1Title: { en: "Prepare your node", hi: "अपना node तैयार करें" },
-      step1Body: { en: "Review the testnet requirements and prepare a supported environment.", hi: "Testnet की ज़रूरतें देखें और सही environment तैयार करें।" },
-      step2Title: { en: "Connect safely", hi: "सुरक्षित तरीके से जुड़ें" },
-      step2Body: { en: "Use only the official configuration shared by the Tazvera team.", hi: "Tazvera टीम की दी हुई आधिकारिक configuration ही इस्तेमाल करें।" },
-      step3Title: { en: "Verify the network", hi: "नेटवर्क की जाँच करें" },
-      step3Body: { en: "Check the genesis hash and block data before participating.", hi: "भाग लेने से पहले Genesis hash और block data जाँचें।" },
-      warningTitle: { en: "Important: experimental prototype", hi: "ज़रूरी सूचना: यह प्रयोगात्मक prototype है" },
-      warningIntro: { en: "This demonstration is not a production network. Do not send funds or rely on it for real-world transactions.", hi: "यह प्रदर्शन production network नहीं है। इसमें पैसे न भेजें और असली लेन-देन के लिए इस पर भरोसा न करें।" },
-      warning1: { en: "Prototype only — functionality and network status may change.", hi: "केवल prototype — सुविधाएँ और नेटवर्क की स्थिति बदल सकती है।" },
-      warning2: { en: "No real money or real-value assets. Do not use valuable funds.", hi: "कोई असली पैसा या मूल्यवान संपत्ति नहीं। कीमती funds इस्तेमाल न करें।" },
-      warning3: { en: "No TLS is configured for this demonstration.", hi: "इस प्रदर्शन में TLS उपलब्ध नहीं है।" },
-      warning4: { en: "No payment path is implemented or available.", hi: "कोई payment path लागू या उपलब्ध नहीं है।" },
-      footer: { en: "Tazvera Testnet • Demonstration page • Not connected to a live node", hi: "Tazvera Testnet • प्रदर्शन पेज • live node से जुड़ा नहीं है" }
-    };
+    function setLang(lang) {
+      const body = document.body;
+      const btnEn = document.getElementById('btn-en');
+      const btnHi = document.getElementById('btn-hi');
 
-    const STORAGE_KEY = "tazvera-testnet-language";
-    const pageText = (key, language) => T[key][language];
-
-    function setLanguage(language) {
-      const active = language === "hi" ? "hi" : "en";
-      document.documentElement.lang = active;
-      document.body.dataset.language = active;
-      document.querySelectorAll("[data-i18n]").forEach((node) => {
-        const key = node.dataset.i18n;
-        if (T[key]) node.textContent = pageText(key, active);
-      });
-      document.getElementById("lang-en").setAttribute("aria-pressed", String(active === "en"));
-      document.getElementById("lang-hi").setAttribute("aria-pressed", String(active === "hi"));
-      try { localStorage.setItem(STORAGE_KEY, active); } catch (_) { /* Storage may be disabled. */ }
+      if (lang === 'hi') {
+        body.classList.add('lang-hi');
+        btnHi.classList.add('active');
+        btnEn.classList.remove('active');
+        document.documentElement.lang = 'hi';
+      } else {
+        body.classList.remove('lang-hi');
+        btnEn.classList.add('active');
+        btnHi.classList.remove('active');
+        document.documentElement.lang = 'en';
+      }
     }
 
-    let initialLanguage = "en";
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "en" || saved === "hi") initialLanguage = saved;
-    } catch (_) { /* First visit defaults to English when storage is unavailable. */ }
-
-    document.getElementById("lang-en").addEventListener("click", () => setLanguage("en"));
-    document.getElementById("lang-hi").addEventListener("click", () => setLanguage("hi"));
-    setLanguage(initialLanguage);
+    function copyHash() {
+      const hashText = document.getElementById('genesisHash').innerText;
+      const btn = document.getElementById('copyBtn');
+      navigator.clipboard.writeText(hashText).then(() => {
+        const original = btn.innerText;
+        btn.innerText = 'COPIED';
+        setTimeout(() => { btn.innerText = original; }, 1500);
+      });
+    }
   </script>
 </body>
 </html>
