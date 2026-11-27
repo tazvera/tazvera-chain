@@ -33,7 +33,7 @@
 
 अगर terminal बंद करने को कहे तो बंद करें, UCRT64 फिर खोलें और update पूरा करें।
 
-    pacman -S --needed git cmake mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-openssl
+    pacman -S --needed git cmake ninja mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-openssl
     git clone https://github.com/tazvera/tazvera-chain.git
     cd tazvera-chain
     git checkout 31291d6
@@ -83,7 +83,7 @@ GENESIS_HASH को step 4 के पूरे commitment से बदलें
 
     ./build/taznode --chain local-chain.json --expect-genesis GENESIS_HASH --serve 19001
 
-**क्या दिखना चाहिए:** node 127.0.0.1:19001 पर peers का इंतज़ार करे।
+**क्या दिखना चाहिए:** node 127.0.0.1:19001 पर peers का इंतज़ार करे। काम पूरा होने पर server terminal में Ctrl+C दबाकर रोकें।
 
 Terminal 2 में उसी chain की अलग copy बनाकर peer चलाएं:
 
