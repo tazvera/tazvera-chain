@@ -8,7 +8,7 @@ This package replaces the broken Phase-1 core with a small, buildable C++20 foun
 
 **Can:** create a chain with `--init-genesis`, load it with a genesis pin, produce a signed block with `--transfer` and a key file (and, for the RWA registry, `--register-asset <kind>:<doc_hash>` and `--transfer-asset <asset_id>:<address>`, same rules), serve several peers one at a time with `--serve`, sync both ways with `--peer`, poll on an interval with `--every`, survive a missing peer with `--retries`, and exchange only the blocks a peer is missing.
 
-**Cannot:** prove who a peer is (no authentication), decide between two chains of the same height beyond a fixed tie-break (no consensus), finalise anything, listen on anything except 127.0.0.1 unless the operator names another address with `--listen-on` (the connection is then still not encrypted), or carry a block with thousands of transactions (one 64 KiB message per block).
+**Cannot:** prove who a peer is (no authentication), decide between two chains of the same height beyond a fixed tie-break (no consensus), finalise anything, listen on anything except 127.0.0.1 unless the operator names another address with `--listen-on` (the connection is then still not encrypted), make blocks on its own unless `--serve` is given `--produce-every <seconds>` (empty blocks only), or carry a block with thousands of transactions (one 64 KiB message per block).
 
 ## What this package includes
 

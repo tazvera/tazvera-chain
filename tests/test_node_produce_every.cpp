@@ -108,10 +108,18 @@ int main() {
         const int rc = run(exe + " --chain " + q(chain) + " --expect-genesis " + pin + " --serve " + std::to_string(port) + " --produce-every 1 --serve-timeout 5 > " + q(log) + " 2>&1");
         CHECK(rc == 0);
         Chain c; std::string e2; CHECK(load_chain_json(chain, c, &e2));
-        CHECK(c.height() >= 2);
+        CHECK(c.height() >= 2 && c.height() <= 6);   // one block per second for five seconds: not a burst
         CHECK(strictly_increasing(c));
         for (std::size_t i = 1; i < c.blocks().size(); ++i) CHECK(c.blocks()[i].transactions.empty());
         CHECK(slurp(log).find("produced block height=1") != std::string::npos);
+    }
+    // 2b. a long interval does not hold back --serve-timeout: the node stops when it was told to, not at the next block time
+    {
+        const std::string chain = fresh_copy("slow.json");
+        const auto t0 = std::chrono::steady_clock::now();
+        CHECK(run(exe + " --chain " + q(chain) + " --expect-genesis " + pin + " --serve " + std::to_string(free_port()) + " --produce-every 60 --serve-timeout 2") == 0);
+        CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(20));
+        Chain c; std::string e2b; CHECK(load_chain_json(chain, c, &e2b) && c.height() == 0);   // no block was due yet
     }
     // 3. a peer fetches the new blocks while the node runs; a producing node keeps serving past --max-peers (default 5)
     {
@@ -139,7 +147,8 @@ int main() {
         { Chain c; std::string e4; CHECK(load_chain_json(pristine, c, &e4)); CHECK(c.set_producers({address_from_pubkey(pk)}).ok); CHECK(save_chain_json(c, chain, &e4)); pin2 = to_hex(c.genesis_commitment()); }
         const std::string before = slurp(chain);
         const std::string base = exe + " --chain " + q(chain) + " --expect-genesis " + pin2 + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 2";
-        CHECK(run(base) == 2);                                              // nobody to sign with
+        CHECK(run(base + " > " + q(log) + " 2>&1") == 2);                   // nobody to sign with, and it says so
+        CHECK(slurp(log).find("needs --key-file") != std::string::npos);
         CHECK(run(base + " --key-file " + q(other_key)) == 2);              // a key that is not a declared producer
         CHECK(slurp(chain) == before);
         const int rc = run(exe + " --chain " + q(chain) + " --expect-genesis " + pin2 + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 5 --key-file " + q(key_file) + " > " + q(log) + " 2>&1");
@@ -159,11 +168,13 @@ int main() {
         CHECK(c.height() >= 3 && strictly_increasing(c));
         CHECK(c.blocks()[2].timestamp == tip + 1);                          // stepped past the tip, not the clock
 
+        // a tip beyond the allowed slack is not extended; the node says so, keeps running and exits normally
         const std::string far = dir + "/far.json", log2 = dir + "/far.log";
-        { Chain c2; std::string e8; CHECK(load_chain_json(pristine, c2, &e8)); CHECK(c2.append_block({}, now_s() + 100, now_s() + 120).ok); CHECK(save_chain_json(c2, far, &e8)); }
-        // age the tip into "beyond the slack" by running with the tip at +100 and a clock check we cannot move: instead use a tip at +100 and rely on the
-        // refusal rule being "tip >= now + 120"; the node must therefore still produce here, and must not die
+        { Chain c2; std::string e8; CHECK(load_chain_json(pristine, c2, &e8)); CHECK(c2.append_block({}, now_s() + 500).ok); CHECK(save_chain_json(c2, far, &e8)); }
         CHECK(run(exe + " --chain " + q(far) + " --expect-genesis " + pin + " --serve " + std::to_string(free_port()) + " --produce-every 1 --serve-timeout 3 > " + q(log2) + " 2>&1") == 0);
+        Chain c3; std::string e9; CHECK(load_chain_json(far, c3, &e9));
+        CHECK(c3.height() == 1);                                            // nothing was added on top of that tip
+        CHECK(slurp(log2).find("beyond this clock") != std::string::npos);
     }
     // 6. the usage text names the flag
     {
