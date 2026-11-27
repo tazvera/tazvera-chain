@@ -78,6 +78,11 @@ bool is_ipv4_address(std::string_view text);
 // Like listen_loopback, but on the given IPv4 address; "0.0.0.0" means every interface of this machine.
 bool listen_on(std::string_view address, std::uint16_t port, Listener& out, std::string* error = nullptr, int backlog = 4);
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error = nullptr);
+// Connect to the given IPv4 address (checked with is_ipv4_address; anything else is refused before a socket is made).
+// A connection that is neither made nor refused within `timeout` fails with a message that says so: a peer on another
+// machine can simply not answer, and the operating system would wait minutes for it.
+bool connect_to(std::string_view address, std::uint16_t port, Socket& out, std::string* error = nullptr,
+                std::chrono::milliseconds timeout = std::chrono::milliseconds(10000));
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);
 // A deadline of TimePoint::max() means "no deadline beyond the per-call socket timeout". Anything else is an

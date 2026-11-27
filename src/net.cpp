@@ -217,6 +217,10 @@ bool connect_loopback(std::uint16_t port, Socket& out, std::string* error) {
     return true;
 }
 
+bool connect_to(std::string_view address, std::uint16_t port, Socket& out, std::string* error, std::chrono::milliseconds) {
+    return connect_loopback(port, out, error);   // red stub: not yet
+}
+
 bool accept_one(const Socket& listener, Socket& out, std::string* error, Deadline deadline) {
     if (deadline != no_deadline()) {
         // select() is the portable way to wait for a connection with a limit; accept() alone blocks for ever, and
