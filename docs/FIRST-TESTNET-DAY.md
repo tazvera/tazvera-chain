@@ -1,6 +1,6 @@
 # TAZVERA testnet: पहले दिन की checklist
 
-यह development test है, public testnet launch नहीं। असली funds/private keys इस्तेमाल न करें। **आज की सीमा:** `--listen-on` उपलब्ध है, लेकिन `--peer` अभी केवल `127.0.0.1` पर connect करता है। B से A के LAN address पर जुड़ने का `--peer <address>:<port>` विकल्प अभी बना नहीं है। इसलिए दो-मशीन sync वाला चरण तभी करें जब वह विकल्प merge होकर test हो जाए। तब तक एक ही मशीन पर दो नोड चलाकर localhost sync जाँचें।
+यह local development test है, public testnet launch या payment service नहीं। Balances/transactions केवल test data हैं; private keys/seed साझा न करें। **आज की सीमा:** `--listen-on` उपलब्ध है, लेकिन `--peer` अभी केवल `127.0.0.1` पर connect करता है। B से A के LAN address पर जुड़ने का `--peer <address>:<port>` विकल्प अभी बना नहीं है। इसलिए दो-मशीन sync वाला चरण तभी करें जब वह विकल्प merge होकर test हो जाए। तब तक एक ही मशीन पर दो नोड चलाकर localhost sync जाँचें।
 
 ## 1. दोनों मशीनों पर binary build करें
 
