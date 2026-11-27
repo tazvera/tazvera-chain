@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0A0C0B">
+<title>Tazvera Testnet</title>
+<style>
+@font-face{font-family:Space Grotesk;src:url("./fonts/SpaceGrotesk-Medium.ttf") format("truetype");font-weight:500;font-display:swap}
+@font-face{font-family:Space Grotesk;src:url("./fonts/SpaceGrotesk-Bold.ttf") format("truetype");font-weight:700;font-display:swap}
+@font-face{font-family:Mukta;src:url("./fonts/Mukta-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
+@font-face{font-family:Mukta;src:url("./fonts/Mukta-Bold.ttf") format("truetype");font-weight:700;font-display:swap}
+@font-face{font-family:IBM Plex Mono;src:url("./fonts/IBMPlexMono-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
+:root{--black:#0A0C0B;--white:#FFFFFF;--green:#4CF27E;--gray:#8C9B94}
+*{box-sizing:border-box}body{margin:0;background:var(--white);color:var(--black);font-family:Space Grotesk,Arial,sans-serif}
+.wrap{width:min(100% - 40px,1000px);margin:auto}.en{display:block}.hi{display:block;font-family:Mukta,sans-serif;font-size:.78em;font-weight:400;color:var(--gray);margin-top:5px;line-height:1.45}
+.hero{background:var(--black);color:var(--white);padding:30px 0 56px}.nav{display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{font-weight:700;letter-spacing:.02em}.pill{border:1px solid var(--gray);border-radius:999px;padding:8px 12px;color:var(--gray);font:12px "IBM Plex Mono",monospace}
+#brand-logo{min-height:0}h1{font-size:clamp(2.6rem,8vw,5.5rem);line-height:.98;letter-spacing:-.055em;max-width:800px;margin:72px 0 20px}.hero p{max-width:610px;color:var(--gray);font-size:1.05rem;line-height:1.65}.hero .hi{color:var(--gray)}
+.btn{display:inline-block;margin-top:18px;background:var(--green);color:var(--black);font-weight:700;text-decoration:none;padding:14px 20px;border-radius:4px}
+section{padding:56px 0}.section-title{font-size:clamp(1.8rem,5vw,3rem);margin:0 0 28px;letter-spacing:-.04em}
+.status{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat{border:1px solid #e5e9e6;padding:22px;border-radius:8px}.label{font-size:.85rem;color:var(--gray);font-weight:700}.value{font-size:1.5rem;font-weight:700;margin-top:12px}.mono{font:400 .9rem "IBM Plex Mono",monospace;overflow-wrap:anywhere}.status-note{margin-top:20px;padding:16px;background:#f4f6f4;border-left:4px solid var(--green);line-height:1.6}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.step{border-top:2px solid var(--black);padding:18px 0}.num{font:400 12px "IBM Plex Mono",monospace;color:var(--gray)}.step h3{font-size:1.25rem;margin:18px 0 8px}.step p{line-height:1.65;color:var(--gray)}
+.warning{background:var(--black);color:var(--white)}.warning .section-title{color:var(--green)}.warning-list{display:grid;grid-template-columns:1fr 1fr;gap:18px}.warning-item{border-top:1px solid #39413c;padding:18px 0;line-height:1.65}.warning-item .hi{color:var(--gray)}footer{padding:24px 0;background:var(--black);color:var(--gray);font:12px "IBM Plex Mono",monospace}
+@media(max-width:650px){.wrap{width:min(100% - 32px,1000px)}.hero{padding-bottom:42px}h1{margin-top:54px}.status,.steps,.warning-list{grid-template-columns:1fr}section{padding:40px 0}.stat{padding:18px}}
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+<div class="nav"><div><div id="brand-logo"></div><div class="brand">TAZVERA</div></div><span class="pill">TESTNET · SAMPLE</span></div>
+<h1><span class="en">Your assets, in your name</span><span class="hi">आपकी संपत्ति, आपके नाम</span></h1>
+<p><span class="en">A testnet preview for exploring the Tazvera network. This page uses sample data and is not connected to a live node yet.</span><span class="hi">Tazvera नेटवर्क को जानने के लिए टेस्टनेट का प्रारंभिक पेज। यहाँ नमूना डेटा है; पेज अभी लाइव नोड से जुड़ा नहीं है।</span></p>
+<a class="btn" href="#join"><span class="en">How to join</span><span class="hi">कैसे जुड़ें</span></a>
+</div></header>
+<main>
+<section><div class="wrap"><h2 class="section-title"><span class="en">Network status</span><span class="hi">नेटवर्क की स्थिति</span></h2>
+<div class="status">
+<div class="stat"><div class="label"><span class="en">Network</span><span class="hi">नेटवर्क</span></div><div class="value">Tazvera Testnet</div></div>
+<div class="stat"><div class="label"><span class="en">Connection</span><span class="hi">कनेक्शन</span></div><div class="value">Sample · Offline</div></div>
+<div class="stat"><div class="label"><span class="en">Block height</span><span class="hi">ब्लॉक ऊँचाई</span></div><div class="value mono">1,284 (sample)</div></div>
+<div class="stat"><div class="label"><span class="en">Genesis hash</span><span class="hi">जेनेसिस हैश</span></div><div class="value mono">0x7a91…c204 (sample)</div></div>
+</div><div class="status-note"><strong>Sample data only.</strong> The page is not connected to a live node; displayed values are illustrative, not network facts.</div>
+</div></section>
+<section id="join"><div class="wrap"><h2 class="section-title"><span class="en">How to join</span><span class="hi">कैसे जुड़ें</span></h2>
+<div class="steps">
+<article class="step"><div class="num">01 / PREPARE</div><h3><span class="en">Prepare your setup</span><span class="hi">अपना सेटअप तैयार करें</span></h3><p><span class="en">Use a test-only environment. Do not use a wallet holding real assets.</span><span class="hi">सिर्फ टेस्ट के लिए अलग वातावरण इस्तेमाल करें। असली संपत्ति वाला वॉलेट न इस्तेमाल करें।</span></p></article>
+<article class="step"><div class="num">02 / RUN</div><h3><span class="en">Run a local node</span><span class="hi">लोकल नोड चलाएँ</span></h3><p><span class="en">Start the node locally and keep it on your own machine. Remote peer connection is not available from this page.</span><span class="hi">नोड अपने कंप्यूटर पर चलाएँ। इस पेज से दूरस्थ peer कनेक्शन अभी उपलब्ध नहीं है।</span></p></article>
+<article class="step"><div class="num">03 / VERIFY</div><h3><span class="en">Verify locally</span><span class="hi">लोकल जाँच करें</span></h3><p><span class="en">Check your local node output. Do not treat this sample status as a live network confirmation.</span><span class="hi">अपने लोकल नोड का आउटपुट जाँचें। इस नमूना स्थिति को लाइव नेटवर्क की पुष्टि न मानें।</span></p></article>
+</div></div></section>
+<section class="warning"><div class="wrap"><h2 class="section-title"><span class="en">Important warnings</span><span class="hi">ज़रूरी चेतावनियाँ</span></h2>
+<div class="warning-list">
+<div class="warning-item"><strong><span class="en">Prototype</span><span class="hi">प्रोटोटाइप</span></strong><span class="en"> — this testnet page is experimental and may change.</span><span class="hi"> — यह टेस्टनेट पेज प्रयोगात्मक है और बदल सकता है।</span></div>
+<div class="warning-item"><strong><span class="en">No real money</span><span class="hi">असली पैसे नहीं</span></strong><span class="en"> — test assets have no monetary value.</span><span class="hi"> — टेस्ट संपत्ति का कोई मौद्रिक मूल्य नहीं है।</span></div>
+<div class="warning-item"><strong><span class="en">No TLS</span><span class="hi">TLS उपलब्ध नहीं</span></strong><span class="en"> — do not send sensitive information.</span><span class="hi"> — संवेदनशील जानकारी न भेजें।</span></div>
+<div class="warning-item"><strong><span class="en">Do not send funds</span><span class="hi">फंड न भेजें</span></strong><span class="en"> — no deposits or transfers are supported here.</span><span class="hi"> — यहाँ जमा या ट्रांसफर की सुविधा नहीं है।</span></div>
+</div></div></section>
+</main><footer><div class="wrap">TAZVERA TESTNET · SAMPLE STATUS · NOT CONNECTED TO A LIVE NODE</div></footer>
+</body></html>
