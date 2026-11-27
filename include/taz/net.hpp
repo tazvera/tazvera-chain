@@ -10,7 +10,7 @@ namespace taz {
 // v9.0: loopback transport for the handshake. Two processes on one machine, nothing on the internet.
 //
 // Deliberate limits of this step:
-//   - it binds 127.0.0.1 only; there is no way to ask it to listen on 0.0.0.0;
+//   - listen_loopback() binds 127.0.0.1 only; to listen anywhere else the caller must name the address (listen_on);
 //   - it carries one message at a time and no peer discovery;
 //   - a successful handshake means "same chain", never "trusted peer". Hello is not authenticated, so any
 //     stranger can claim to be a node. Peer identity is a separate milestone.
@@ -73,6 +73,10 @@ struct Listener {
 
 // port 0 asks the OS for a free port; the chosen one comes back in Listener::port.
 bool listen_loopback(std::uint16_t port, Listener& out, std::string* error = nullptr, int backlog = 4);
+// A dotted-quad IPv4 address, strictly: four decimal parts, each 0..255, no leading zeros, nothing else.
+bool is_ipv4_address(std::string_view text);
+// Like listen_loopback, but on the given IPv4 address; "0.0.0.0" means every interface of this machine.
+bool listen_on(std::string_view address, std::uint16_t port, Listener& out, std::string* error = nullptr, int backlog = 4);
 bool connect_loopback(std::uint16_t port, Socket& out, std::string* error = nullptr);
 // Raw bytes, for framing tests and for the transport itself.
 bool send_all(const Socket& socket, std::string_view bytes, std::string* error = nullptr);

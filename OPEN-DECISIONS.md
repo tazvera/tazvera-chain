@@ -198,3 +198,21 @@ They are not part of F10; address them together with the planned RWA-era Explore
 
 - No second transport and no command-line option for one.
 - `api.cpp` (the HTTP API) is not on the message layer and is unchanged.
+
+# taznode: `--listen-on <address>`
+
+## Fixed behaviour (decided by the owner of the project)
+
+- `--listen-on <address>` sets the IPv4 address that `--listen` and `--serve` wait on. Default 127.0.0.1, so nothing that exists today changes. A wrong address is a usage error (exit 2) and nothing is written.
+- `net.cpp` no longer has `INADDR_LOOPBACK` written into the listening function: `listen_on(address, port, ...)` takes the address, and `listen_loopback(port, ...)` is now `listen_on("127.0.0.1", ...)` (the tests read the bound address back to prove that it can never be anything else).
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **0.0.0.0 is accepted** ("every interface"). Without it a node could only be opened to the network by naming one interface's address, which is awkward on a test network. The previous comment in `net.hpp` ("no way to ask for 0.0.0.0") is replaced.
+2. **Only dotted-quad IPv4 is accepted** (four decimal parts, 0..255, no leading zeros). No host names ("localhost"), no IPv6, no short forms like `127.1`. The check is our own, not `inet_pton`, so it means the same on Linux and Windows.
+3. **`--listen-on` is refused unless `--listen` or `--serve` is given**, also with `--peer`, `--api`, `--transfer` and the other actions, and with `--new-key`. It is refused when given twice.
+4. **A warning on stderr when the address is not 127.x:** "listening on <address> makes this node reachable beyond this machine; the connection is not encrypted, so consider --identity with --require-identity". The node still starts: refusing to start without `--require-identity` would be a policy nobody asked for. If you want that policy, it is a one-line check.
+5. **The "listening on ..." line now names the address** (`listening on 0.0.0.0:<port>`). For the default it is the same line as before (`listening on 127.0.0.1:<port>`), which the existing tests wait for.
+6. **`--peer` still connects to 127.0.0.1 only.** A second machine can now connect *to* this node, but this node cannot connect out to another machine. A `--connect-to <address>` is the natural next flag; it was not asked for.
+7. **The HTTP API (`--api`) stays on 127.0.0.1** and is not affected.
+8. **Plain text on the wire.** `--listen-on` does not add encryption. The authenticated handshake (`--identity`, `--require-identity`, `--allow-peer`) proves who the peer is; it does not hide the traffic.
