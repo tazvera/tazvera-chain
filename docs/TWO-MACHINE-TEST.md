@@ -1,6 +1,6 @@
 # दो मशीनों पर TAZVERA node चलाने की गाइड
 
-यह गाइड भरोसेमंद, एक ही घर के LAN/Wi-Fi पर testnet की तैयारी के लिए है। अभी **दो अलग मशीनों के बीच peer connection उपलब्ध नहीं है**: `--peer` केवल `127.0.0.1` से जुड़ता है; उसमें remote address देने का विकल्प बाकी है और Claude उसे बना रहा है। तब तक दोनों नोड **एक ही मशीन पर** चलाकर देखें। सार्वजनिक इंटरनेट पर port न खोलें।
+यह गाइड भरोसेमंद, एक ही घर के LAN/Wi-Fi पर testnet की तैयारी के लिए है। अभी **दो अलग मशीनों के बीच peer connection उपलब्ध नहीं है**: `--peer` केवल `127.0.0.1` से जुड़ता है; उसमें remote address देने का विकल्प अभी बना नहीं है। तब तक दोनों नोड **एक ही मशीन पर** चलाकर देखें। सार्वजनिक इंटरनेट पर port न खोलें।
 
 ## अभी की सीमा
 
@@ -30,7 +30,7 @@ A की terminal खुली रखें। LAN address वही दें �
 taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
 ```
 
-**महत्वपूर्ण:** B से A तक जाने के लिए `--peer` में address वाला विकल्प अभी बाकी है, यह Claude बना रहा है। Remote-peer support merge होने, `--help` में दिखने और test होने से पहले ऊपर की B command न चलाएँ। तब तक दोनों नोड एक ही मशीन पर चलाकर देखें; उस test में server `--serve 7001` और peer `--peer 7001` इस्तेमाल करता है।
+**महत्वपूर्ण:** B से A तक जाने के लिए `--peer` में address वाला विकल्प अभी बना नहीं है। Remote-peer support merge होने, `--help` में दिखने और test होने से पहले ऊपर की B command न चलाएँ। तब तक दोनों नोड एक ही मशीन पर चलाकर देखें; उस test में server `--serve 7001` और peer `--peer 7001` इस्तेमाल करता है।
 
 ## Remote peer support आने पर LAN checks
 
@@ -58,4 +58,4 @@ taznode --chain b.json --expect-genesis <pin> --peer 7001
 
 ## सुरक्षा
 
-यह development test है: असली funds/keys इस्तेमाल न करें। TLS अभी wired नहीं है; plaintext traffic को भरोसेमंद LAN तक सीमित रखें। Public Wi-Fi या public internet पर node expose न करें।
+यह development test है: balances/transactions केवल test data हैं, आर्थिक मूल्य या payment service नहीं। Private keys/seed साझा न करें। TLS अभी wired नहीं है; plaintext traffic को भरोसेमंद LAN तक सीमित रखें। Public Wi-Fi या public internet पर node expose न करें।
