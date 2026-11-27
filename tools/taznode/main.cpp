@@ -42,6 +42,8 @@ constexpr const char* kUsage =
     "  --transfer-asset <id>:<a> produce one block that gives the asset <id> (64 hex) to the address <a> (40 hex);\n"
     "                            the key must be the asset's current owner\n"
     "  --listen <port>           wait for one peer on 127.0.0.1:<port>, sync, then stop\n"
+    "  --listen-on <address>     with --listen or --serve: the IPv4 address to wait on instead of 127.0.0.1\n"
+    "                            (0.0.0.0 = every interface; the connection is not encrypted)\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
     "  --api <port>              read-only HTTP API on 127.0.0.1 (GET only; disabled by default)\n"
     "  --api-allow-origin <origin> allow exact browser Origin (repeatable; default: none)\n"
@@ -156,6 +158,8 @@ int main(int argc, char** argv) {
     std::string transfer_spec;
     std::string register_spec, transfer_asset_spec;
     std::string listen_port;
+    std::string listen_on_address = "127.0.0.1";   // --listen-on; loopback unless the operator names another address
+    bool seen_listen_on = false;
     std::string serve_port;
     std::string api_port_text;
     std::vector<std::string> api_allow_origins;
@@ -230,6 +234,10 @@ int main(int argc, char** argv) {
             if (seen_transfer) return usage_error("--transfer was given twice");
             seen_transfer = true; transfer_spec = argv[++i]; continue;
         }
+        if (a == "--listen-on" && i + 1 < argc) {
+            if (seen_listen_on) return usage_error("--listen-on was given twice");
+            seen_listen_on = true; listen_on_address = argv[++i]; continue;
+        }
         if (a == "--register-asset" && i + 1 < argc) {
             if (seen_register) return usage_error("--register-asset was given twice");
             seen_register = true; register_spec = argv[++i]; continue;
@@ -246,6 +254,8 @@ int main(int argc, char** argv) {
     const bool production_asked = seen_transfer || seen_register || seen_transfer_asset;
     if ((seen_transfer ? 1 : 0) + (seen_register ? 1 : 0) + (seen_transfer_asset ? 1 : 0) > 1)
         return usage_error("--transfer, --register-asset and --transfer-asset each do one thing and stop; use one of them");
+    if (seen_listen_on && listen_port.empty() && serve_port.empty())
+        return usage_error("--listen-on needs --listen or --serve (it is the address they wait on)");
     // Validate allowlist configuration before loading the chain or opening sockets. Empty files mean deny all.
     if (allowlist_enabled && !require_identity)
         return usage_error("--allow-peer and --allow-peer-file require --require-identity");
@@ -280,7 +290,7 @@ int main(int argc, char** argv) {
 
     // Making a key needs no chain, so this is handled before that check and then stops.
     if (!new_key_file.empty()) {
-        if (seen_chain || !init_specs.empty() || production_asked || !peer_port.empty() || !listen_port.empty() ||
+        if (seen_chain || !init_specs.empty() || production_asked || seen_listen_on || !peer_port.empty() || !listen_port.empty() ||
             !serve_port.empty() || !api_port_text.empty() || !api_allow_origins.empty() || seen_key || !identity_file.empty())
             return usage_error("--new-key makes a key and stops; it cannot be combined with other actions");
         if (std::ifstream(new_key_file)) return usage_error("the key file already exists; refusing to overwrite it");
@@ -406,6 +416,11 @@ int main(int argc, char** argv) {
         if (seen_register || seen_transfer_asset)
             return usage_error("--register-asset and --transfer-asset do one thing and stop; they cannot be combined with --listen, --serve or --peer");
 
+        if (seen_listen_on) {
+            if (!peer_port.empty()) return usage_error("--listen-on is the address --listen and --serve wait on; --peer connects and does not listen");
+            if (!taz::is_ipv4_address(listen_on_address))
+                return usage_error("--listen-on wants an IPv4 address such as 127.0.0.1 or 0.0.0.0, not \"" + listen_on_address + "\"");
+        }
         auto parse_port = [](const std::string& text, std::uint16_t& out) -> bool {
             taz::Amount value = 0;
             if (!parse_amount(text, value) || value == 0 || value > 65535) return false;
@@ -879,13 +894,17 @@ int main(int argc, char** argv) {
             }
         } else {
             taz::Listener listener;
-            if (!taz::listen_loopback(port, listener, &net_err)) {
+            if (!taz::listen_on(listen_on_address, port, listener, &net_err)) {
                 std::cerr << "taznode: " << net_err << "\n";
                 taz::net_cleanup();
                 return 3;
             }
             const std::uint64_t wanted = listen_port.empty() ? max_peers : 1;
-            std::cout << "taznode: listening on 127.0.0.1:" << listener.port
+            // Anything other than 127.x is reachable from other machines; say so, and say what is missing.
+            if (listen_on_address.compare(0, 4, "127.") != 0)
+                std::cerr << "taznode: warning: listening on " << listen_on_address << " makes this node reachable beyond this machine; "
+                             "the connection is not encrypted, so consider --identity with --require-identity\n";
+            std::cout << "taznode: listening on " << listen_on_address << ":" << listener.port
                       << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << std::endl;   // v9.1: flushed, so a script that waits for this line (the tests do) is not left waiting in a stdio buffer
             // Only a peer that proved what it had to prove and finished its exchange counts towards --max-peers.
             // A refused or timed-out connection is not a served peer: otherwise a handful of anonymous connections
