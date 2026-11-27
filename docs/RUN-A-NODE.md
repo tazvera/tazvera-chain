@@ -1,10 +1,14 @@
 # अपनी मशीन पर TAZVERA node चलाना
 
+यह guide node को repository source से CMake द्वारा build करने के लिए है; अभी कोई downloadable release जारी नहीं हुई है।
+वर्तमान CLI में ये flags उपलब्ध हैं: `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset`।
+`--produce-every` अभी उपलब्ध नहीं है और development में है; `--tls` flag/transport अभी implement नहीं है।
+ध्यान दें: `--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
 यह local development prototype है, public testnet या payment service नहीं। यहाँ के balances/transactions test data हैं, आर्थिक मूल्य नहीं। Private keys/seed साझा न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
 
-## 1. Build करें
+## 1. Source से build करें
 
-Repository की वर्तमान `main` checkout लें और उसी commit से binary बनाएं। दो मशीनों के test में दोनों पर compatible binaries उसी commit से बननी चाहिए।
+अभी कोई release binary डाउनलोड करने के लिए उपलब्ध नहीं है। Repository का source clone करके CMake से binary बनाएं। दो मशीनों के test में दोनों पर compatible binaries उसी commit से बननी चाहिए।
 
 Linux:
 ```sh
@@ -86,4 +90,4 @@ taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:70
 - **Height नहीं बढ़ती:** server के पास नए blocks न हों तो height बढ़ना अपेक्षित नहीं। दोनों logs और heights देखें।
 - **Chain load/parse error:** node रोकें, logs सुरक्षित करें; chain file हाथ से edit न करें। केवल disposable test data के लिए नई filename से genesis बनाएं।
 
-Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें। `--produce-every` अभी बना नहीं है; CLI का `--every <seconds>` केवल `--peer` reconnect interval है, block production option नहीं.
+Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।
