@@ -1,123 +1,89 @@
 # अपनी मशीन पर TAZVERA node चलाना
 
-> यह केवल local prototype है। असली पैसा, असली wallet key या Shardeum TZV इस्तेमाल न करें। नोड केवल 127.0.0.1 पर सुनता है। दूसरे कंप्यूटर से जुड़ना अभी समर्थित नहीं है; नीचे दो नोड एक ही कंप्यूटर पर चलेंगे।
+यह development/testnet prototype है। असली पैसा, असली wallet key या Shardeum TZV इस्तेमाल न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
 
-## 1. ज़रूरी चीज़ें
+## 1. Build करें
 
-- CMake 3.20 या नया
-- OpenSSL 3.x development package
-- C++26 compiler: GCC 16+, Clang 22+, या Visual Studio 2022 17.14+ का MSVC
-- Git
+Repository की वर्तमान `main` checkout लें और उसी commit से binary बनाएं। दो मशीनों के test में दोनों पर compatible binaries उसी commit से बननी चाहिए।
 
-## 2. कोड लें और build करें
+Linux:
+```sh
+git clone https://github.com/tazvera/tazvera-chain.git
+cd tazvera-chain
+git checkout main
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
 
-### Linux (Ubuntu/Debian)
+Windows 10/11 पर MSYS2 UCRT64 terminal खोलकर project की Windows build instructions के अनुसार dependencies install करें, फिर CMake configure/build/test चलाएँ। Compiler को C++26 support करना होगा। Build/test fail हो तो आगे न बढ़ें।
 
-    sudo apt update
-    sudo apt install git cmake build-essential libssl-dev
-    git clone https://github.com/tazvera/tazvera-chain.git
-    cd tazvera-chain
-    git checkout 31291d6
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-    cmake --build build --parallel
-    ctest --test-dir build --output-on-failure
+## 2. Test keys और genesis बनाएं
 
-**क्या दिखना चाहिए:** CMake configure और build सफल हों; CTest के अंत में 100% tests passed दिखे। यदि compiler C++26 support नहीं करता, configure वहीं रुक जाएगा।
+Project root से दो test keys बनाएं:
+```sh
+./build/taznode --new-key node-a.key
+./build/taznode --new-key node-b.key
+```
+Windows पर executable `build/taznode.exe` है। छपे हुए दोनों public addresses नोट करें। Private key files साझा न करें।
 
-### Windows 10/11 (MSYS2 UCRT64)
+एक नई chain बनाएं; addresses को वास्तविक test addresses से बदलें:
+```sh
+./build/taznode --chain local-chain.json --init-genesis ADDRESS_A:100000000 --init-genesis ADDRESS_B:100000000
+```
+Genesis commitment/pin को ज्यों का त्यों सुरक्षित लिख लें। अलग addresses, balances या options से pin अलग होगा। Existing chain file overwrite नहीं होती; जरूरत हो तो नई filename लें।
 
-1. MSYS2 install करें और **MSYS2 UCRT64** terminal खोलें (साधारण MSYS terminal नहीं)।
-2. package update करें:
+## 3. Pin verify करें
 
-    pacman -Syu
+```sh
+./build/taznode --chain local-chain.json --expect-genesis <pin>
+```
+`<pin>` को पूरे genesis commitment से बदलें। सही pin पर chain load होनी चाहिए; गलत pin पर आगे न बढ़ें।
 
-अगर terminal बंद करने को कहे तो बंद करें, UCRT64 फिर खोलें और update पूरा करें।
+## 4. दो नोड एक ही मशीन पर चलाएं (अभी supported)
 
-    pacman -S --needed git cmake ninja mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-openssl
-    git clone https://github.com/tazvera/tazvera-chain.git
-    cd tazvera-chain
-    git checkout 31291d6
-    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-    cmake --build build --parallel
-    ctest --test-dir build --output-on-failure
+दो terminals खोलें। Peer node के लिए chain file की अलग copy बनाएं:
 
-**क्या दिखना चाहिए:** compiler, OpenSSL और CMake मिलें और tests pass हों। MSYS2 का उपलब्ध GCC अगर C++26 के लिए बहुत पुराना हो तो build नहीं होगा; उस स्थिति में नया समर्थित compiler इस्तेमाल करें।
+```sh
+cp local-chain.json peer-chain.json
+```
 
-## 3. दो अलग key बनाएं
+Windows Command Prompt में `copy local-chain.json peer-chain.json` चलाएं।
 
-हर command project root से चलाएं। पहले node A और फिर node B की key बनाएं:
+**Terminal 1 — server:**
+```sh
+./build/taznode --chain local-chain.json --expect-genesis <pin> --serve 7001 --listen-on 127.0.0.1
+```
 
-    ./build/taznode --new-key node-a.key
-    ./build/taznode --new-key node-b.key
+**Terminal 2 — peer:**
+```sh
+./build/taznode --chain peer-chain.json --expect-genesis <pin> --peer 7001
+```
 
-Windows पर executable का नाम build/taznode.exe है:
+Windows पर दोनों commands में `./build/taznode` की जगह `build/taznode.exe` लिखें। Server और peer दोनों terminals खुली रखें; logs में connection/sync देखें। Height तभी बढ़ेगी जब server के पास peer से आगे के blocks हों।
 
-    build/taznode.exe --new-key node-a.key
-    build/taznode.exe --new-key node-b.key
+## 5. अलग मशीनों के बारे में जरूरी बात
 
-**क्या दिखना चाहिए:** हर बार एक अलग 40-hex address छपे और key file बने। ये prototype keys हैं; इन्हें असली funds के लिए न रखें, साझा न करें।
+`--listen-on ADDRESS` अब मौजूद है और server को चुने हुए local interface/IP पर listen कराने के लिए है। लेकिन `--peer` अभी **सिर्फ़ `127.0.0.1` पर जुड़ता है**; remote address वाला विकल्प अभी बाकी है और Claude उसे बना रहा है। इसलिए B से A तक जाने के लिए `--peer` में address देने वाली सुविधा अभी उपलब्ध नहीं है। Remote-peer address support आने और test होने तक दो नोड एक ही मशीन पर ही चलाएं।
 
-## 4. नई local chain बनाएं
+Remote support आने के बाद अपेक्षित LAN command यह होगी—इसे अभी चलने योग्य न मानें:
 
-दोनों genesis accounts में मनमाना test balance दें। ADDRESS_A और ADDRESS_B को ऊपर छपे पूरे addresses से बदलें:
+मशीन A:
+```sh
+taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
+```
 
-    ./build/taznode --chain local-chain.json --init-genesis ADDRESS_A:100000000 --init-genesis ADDRESS_B:100000000
+मशीन B:
+```sh
+taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
+```
 
-Windows में ./build/taznode की जगह build/taznode.exe लिखें।
+## 6. आम गलतियाँ
 
-**क्या दिखना चाहिए:** chain file बने और node एक 64-hex **genesis commitment** छापे। उसे अलग सुरक्षित text file में copy करें; इसे chain file से खुद निकालकर भरोसे का pin न बनाएं। गलत address/amount या पहले से मौजूद chain file पर command fail होनी चाहिए। पुरानी file overwrite नहीं होती।
+- **Genesis pin mismatch:** दोनों nodes में वही पूरा pin दें; genesis inputs भी समान हों।
+- **Port busy / bind failed:** पुराना node रोकें या खाली port चुनें; दोनों commands में वही port रखें।
+- **Unknown flag:** सही commit से binary rebuild करें और `--help` देखें।
+- **Height नहीं बढ़ती:** server के पास नए blocks न हों तो height बढ़ना अपेक्षित नहीं। दोनों logs और heights देखें।
+- **Chain load/parse error:** node रोकें, logs सुरक्षित करें; chain file हाथ से edit न करें। केवल disposable test data के लिए नई filename से genesis बनाएं।
 
-## 5. सही pin से chain खोलें
-
-Terminal 1 में:
-
-    ./build/taznode --chain local-chain.json --expect-genesis GENESIS_HASH
-
-GENESIS_HASH को step 4 के पूरे commitment से बदलें।
-
-**क्या दिखना चाहिए:** node loaded chain की जानकारी और height दिखाकर सामान्य रूप से exit करे। गलत या missing pin पर non-zero exit आए। गलत pin को ठीक करने के लिए अंदाज़ा न लगाएं—step 4 वाला commitment इस्तेमाल करें।
-
-## 6. दूसरे node से sync करें (एक ही कंप्यूटर)
-
-दो अलग terminals खोलें। Terminal 1 में peer server:
-
-    ./build/taznode --chain local-chain.json --expect-genesis GENESIS_HASH --serve 19001
-
-**क्या दिखना चाहिए:** node 127.0.0.1:19001 पर peers का इंतज़ार करे। काम पूरा होने पर server terminal में Ctrl+C दबाकर रोकें।
-
-Terminal 2 में उसी chain की अलग copy बनाकर peer चलाएं:
-
-    cp local-chain.json peer-chain.json
-    ./build/taznode --chain peer-chain.json --expect-genesis GENESIS_HASH --peer 19001
-
-Windows UCRT64 में copy के लिए cp उपलब्ध है; Windows Command Prompt में copy local-chain.json peer-chain.json चलाएं और फिर node command चलाएं।
-
-**क्या दिखना चाहिए:** peer connect/sync का status और सफल completion। दोनों chain files का genesis pin एक होना चाहिए। इस prototype में peer केवल localhost पर है; दो अलग कंप्यूटरों के बीच connection नहीं चलेगा।
-
-## 7. Sync/height देखें
-
-हर बार node को सही pin के साथ खोलें:
-
-    ./build/taznode --chain local-chain.json --expect-genesis GENESIS_HASH
-    ./build/taznode --chain peer-chain.json --expect-genesis GENESIS_HASH
-
-**क्या दिखना चाहिए:** दोनों में समान chain का genesis commitment और synced height दिखे। कोई block बना/आया नहीं है तो height समान रहना ही अपेक्षित है। यह production network की सुरक्षा या स्थिरता का प्रमाण नहीं है।
-
-## आम गलतियाँ
-
-- **Fee 1000:** prototype transfer fee 1000 utzv है। transfer के लिए sender के पास रकम के साथ fee भी होनी चाहिए; यह fee नीति final नहीं है।
-- **Genesis pin गलत:** दोनों nodes में एक ही सही commitment दें। अलग genesis वाली chain sync नहीं होगी।
-- **Port busy:** --serve 19001 पर bind error आए तो उस port पर पहले से process है। server बंद करें या नया unused port चुनें; peer command में वही port दें।
-- **पुराना binary:** हर source update के बाद build दोबारा करें: cmake --build build --parallel. चल रहे पुराने process को बंद करके नया binary शुरू करें।
-- **Compiler/OpenSSL नहीं मिला:** सही MSYS2 UCRT64 terminal या supported compiler/OpenSSL development package इस्तेमाल करें।
-- **पुरानी chain file:** genesis बनाने की command existing file overwrite नहीं करती। नया filename दें या केवल disposable local test data हटाने के बाद दोबारा चलाएं।
-
-
-## नए flags (जब merge हो जाएँ)
-
-ये flags development में हैं। इन्हें तभी इस्तेमाल करें जब संबंधित बदलाव merge हो चुका हो और आपके build के `--help` में दिखता हो:
-
-- `--listen-on ADDRESS`: `--serve PORT` के साथ server को किस local interface/IP पर listen करना है, यह बताता है। LAN test में server मशीन का Wi-Fi/LAN IPv4 address दें; `127.0.0.1` केवल उसी कंप्यूटर के connections के लिए है।
-- `--produce-every N`: block producer का interval/configuration बताने के लिए है। `N` का unit, allowed range और default वही मानें जो merged implementation और `--help` में स्पष्ट हों; अनुमान से value न दें।
-
-इन flags के merge होने तक पुराने निर्देशों को इनका support मानकर न चलाएँ। दो अलग मशीनों की प्रक्रिया के लिए `docs/TWO-MACHINE-TEST.md` देखें।
+Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।
