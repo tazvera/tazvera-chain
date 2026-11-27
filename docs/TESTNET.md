@@ -1,67 +1,67 @@
-# TAZVERA Chain local prototype: स्थिति और सीमाएँ
+# TAZVERA Chain Local Prototype: Status and Limitations
 
-यह repository source से CMake द्वारा build होने वाला local prototype है; अभी कोई downloadable release जारी नहीं हुई है।
-`--produce-every <seconds>` उपलब्ध है: `--serve` के साथ producer हर N सेकंड में block बनाने की कोशिश करता है। `--tls` flag/transport अभी implement नहीं है।
-`--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
-Explorer का testnet पेज `explorer/testnet.html` sample/demo data दिखाता है और किसी चालू node से जुड़ा नहीं है।
+This repository contains a local prototype built from source with CMake; no downloadable release has been published yet.
+`--produce-every <seconds>` is available: with `--serve`, the producer attempts to create a block every N seconds. The `--tls` flag/transport has not been implemented yet.
+`--every <seconds>` is only the `--peer` reconnect interval, not the block-production interval.
+The Explorer testnet page, `explorer/testnet.html`, shows sample/demo data and is not connected to a running node.
 
-## यह क्या है?
+## What is this?
 
-यह repository का local prototype है, public testnet या mainnet नहीं। यह मौजूदा Shardeum TZV token से अलग है। यहाँ के balances और transactions केवल local test data हैं; इनका कोई घोषित आर्थिक मूल्य, market price या redeem value नहीं है और यह कोई real-world payment service नहीं है।
+This is the repository's local prototype, not a public testnet or mainnet. It is separate from the existing Shardeum TZV token. Balances and transactions here are local test data only; they have no declared economic value, market price, or redemption value, and this is not a real-world payment service.
 
-## नोड चलाने की शर्तें
+## Requirements for running a node
 
-- C++26 समर्थित compiler, CMake 3.20+ और OpenSSL 3.x development files चाहिए।
-- अभी कोई release binary उपलब्ध नहीं है; source checkout लेकर CMake से build करें। पूरा तरीका: docs/RUN-A-NODE.md।
-- Windows पर MSYS2 UCRT64 terminal और उसके matching compiler/OpenSSL packages इस्तेमाल करें।
-- हर existing chain खोलते समय trusted genesis commitment देना ज़रूरी है।
-- Node listener का default `127.0.0.1` है। `--listen-on <IPv4-address>` को `--serve <port>` या `--listen <port>` के साथ दिया जा सकता है; यह listener का bind address बदलता है।
-- `--peer <port>` अभी केवल `127.0.0.1:<port>` से जुड़ता है। Remote address वाला `--peer <address>:<port>` विकल्प अभी उपलब्ध नहीं है; इसलिए दो अलग computers के बीच peer connection अभी supported नहीं है।
-- `--produce-every <seconds>` उपलब्ध है और `--serve` के साथ ही दिया जा सकता है। उदाहरण और संचालन-निर्देश: docs/RUN-A-NODE.md।
-- `--tls` CLI flag उपलब्ध नहीं है और TLS transport अभी implement नहीं है।
+- A C++26-capable compiler, CMake 3.20+, and OpenSSL 3.x development files are required.
+- No release binary is available yet; check out the source and build with CMake. Full instructions: `docs/RUN-A-NODE.md`.
+- On Windows, use an MSYS2 UCRT64 terminal and its matching compiler/OpenSSL packages.
+- A trusted genesis commitment must be provided whenever opening an existing chain.
+- The node listener defaults to `127.0.0.1`. `--listen-on <IPv4-address>` can be supplied with `--serve <port>` or `--listen <port>`; it changes the listener's bind address.
+- `--peer <port>` currently connects only to `127.0.0.1:<port>`. The remote-address option `--peer <address>:<port>` is not available yet; therefore, peer connections between two separate computers are not supported yet.
+- `--produce-every <seconds>` is available and can only be supplied with `--serve`. Examples and operating instructions: `docs/RUN-A-NODE.md`.
+- The `--tls` CLI flag is not available, and TLS transport has not been implemented yet.
 
-## Producer flag का व्यवहार और सीमाएँ
+## Producer flag behavior and limitations
 
-उदाहरण:
+Example:
 ```sh
 taznode --chain a.json --expect-genesis <pin> --key-file a.key --serve 7001 --produce-every 5
 ```
 
-- Block हर N सेकंड में schedule होता है, पर timing थोड़ा खिसक सकता है: node single-threaded है और लंबा peer exchange tick को देर करा सकता है।
-- Block खाली होंगे; `taznode` में mempool नहीं है, इसलिए transactions इन blocks में अपने-आप शामिल नहीं होतीं।
-- Producer-enabled chain में उसी configured producer की key चाहिए। दूसरे producer की key से tick refuse/skip हो सकता है।
-- यदि tip का timestamp local clock से 120 सेकंड या अधिक आगे है, node warning देता है और उस tick को छोड़ देता है; clock catch up होने तक इंतजार करता है।
-- Block save न हो सके तो node exit code 3 से बंद होगा।
-- `--produce-every` को `--serve` के बिना देना usage error है (exit code 2)।
-- एक ही chain पर दो producers fork race बना सकते हैं। यह flag consensus/finality नहीं देता; intended setup एक producer और followers है।
+- Blocks are scheduled every N seconds, but timing may drift: the node is single-threaded, and a long peer exchange can delay a tick.
+- Blocks will be empty; `taznode` has no mempool, so transactions are not automatically included in these blocks.
+- A producer-enabled chain requires the configured producer's key. A tick may be refused/skipped when using another producer's key.
+- If the tip timestamp is 120 seconds or more ahead of the local clock, the node issues a warning and skips that tick; it waits until the clock catches up.
+- If a block cannot be saved, the node exits with code 3.
+- Supplying `--produce-every` without `--serve` is a usage error (exit code 2).
+- Two producers on the same chain can create a fork race. This flag does not provide consensus/finality; the intended setup is one producer and followers.
 
-## अभी क्या काम करता है
+## What works now
 
-- स्थानीय chain file बनाना और trusted genesis pin के साथ load करना।
-- Ed25519 transaction signing/verification और prototype transfer fee/nonce/balance checks।
-- स्थानीय block बनाना, chain file में save/load करना और chain state/hash जाँचना।
-- एक ही मशीन पर localhost peer से blocks sync करना।
-- Authenticated hello/peer identity handshake और configured peer identity allowlist।
-- Optional read-only HTTP API; यह default में बंद है और loopback पर ही सुनता है।
-- CLI में `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset` और `--produce-every` उपलब्ध हैं।
+- Create a local chain file and load it with a trusted genesis pin.
+- Ed25519 transaction signing/verification and prototype transfer fee/nonce/balance checks.
+- Create local blocks, save/load them in the chain file, and check chain state/hash.
+- Sync blocks with a localhost peer on the same machine.
+- Authenticated hello/peer identity handshake and configured peer identity allowlist.
+- Optional read-only HTTP API; disabled by default and listens only on loopback.
+- The CLI includes `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset`, and `--produce-every`.
 
-## अभी क्या नहीं है / किस पर भरोसा न करें
+## What is not available yet / what not to rely on
 
-- यह public testnet या production network नहीं है; कोई public endpoint या public peer network नहीं।
-- Remote-address peer dialing नहीं; `--peer` अभी localhost-only है।
-- Production-grade consensus/finality, fault-tolerant producer availability, TLS transport encryption या connection/request rate limiting नहीं।
-- HTTP API में transaction submit/write endpoint नहीं है।
-- Prototype transfer fee 1000 utzv है और local model में burn होती है; यह अंतिम या approved fee नहीं।
-- Local build/tests पास होना security audit या production readiness का प्रमाण नहीं।
+- This is not a public testnet or production network; there is no public endpoint or public peer network.
+- No remote-address peer dialing; `--peer` is currently localhost-only.
+- No production-grade consensus/finality, fault-tolerant producer availability, TLS transport encryption, or connection/request rate limiting.
+- The HTTP API has no transaction submit/write endpoint.
+- The prototype transfer fee is 1000 utzv and is burned in the local model; this is not a final or approved fee.
+- Passing local builds/tests is not evidence of a security audit or production readiness.
 
-## गड़बड़ी होने पर
+## If something goes wrong
 
-1. Node बंद करें और exact error message नोट करें।
-2. Build बदलने के बाद पुराना process बंद करके binary फिर build करें: `cmake --build build --parallel`.
-3. Chain load न हो तो सही trusted genesis pin दें। Pin को chain file से अनुमान लगाकर न बनाएं।
-4. Peer connect न हो तो दोनों commands में एक ही port, एक ही genesis pin और सही chain file जाँचें। अभी `--peer` केवल localhost पर काम करता है; अलग computer से कोशिश न करें।
-5. Port busy हो तो server बंद करें या कोई खाली local port चुनें और दोनों तरफ वही port रखें।
-6. Transfer fail हो तो sender balance में amount के साथ 1000 utzv fee और सही nonce की जाँच करें।
-7. Logs/error से कारण स्पष्ट न हो तो reproduction steps और error output issue में दें। Secret key file या private seed कभी attach न करें।
+1. Stop the node and note the exact error message.
+2. After changing the build, stop the old process and rebuild the binary: `cmake --build build --parallel`.
+3. If the chain does not load, provide the correct trusted genesis pin. Do not derive the pin by guessing from the chain file.
+4. If a peer does not connect, check that both commands use the same port, the same genesis pin, and the correct chain file. `--peer` currently works only on localhost; do not try connecting from a separate computer.
+5. If the port is busy, stop the server or choose an unused local port and use the same port on both sides.
+6. If a transfer fails, check the sender's balance for the amount plus the 1000 utzv fee and the correct nonce.
+7. If the cause is not clear from logs/error, file an issue with reproduction steps and error output. Never attach a secret key file or private seed.
 
-**सुरक्षा नोट:** यह software testing के लिए है। Local transfer functionality को real-world payment, economic value या production readiness का प्रमाण न मानें।
+**Security note:** This software is for testing. Do not treat local transfer functionality as evidence of real-world payment, economic value, or production readiness.
