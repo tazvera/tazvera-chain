@@ -11,7 +11,8 @@ namespace taz {
 // The caller owns the Socket and must keep it alive for this transport's lifetime.
 class TlsTransport final : public Transport {
 public:
-    TlsTransport(const Socket& socket, std::unique_ptr<TlsContext::Conn> connection) noexcept;
+    TlsTransport(const Socket& socket, std::unique_ptr<TlsContext> context,
+                 std::unique_ptr<TlsContext::Conn> connection) noexcept;
     ~TlsTransport() override = default;
 
     TlsTransport(const TlsTransport&) = delete;
@@ -23,6 +24,7 @@ public:
 
 private:
     const Socket& socket_;
+    std::unique_ptr<TlsContext> context_;
     std::unique_ptr<TlsContext::Conn> connection_;
 };
 
