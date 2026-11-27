@@ -1,5 +1,11 @@
 # TAZVERA Chain local prototype: स्थिति और सीमाएँ
 
+यह repository source से CMake द्वारा build होने वाला local prototype है; अभी कोई downloadable release जारी नहीं हुई है।
+वर्तमान CLI में उपलब्ध flags: `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset`।
+`--produce-every` अभी उपलब्ध नहीं है और development में है; `--tls` flag/transport अभी implement नहीं है।
+`--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
+Explorer का testnet पेज `explorer/testnet.html` है; यह अभी sample/demo data दिखाता है और किसी चालू node से जुड़ा नहीं है।
+
 ## यह क्या है?
 
 यह repository का local prototype है, public testnet या mainnet नहीं। यह मौजूदा Shardeum TZV token से अलग है। यहाँ के balances और transactions केवल local test data हैं; इनका कोई घोषित आर्थिक मूल्य, market price या redeem value नहीं है और यह कोई real-world payment service नहीं है।
@@ -7,11 +13,13 @@
 ## नोड चलाने की शर्तें
 
 - C++26 समर्थित compiler, CMake 3.20+ और OpenSSL 3.x development files चाहिए।
+- अभी कोई release binary उपलब्ध नहीं है; source checkout लेकर CMake से build करें। पूरा तरीका: docs/RUN-A-NODE.md।
 - Windows पर MSYS2 UCRT64 terminal और उसके matching compiler/OpenSSL packages इस्तेमाल करें।
 - हर existing chain खोलते समय trusted genesis commitment देना ज़रूरी है।
 - Node listener का default `127.0.0.1` है। `--listen-on <IPv4-address>` को `--serve <port>` या `--listen <port>` के साथ दिया जा सकता है; यह listener का bind address बदलता है।
 - `--peer <port>` अभी केवल `127.0.0.1:<port>` से जुड़ता है। Remote address वाला `--peer <address>:<port>` विकल्प अभी बना नहीं है; इसलिए दो अलग computers के बीच peer connection अभी supported नहीं है।
 - `--produce-every` अभी बना नहीं है। CLI का `--every <seconds>` केवल `--peer` के साथ reconnect interval है, block production interval नहीं।
+- `--tls` CLI flag उपलब्ध नहीं है और TLS transport अभी implement नहीं है।
 - चलाने के पूरे कदम: docs/RUN-A-NODE.md देखें।
 
 ## अभी क्या काम करता है
@@ -22,12 +30,15 @@
 - एक ही मशीन पर localhost peer से blocks sync करना।
 - Authenticated hello/peer identity handshake और configured peer identity allowlist।
 - Optional read-only HTTP API; यह default में बंद है और loopback पर ही सुनता है।
+- CLI में `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset` और `--transfer-asset` उपलब्ध हैं।
 
 ## अभी क्या नहीं है / किस पर भरोसा न करें
 
 - यह public testnet या production network नहीं है; कोई public endpoint या public peer network नहीं।
 - Remote-address peer dialing नहीं; `--peer` अभी localhost-only है।
 - Production-grade consensus/finality, fault-tolerant producer availability, TLS transport encryption या connection/request rate limiting नहीं।
+- `--produce-every` block production flag अभी नहीं है; यह development में है।
+- `--tls` flag/transport अभी implement नहीं है।
 - HTTP API में transaction submit/write endpoint नहीं है।
 - Prototype transfer fee 1000 utzv है और local model में burn होती है; यह अंतिम या approved fee नहीं।
 - Local build/tests पास होना security audit या production readiness का प्रमाण नहीं।
