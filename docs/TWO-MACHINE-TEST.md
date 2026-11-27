@@ -19,7 +19,7 @@ Use compatible binaries built from the same commit and the same genesis pin on b
 **Machine A — server:**
 
 ```sh
-taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
+taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A LAN address>
 ```
 
 Keep A's terminal open. Use the LAN address of A's connected LAN interface. Port 7001 must be available.
@@ -27,7 +27,7 @@ Keep A's terminal open. Use the LAN address of A's connected LAN interface. Port
 **Machine B — peer:**
 
 ```sh
-taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
+taznode --chain b.json --expect-genesis <pin> --peer <A LAN address>:7001
 ```
 
 **Important:** The address-taking option for `--peer` to connect from B to A has not been implemented yet. Do not run the B command above until remote-peer support is merged, appears in `--help`, and is tested. Until then, run both nodes on the same machine; that test uses server `--serve 7001` and peer `--peer 7001`.
@@ -35,7 +35,7 @@ taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:70
 ## LAN checks after remote peer support is available
 
 1. Ping A's correct LAN IPv4 address from B. If ping fails, check Wi-Fi/SSID, guest network, subnet, VPN, and router client/AP isolation; ping being blocked alone does not prove TCP failure.
-2. Run the node on A with `--serve 7001 --listen-on <A का LAN पता>` and confirm the log shows a successful bind/listen.
+2. Run the node on A with `--serve 7001 --listen-on <A LAN address>` and confirm the log shows a successful bind/listen.
 3. In A's Windows Firewall, allow inbound TCP 7001 only on the trusted Private network. Do not turn off the firewall entirely; remove the temporary rule after testing.
 4. In B's command, provide A's correct LAN IP and the same port. Do not configure internet port forwarding on the router.
 5. If the connection fails, check in order: is the node running? Is the LAN IP correct? Is the port the same and available? Is the firewall rule on the correct profile/port? Are the binaries from the same compatible commit? Then check both logs.
