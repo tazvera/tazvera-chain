@@ -10,7 +10,7 @@
 - [ ] **F4 — DoS सीमा:** connection, message/frame size, chunking, समय और sync के लिए सीमाएँ लागू हैं; सीमा से बाहर input सीमित संसाधन खर्च करके अस्वीकार होता है। सीमा-पार और boundary tests सफल हैं।
 - [ ] नए और पुराने network tests पूरे चलाए गए; कोई test हटाया, skip किया या कमजोर assertion के साथ बदला नहीं गया।
 - [ ] Linux और Windows पर build तथा test परिणाम दर्ज हैं; sanitizer/fuzz परीक्षण जहाँ लागू हों वहाँ सफल हैं।
-- [ ] `--listen-on` और `--produce-every` के help/usage और error messages सही हैं; गलत configuration पर node साफ़ error देकर रुकता है।
+- [ ] `--listen-on` का help/usage और error behavior सही है। `--produce-every` अभी बना नहीं है; उसके लिए कोई उपलब्ध CLI behavior claim न करें।
 
 ## 2. दो अलग मशीनों का परीक्षण
 
@@ -30,7 +30,7 @@
 
 ## 4. Testnet की सीमाएँ — शुरू करने से पहले पढ़ें
 
-- [ ] **असली पैसा नहीं:** इस testnet पर कोई वास्तविक मूल्य या असली funds नहीं हैं। Testnet data/keys को मूल्यवान न समझें।
+- [ ] **केवल test data:** balances/transactions का कोई घोषित आर्थिक मूल्य नहीं है और कोई real-world payment path नहीं है; इन्हें भुगतान या funds न समझें।
 - [ ] **पैसा भेजना नहीं:** यह वास्तविक भुगतान या असली wallet transfer के लिए नहीं है। कोई ऐसा दावा/निर्देश प्रकाशित नहीं है।
 - [ ] **TLS नहीं:** transport encrypted नहीं है। इसे केवल नियंत्रित, भरोसेमंद LAN परीक्षण तक सीमित रखें; सार्वजनिक Wi-Fi या इंटरनेट पर न चलाएँ।
 - [ ] **Consensus नहीं:** nodes के बीच production-grade consensus/finality नहीं है। समान chain दिखना या sync पूरा होना canonical chain/finality की गारंटी नहीं है।
