@@ -126,29 +126,66 @@
       color: var(--green-bright);
       letter-spacing: 0.06em;
     }
-    .lang-switch {
-      display: inline-flex;
-      align-items: center;
-    }
-    .lang-btn {
-      display: inline-grid;
+    .language-picker { position: relative; flex: 0 0 auto; }
+    .language-trigger {
+      display: grid;
       place-items: center;
       width: 42px;
       height: 42px;
-      padding: 0;
-      color: var(--green-bright);
+      color: var(--text-white);
       background: var(--bg-surface);
-      border: 1px solid var(--border-green);
+      border: 1px solid var(--border-subtle);
       border-radius: 10px;
       cursor: pointer;
-      transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+      transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
     }
-    .lang-btn:hover {
+    .language-trigger:hover, .language-trigger[aria-expanded="true"] {
+      color: var(--green-bright);
+      border-color: var(--green-deep);
+      background: var(--bg-elevated);
+    }
+    .language-trigger svg { width: 21px; height: 21px; display: block; }
+    .language-menu {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      z-index: 100;
+      width: max-content;
+      min-width: 168px;
+      max-width: min(220px, calc(100vw - 32px));
+      padding: 6px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-green);
+      border-radius: 10px;
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.55);
+    }
+    .language-menu[hidden] { display: none; }
+    .language-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 40px;
+      padding: 8px 10px;
+      color: var(--text-muted);
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+      text-align: left;
+      font: 500 0.92rem var(--font-en);
+      cursor: pointer;
+    }
+    .language-option[data-lang="hi"] { font-family: var(--font-hi); }
+    .language-option:hover, .language-option:focus-visible {
+      color: var(--text-white);
+      background: rgba(76, 242, 126, 0.08);
+    }
+    .language-option[aria-checked="true"] {
+      color: var(--green-bright);
       background: rgba(76, 242, 126, 0.10);
-      border-color: var(--green-bright);
+      font-weight: 700;
     }
-    .lang-btn:active { transform: scale(0.96); }
-    .lang-btn svg { width: 21px; height: 21px; display: block; }
+    .language-check { width: 1em; flex: 0 0 1em; text-align: center; }
 
     .hero-section {
       padding: 64px 0 48px;
@@ -386,13 +423,18 @@
         <span class="wordmark">TAZVERA</span>
         <span class="nav-badge" data-i18n="top_badge"></span>
       </div>
-      <div class="lang-switch">
-        <button class="lang-btn" id="lang-toggle" type="button" onclick="toggleLang()" aria-label="Switch language to Hindi" title="Switch language to Hindi">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-            <circle cx="12" cy="12" r="9.25"></circle>
-            <path d="M2.9 12h18.2M12 2.75c2.35 2.5 3.55 5.58 3.55 9.25S14.35 18.75 12 21.25C9.65 18.75 8.45 15.67 8.45 12S9.65 5.25 12 2.75Z"></path>
+      <div class="language-picker" id="language-picker">
+        <button class="language-trigger" id="language-trigger" type="button"
+          aria-label="Open language menu" aria-haspopup="menu" aria-expanded="false"
+          aria-controls="language-menu">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+            aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"></path>
           </svg>
         </button>
+        <div class="language-menu" id="language-menu" role="menu" aria-label="Choose language" hidden></div>
       </div>
     </div>
   </header>
@@ -684,13 +726,70 @@
       }
     };
 
-    function toggleLang() {
-      const current = document.documentElement.lang === 'hi' ? 'hi' : 'en';
-      setLang(current === 'en' ? 'hi' : 'en');
+    // Add future languages here and add matching entries to the TEXT table.
+    const LANGUAGES = [
+      { code: 'en', label: 'English' },
+      { code: 'hi', label: 'हिंदी' }
+    ];
+    const languagePicker = document.getElementById('language-picker');
+    const languageTrigger = document.getElementById('language-trigger');
+    const languageMenu = document.getElementById('language-menu');
+    let activeLanguageIndex = 0;
+
+    function renderLanguageMenu() {
+      languageMenu.replaceChildren();
+      LANGUAGES.forEach((language) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'language-option';
+        item.dataset.lang = language.code;
+        item.setAttribute('role', 'menuitem');
+        item.setAttribute('tabindex', '-1');
+        item.setAttribute('aria-checked', 'false');
+
+        const check = document.createElement('span');
+        check.className = 'language-check';
+        check.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.textContent = language.label;
+        item.append(check, label);
+        item.addEventListener('click', () => {
+          setLang(language.code);
+          closeLanguageMenu(true);
+        });
+        languageMenu.append(item);
+      });
+    }
+
+    function updateLanguageMenu(selected) {
+      const index = LANGUAGES.findIndex((language) => language.code === selected);
+      activeLanguageIndex = index >= 0 ? index : 0;
+      languageMenu.querySelectorAll('[role="menuitem"]').forEach((item, itemIndex) => {
+        const active = item.dataset.lang === selected;
+        item.setAttribute('aria-checked', String(active));
+        item.querySelector('.language-check').textContent = active ? '✓' : '';
+        item.classList.toggle('active', active);
+      });
+    }
+
+    function openLanguageMenu(focusSelected = true) {
+      languageMenu.hidden = false;
+      languageTrigger.setAttribute('aria-expanded', 'true');
+      if (focusSelected) {
+        const items = languageMenu.querySelectorAll('[role="menuitem"]');
+        items[activeLanguageIndex]?.focus();
+      }
+    }
+
+    function closeLanguageMenu(returnFocus = false) {
+      if (languageMenu.hidden) return;
+      languageMenu.hidden = true;
+      languageTrigger.setAttribute('aria-expanded', 'false');
+      if (returnFocus) languageTrigger.focus();
     }
 
     function setLang(lang) {
-      const selected = lang === 'hi' ? 'hi' : 'en';
+      const selected = LANGUAGES.some((language) => language.code === lang) ? lang : 'en';
       document.documentElement.lang = selected;
       document.body.classList.toggle('lang-hi', selected === 'hi');
 
@@ -702,12 +801,7 @@
         }
       });
 
-      const langToggle = document.getElementById('lang-toggle');
-      const nextLanguage = selected === 'en' ? 'Hindi' : 'English';
-      const accessibleLabel = 'Switch language to ' + nextLanguage;
-      langToggle.setAttribute('aria-label', accessibleLabel);
-      langToggle.setAttribute('title', accessibleLabel);
-
+      updateLanguageMenu(selected);
       try {
         localStorage.setItem('tz_lang', selected);
       } catch (error) {
@@ -715,11 +809,48 @@
       }
     }
 
+    languageTrigger.addEventListener('click', () => {
+      if (languageMenu.hidden) openLanguageMenu();
+      else closeLanguageMenu();
+    });
+
+    languageMenu.addEventListener('keydown', (event) => {
+      const items = Array.from(languageMenu.querySelectorAll('[role="menuitem"]'));
+      if (!items.length) return;
+      let nextIndex = activeLanguageIndex;
+      if (event.key === 'ArrowDown') nextIndex = (activeLanguageIndex + 1) % items.length;
+      else if (event.key === 'ArrowUp') nextIndex = (activeLanguageIndex - 1 + items.length) % items.length;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = items.length - 1;
+      else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeLanguageMenu(true);
+        return;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      activeLanguageIndex = nextIndex;
+      items[nextIndex].focus();
+    });
+
+    document.addEventListener('pointerdown', (event) => {
+      if (!languagePicker.contains(event.target)) closeLanguageMenu();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !languageMenu.hidden) {
+        event.preventDefault();
+        closeLanguageMenu(true);
+      }
+    });
+
     (function initLanguage() {
+      renderLanguageMenu();
       let saved = 'en';
       try {
         const stored = localStorage.getItem('tz_lang');
-        if (stored === 'en' || stored === 'hi') saved = stored;
+        if (LANGUAGES.some((language) => language.code === stored)) saved = stored;
       } catch (error) {
         // Use English when local storage is unavailable.
       }
