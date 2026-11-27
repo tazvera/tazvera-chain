@@ -6,10 +6,13 @@
 #include <sys/socket.h>
 #endif
 
+#include <utility>
+
 namespace taz {
 
-TlsTransport::TlsTransport(const Socket& socket, std::unique_ptr<TlsContext::Conn> connection) noexcept
-    : socket_(socket), connection_(std::move(connection)) {}
+TlsTransport::TlsTransport(const Socket& socket, std::unique_ptr<TlsContext> context,
+                           std::unique_ptr<TlsContext::Conn> connection) noexcept
+    : socket_(socket), context_(std::move(context)), connection_(std::move(connection)) {}
 
 bool TlsTransport::send_all(std::string_view bytes, std::string* error, Deadline deadline) {
     if (!connection_) {
