@@ -1,68 +1,60 @@
-# टोकन भेजना और लेना
-<small>Sending and receiving tokens</small>
+# Sending and receiving tokens
 
-## टोकन क्या है?
-<small>What is a token?</small>
+## What is a token?
 
-टोकन चेन की किताब में दर्ज एक संख्या है। यह अपने-आप असली पैसा नहीं है और इसकी कोई तय नकद कीमत नहीं मानी जा सकती। यह दस्तावेज़ मौजूदा TAZVERA prototype के परीक्षण के लिए है।
+A token is a number recorded in the chain's ledger. It is not real money by itself and has no guaranteed cash value. This document is for testing the current TAZVERA prototype.
 
-## आज टोकन कैसे भेजें?
-<small>How to send tokens today</small>
+## How to send tokens today
 
-अभी टोकन भेजने का तरीका कमांड लाइन है। भेजने वाले की key file और सही chain का genesis pin चाहिए। नीचे `<पता>` की जगह पाने वाले का पूरा 40-character hexadecimal address और `<pin>` की जगह भरोसेमंद genesis pin डालें।
+Tokens are currently sent through the command line. You need the sender's key file and the correct chain's genesis pin. In the command below, replace `<recipient-address>` with the recipient's complete 40-character hexadecimal address and `<pin>` with the trusted genesis pin.
 
 ```sh
-taznode --chain c1.json --expect-genesis <pin> --key-file a.key --transfer <पता>:1000
+taznode --chain c1.json --expect-genesis <pin> --key-file a.key --transfer <recipient-address>:1000
 ```
 
-यह उदाहरण 1000 token units भेजता है। मौजूदा CLI एक transfer के लिए एक block बनाता है और फिर रुक जाता है। यह prototype command है—कोई public payment service नहीं।
+This example sends 1000 token units. The current CLI creates one block for a transfer and then stops. This is a prototype command, not a public payment service.
 
-## Fee 1000 क्यों कटती है?
-<small>Why is a 1000-unit fee charged?</small>
+## Why is a 1000-unit fee charged?
 
-हर transaction पर 1000 units की fee लगती है। भेजने वाले के खाते से भेजी गई रकम **और** 1000 fee दोनों कटते हैं। Fee को जला दिया जाता है; वह पाने वाले को नहीं मिलती। इसका उद्देश्य नेटवर्क को बेकार या spam transactions से बचाने में मदद करना है। यह मौजूदा prototype की fee है, अंतिम आर्थिक नियम नहीं।
+A fee of 1000 units is charged for every transaction. The sender's account is debited by both the amount sent **and** the 1000-unit fee. The fee is burned; the recipient does not receive it. Its purpose is to help protect the network against useless or spam transactions. This is the current prototype fee, not a final economic rule.
 
-उदाहरण: 5000 units भेजने के लिए balance कम-से-कम 6000 units होना चाहिए।
+Example: to send 5000 units, the balance must be at least 6000 units.
 
-## भेजने के बाद क्या होता है?
-<small>What happens after sending?</small>
+## What happens after sending?
 
-कमांड transaction को block में रखती है। दूसरा node block sync करके उसे जाँचता और अपनी chain में स्वीकार करता है। यह prototype है; block बनना अपने-आप में किसी भुगतान की कानूनी या आर्थिक पुष्टि नहीं है।
+The command places the transaction in a block. Another node synchronizes the block, verifies it, and accepts it into its own chain. This is a prototype; block production by itself is not legal or economic confirmation of a payment.
 
-## Balance कैसे देखें?
-<small>How to check a balance</small>
+## How to check a balance
 
-Node पर read-only API चालू करें:
+Enable the read-only API on the node:
 
 ```sh
 taznode --chain c1.json --expect-genesis <pin> --api 8080
 ```
 
-फिर browser या HTTP client से यह GET request करें:
+Then make this GET request from a browser or HTTP client:
 
 ```http
-GET /balance/<पता>
+GET /balance/<address>
 ```
 
-उदाहरण URL: `http://127.0.0.1:8080/balance/<पता>`
+Example URL: `http://127.0.0.1:8080/balance/<address>`
 
-उत्तर में balance और अगला nonce मिलता है:
+The response contains the balance and next nonce:
 
 ```json
 {"balance":"10000","nonce":"0"}
 ```
 
-यहाँ `10000` और `0` केवल उदाहरण हैं। मौजूदा API loopback पर read-only है; यह transaction भेजने का endpoint नहीं है।
+Here, `10000` and `0` are examples only. The current API is read-only and loopback-only; it is not an endpoint for sending transactions.
 
-## आम गलतियाँ
-<small>Common errors</small>
+## Common errors
 
-- **गलत पता:** address ठीक 40 hexadecimal characters का होना चाहिए। API में गलत address पर error आता है: `address must be exactly 40 hexadecimal characters`. Transfer command में गलत/अधूरा address देने पर usage error आता है।
-- **Fee सहित balance कम:** `insufficient balance`. भेजी जाने वाली रकम और 1000 fee—दोनों के लिए balance चाहिए।
-- **Nonce गलत:** `bad nonce`. Sender का nonce chain में मौजूद अगले nonce के बराबर होना चाहिए। Balance API का `nonce` देखें।
-- **गलत chain:** `wrong chain ID`. Transaction और node एक ही chain के होने चाहिए; सही chain file और trusted genesis pin इस्तेमाल करें।
+- **Invalid address:** The address must be exactly 40 hexadecimal characters. The API returns `address must be exactly 40 hexadecimal characters` for an invalid address. An invalid/incomplete address in the transfer command produces a usage error.
+- **Insufficient balance including the fee:** `insufficient balance`. The balance must cover both the amount being sent and the 1000-unit fee.
+- **Wrong nonce:** `bad nonce`. The sender's nonce must equal the next nonce recorded on the chain. Check the balance API's `nonce`.
+- **Wrong chain:** `wrong chain ID`. The transaction and node must belong to the same chain; use the correct chain file and trusted genesis pin.
 
-## बहुत ज़रूरी चेतावनी
-<small>Important warning</small>
+## Important warning
 
-पता भेजने से पहले दो बार जाँचें। गलत पते पर भेजा गया टोकन वापस नहीं आता—इसे असली chain की तरह ही समझें। Private key file किसी को न दें।
+Check the address twice before sending. A token sent to the wrong address cannot be recovered—treat this as you would a real chain. Never give anyone your private key file.
