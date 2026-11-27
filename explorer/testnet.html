@@ -128,25 +128,27 @@
     }
     .lang-switch {
       display: inline-flex;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 3px;
+      align-items: center;
     }
     .lang-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-family: var(--font-en);
-      font-size: 0.85rem;
-      font-weight: 700;
-      padding: 6px 14px;
-      border-radius: 6px;
+      display: inline-grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      color: var(--green-bright);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-green);
+      border-radius: 10px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
     }
-    .lang-btn.hi-label { font-family: var(--font-hi); font-size: 0.92rem; }
-    .lang-btn.active { background: var(--green-bright); color: var(--text-on-green); }
+    .lang-btn:hover {
+      background: rgba(76, 242, 126, 0.10);
+      border-color: var(--green-bright);
+    }
+    .lang-btn:active { transform: scale(0.96); }
+    .lang-btn svg { width: 21px; height: 21px; display: block; }
 
     .hero-section {
       padding: 64px 0 48px;
@@ -384,9 +386,13 @@
         <span class="wordmark">TAZVERA</span>
         <span class="nav-badge" data-i18n="top_badge"></span>
       </div>
-      <div class="lang-switch" role="group" aria-label="Language switch">
-        <button class="lang-btn active" id="btn-en" type="button" onclick="setLang('en')" aria-pressed="true">EN</button>
-        <button class="lang-btn hi-label" id="btn-hi" type="button" onclick="setLang('hi')" aria-pressed="false">हिंदी</button>
+      <div class="lang-switch">
+        <button class="lang-btn" id="lang-toggle" type="button" onclick="toggleLang()" aria-label="Switch language to Hindi" title="Switch language to Hindi">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="9.25"></circle>
+            <path d="M2.9 12h18.2M12 2.75c2.35 2.5 3.55 5.58 3.55 9.25S14.35 18.75 12 21.25C9.65 18.75 8.45 15.67 8.45 12S9.65 5.25 12 2.75Z"></path>
+          </svg>
+        </button>
       </div>
     </div>
   </header>
@@ -678,6 +684,11 @@
       }
     };
 
+    function toggleLang() {
+      const current = document.documentElement.lang === 'hi' ? 'hi' : 'en';
+      setLang(current === 'en' ? 'hi' : 'en');
+    }
+
     function setLang(lang) {
       const selected = lang === 'hi' ? 'hi' : 'en';
       document.documentElement.lang = selected;
@@ -691,12 +702,11 @@
         }
       });
 
-      const btnEn = document.getElementById('btn-en');
-      const btnHi = document.getElementById('btn-hi');
-      btnEn.classList.toggle('active', selected === 'en');
-      btnHi.classList.toggle('active', selected === 'hi');
-      btnEn.setAttribute('aria-pressed', String(selected === 'en'));
-      btnHi.setAttribute('aria-pressed', String(selected === 'hi'));
+      const langToggle = document.getElementById('lang-toggle');
+      const nextLanguage = selected === 'en' ? 'Hindi' : 'English';
+      const accessibleLabel = 'Switch language to ' + nextLanguage;
+      langToggle.setAttribute('aria-label', accessibleLabel);
+      langToggle.setAttribute('title', accessibleLabel);
 
       try {
         localStorage.setItem('tz_lang', selected);
