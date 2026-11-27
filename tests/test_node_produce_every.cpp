@@ -112,6 +112,7 @@ int main() {
         CHECK(strictly_increasing(c));
         for (std::size_t i = 1; i < c.blocks().size(); ++i) CHECK(c.blocks()[i].transactions.empty());
         CHECK(slurp(log).find("produced block height=1") != std::string::npos);
+        if (failures) std::cerr << "---- node log (plain) ----\n" << slurp(log) << "---- height " << c.height() << " ----\n";
     }
     // 2b. a long interval does not hold back --serve-timeout: the node stops when it was told to, not at the next block time
     {
@@ -139,6 +140,7 @@ int main() {
         CHECK(server_rc == 0);
         Chain c; std::string e3; CHECK(load_chain_json(copy, c, &e3) && c.height() >= 1);
         CHECK(slurp(log).find("stopped waiting after 12s") != std::string::npos);
+        if (failures) std::cerr << "---- node log (live) ----\n" << slurp(log) << "---- client height " << c.height() << " ----\n";
     }
     // 4. a chain that declares producers: no key, or a key that is not a producer, is a usage error; the right key signs
     {
