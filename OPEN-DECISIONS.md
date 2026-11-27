@@ -239,3 +239,10 @@ They are not part of F10; address them together with the planned RWA-era Explore
 8. **Only empty blocks.** There is no mempool in taznode, so nothing waits to be put into these blocks. Transactions still go in with `--transfer` and the other one-shot commands.
 9. **The key file is read once at start.** A node that makes blocks for days keeps the key in memory. Nothing new is written about key storage here.
 10. **Two nodes producing on the same chain** are a fork race, as they would be anywhere without consensus. This flag does not try to prevent that; it is for one producing node plus followers (`--peer --every`).
+
+
+# TLS transport shutdown behavior
+
+- `TlsContext::Conn` exposes TLS read/write and peer-certificate fingerprint operations, but no TLS shutdown/close-notify operation.
+- `TlsTransport::shutdown()` currently shuts down the underlying socket and releases the TLS connection so the message layer can cut off a broken peer. This does not send a TLS `close_notify` alert.
+- Decision needed: should `TlsContext::Conn` expose a bounded, error-reporting TLS shutdown/close-notify operation, and should `TlsTransport::shutdown()` attempt it before shutting down the socket? Keep that behavior change in a separate change to the TLS foundation.
