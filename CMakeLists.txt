@@ -50,6 +50,7 @@ add_library(tazcore
     src/fork.cpp
     src/auth.cpp
     src/tls.cpp
+    src/tls_transport.cpp
 )
 target_include_directories(tazcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(tazcore PUBLIC OpenSSL::Crypto OpenSSL::SSL)
@@ -133,6 +134,10 @@ find_package(Threads REQUIRED)
 add_executable(taz_tls_tests tests/test_tls.cpp)
 target_link_libraries(taz_tls_tests PRIVATE tazcore Threads::Threads)
 add_test(NAME taz_tls_tests COMMAND taz_tls_tests)
+
+add_executable(taz_tls_transport_tests tests/test_tls_transport.cpp)
+target_link_libraries(taz_tls_transport_tests PRIVATE tazcore)
+add_test(NAME taz_tls_transport_tests COMMAND taz_tls_transport_tests)
 
 add_executable(taz_auth_tests tests/test_auth.cpp)
 target_link_libraries(taz_auth_tests PRIVATE tazcore)
