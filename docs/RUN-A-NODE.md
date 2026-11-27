@@ -1,8 +1,7 @@
 # अपनी मशीन पर TAZVERA node चलाना
 
 यह guide node को repository source से CMake द्वारा build करने के लिए है; अभी कोई downloadable release जारी नहीं हुई है।
-वर्तमान CLI में ये flags उपलब्ध हैं: `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset`।
-`--produce-every` अभी उपलब्ध नहीं है और development में है; `--tls` flag/transport अभी implement नहीं है।
+वर्तमान CLI में `--produce-every` उपलब्ध है; यह `--serve` के साथ हर N seconds में block बनाने के लिए है। `--tls` flag/transport अभी implement नहीं है।
 ध्यान दें: `--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
 यह local development prototype है, public testnet या payment service नहीं। यहाँ के balances/transactions test data हैं, आर्थिक मूल्य नहीं। Private keys/seed साझा न करें। इस guide में दोनों नोड **एक ही कंप्यूटर पर** चलते हैं।
 
@@ -44,7 +43,26 @@ Genesis commitment/pin को ज्यों का त्यों सुर�
 ```
 `<pin>` को पूरे genesis commitment से बदलें। सही pin पर chain load होनी चाहिए; गलत pin पर आगे न बढ़ें।
 
-## 4. दो नोड एक ही मशीन पर चलाएं (अभी supported)
+## 4. Block producer चलाएं
+
+`--produce-every` उपलब्ध है। Producer को `--serve` और trusted genesis pin के साथ चलाएं। Producer-enabled chain पर `--key-file` में उसी chain के configured producer की private key होनी चाहिए।
+
+उदाहरण — हर 5 सेकंड में block बनाने की कोशिश:
+```sh
+taznode --chain a.json --expect-genesis <pin> --key-file a.key --serve 7001 --produce-every 5
+```
+`<pin>` को वास्तविक trusted genesis pin से बदलें। `a.key` उसी producer की key होनी चाहिए जिसे chain में producer के रूप में तय किया गया है। यह command लगातार चलती रहेगी; रोकने के लिए Ctrl+C दबाएं।
+
+**सीमाएँ / जरूरी व्यवहार:**
+- Block हर N सेकंड में schedule होता है, लेकिन समय थोड़ा खिसक सकता है। Node single-threaded है; peer का लंबा काम अगला tick देर से करा सकता है।
+- ये blocks खाली होंगे। `taznode` में mempool नहीं है, इसलिए pending transactions अपने-आप इन blocks में शामिल नहीं होतीं।
+- जिस chain में producers तय हैं, block बनाने के लिए उसी configured producer की key चाहिए। दूसरे producer की key से tick refuse/skip हो सकता है।
+- यदि tip का timestamp local clock से 120 सेकंड या अधिक आगे है, node warning देता है और उस tick को छोड़ देता है; clock catch up होने तक इंतजार करता है।
+- Block chain file में save न हो सके तो node exit code 3 से बंद होगा।
+- `--produce-every` को `--serve` के बिना देना usage error है (exit code 2)।
+- एक ही chain पर दो producer चलाना fork race पैदा कर सकता है। इस option का intended setup एक producer और followers हैं; यह consensus/finality नहीं है।
+
+## 5. दो नोड एक ही मशीन पर चलाएं
 
 दो terminals खोलें। Peer node के लिए chain file की अलग copy बनाएं:
 
@@ -54,40 +72,25 @@ cp local-chain.json peer-chain.json
 
 Windows Command Prompt में `copy local-chain.json peer-chain.json` चलाएं।
 
-**Terminal 1 — server:**
-```sh
-./build/taznode --chain local-chain.json --expect-genesis <pin> --serve 7001 --listen-on 127.0.0.1
-```
+**Terminal 1 — server/producer:** ऊपर दिए गए producer command में `a.json` को `local-chain.json` और port को `7001` रखें।
 
 **Terminal 2 — peer:**
 ```sh
 ./build/taznode --chain peer-chain.json --expect-genesis <pin> --peer 7001
 ```
 
-Windows पर दोनों commands में `./build/taznode` की जगह `build/taznode.exe` लिखें। Server और peer दोनों terminals खुली रखें; logs में connection/sync देखें। Height तभी बढ़ेगी जब server के पास peer से आगे के blocks हों।
+Windows पर executable के लिए `build/taznode.exe` लिखें। Server और peer दोनों terminals खुली रखें; logs में connection/sync देखें। Peer को producer की अलग chain-file copy दें; एक ही file को दो processes से लिखवाएं नहीं।
 
-## 5. अलग मशीनों के बारे में जरूरी बात
+## 6. अलग मशीनों के बारे में जरूरी बात
 
-`--listen-on <IPv4-address>` मौजूद है; इसे `--serve <port>` या `--listen <port>` के साथ दें। Default listener address `127.0.0.1` है। `--peer <port>` अभी केवल `127.0.0.1:<port>` पर connect करता है; `--peer <address>:<port>` वाला remote-address विकल्प अभी बना नहीं है। इसलिए दो नोड एक ही मशीन पर चलाएं।
+`--listen-on <IPv4-address>` मौजूद है; इसे `--serve <port>` या `--listen <port>` के साथ दें। Default listener address `127.0.0.1` है। `--peer <port>` अभी केवल `127.0.0.1:<port>` पर connect करता है; `--peer <address>:<port>` वाला remote-address विकल्प अभी उपलब्ध नहीं है। इसलिए दो नोड एक ही मशीन पर चलाएं।
 
-Remote `--peer` address support आने के बाद ही ये LAN commands चलने योग्य होंगी; अभी ये केवल अपेक्षित syntax हैं:
-
-मशीन A:
-```sh
-taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
-```
-
-मशीन B:
-```sh
-taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
-```
-
-## 6. आम गलतियाँ
+## 7. आम गलतियाँ
 
 - **Genesis pin mismatch:** दोनों nodes में वही पूरा pin दें; genesis inputs भी समान हों।
 - **Port busy / bind failed:** पुराना node रोकें या खाली port चुनें; दोनों commands में वही port रखें।
 - **Unknown flag:** सही commit से binary rebuild करें और `--help` देखें।
-- **Height नहीं बढ़ती:** server के पास नए blocks न हों तो height बढ़ना अपेक्षित नहीं। दोनों logs और heights देखें।
+- **Height नहीं बढ़ती:** producer की logs देखें; configured producer key, clock warning और chain-file write errors जाँचें।
 - **Chain load/parse error:** node रोकें, logs सुरक्षित करें; chain file हाथ से edit न करें। केवल disposable test data के लिए नई filename से genesis बनाएं।
 
-Test खत्म होने पर दोनों node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।
+Test खत्म होने पर node terminals में **Ctrl+C** दबाकर रोकें। Chain file को हाथ से न बदलें और private keys साझा न करें।

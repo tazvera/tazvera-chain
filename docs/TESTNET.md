@@ -1,10 +1,9 @@
 # TAZVERA Chain local prototype: स्थिति और सीमाएँ
 
 यह repository source से CMake द्वारा build होने वाला local prototype है; अभी कोई downloadable release जारी नहीं हुई है।
-वर्तमान CLI में उपलब्ध flags: `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset`।
-`--produce-every` अभी उपलब्ध नहीं है और development में है; `--tls` flag/transport अभी implement नहीं है।
+`--produce-every <seconds>` उपलब्ध है: `--serve` के साथ producer हर N सेकंड में block बनाने की कोशिश करता है। `--tls` flag/transport अभी implement नहीं है।
 `--every <seconds>` केवल `--peer` reconnect interval है, block-production interval नहीं।
-Explorer का testnet पेज `explorer/testnet.html` है; यह अभी sample/demo data दिखाता है और किसी चालू node से जुड़ा नहीं है।
+Explorer का testnet पेज `explorer/testnet.html` sample/demo data दिखाता है और किसी चालू node से जुड़ा नहीं है।
 
 ## यह क्या है?
 
@@ -17,10 +16,24 @@ Explorer का testnet पेज `explorer/testnet.html` है; यह अभ�
 - Windows पर MSYS2 UCRT64 terminal और उसके matching compiler/OpenSSL packages इस्तेमाल करें।
 - हर existing chain खोलते समय trusted genesis commitment देना ज़रूरी है।
 - Node listener का default `127.0.0.1` है। `--listen-on <IPv4-address>` को `--serve <port>` या `--listen <port>` के साथ दिया जा सकता है; यह listener का bind address बदलता है।
-- `--peer <port>` अभी केवल `127.0.0.1:<port>` से जुड़ता है। Remote address वाला `--peer <address>:<port>` विकल्प अभी बना नहीं है; इसलिए दो अलग computers के बीच peer connection अभी supported नहीं है।
-- `--produce-every` अभी बना नहीं है। CLI का `--every <seconds>` केवल `--peer` के साथ reconnect interval है, block production interval नहीं।
+- `--peer <port>` अभी केवल `127.0.0.1:<port>` से जुड़ता है। Remote address वाला `--peer <address>:<port>` विकल्प अभी उपलब्ध नहीं है; इसलिए दो अलग computers के बीच peer connection अभी supported नहीं है।
+- `--produce-every <seconds>` उपलब्ध है और `--serve` के साथ ही दिया जा सकता है। उदाहरण और संचालन-निर्देश: docs/RUN-A-NODE.md।
 - `--tls` CLI flag उपलब्ध नहीं है और TLS transport अभी implement नहीं है।
-- चलाने के पूरे कदम: docs/RUN-A-NODE.md देखें।
+
+## Producer flag का व्यवहार और सीमाएँ
+
+उदाहरण:
+```sh
+taznode --chain a.json --expect-genesis <pin> --key-file a.key --serve 7001 --produce-every 5
+```
+
+- Block हर N सेकंड में schedule होता है, पर timing थोड़ा खिसक सकता है: node single-threaded है और लंबा peer exchange tick को देर करा सकता है।
+- Block खाली होंगे; `taznode` में mempool नहीं है, इसलिए transactions इन blocks में अपने-आप शामिल नहीं होतीं।
+- Producer-enabled chain में उसी configured producer की key चाहिए। दूसरे producer की key से tick refuse/skip हो सकता है।
+- यदि tip का timestamp local clock से 120 सेकंड या अधिक आगे है, node warning देता है और उस tick को छोड़ देता है; clock catch up होने तक इंतजार करता है।
+- Block save न हो सके तो node exit code 3 से बंद होगा।
+- `--produce-every` को `--serve` के बिना देना usage error है (exit code 2)।
+- एक ही chain पर दो producers fork race बना सकते हैं। यह flag consensus/finality नहीं देता; intended setup एक producer और followers है।
 
 ## अभी क्या काम करता है
 
@@ -30,15 +43,13 @@ Explorer का testnet पेज `explorer/testnet.html` है; यह अभ�
 - एक ही मशीन पर localhost peer से blocks sync करना।
 - Authenticated hello/peer identity handshake और configured peer identity allowlist।
 - Optional read-only HTTP API; यह default में बंद है और loopback पर ही सुनता है।
-- CLI में `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset` और `--transfer-asset` उपलब्ध हैं।
+- CLI में `--listen-on`, `--serve`, `--listen`, `--peer`, `--api`, `--register-asset`, `--transfer-asset` और `--produce-every` उपलब्ध हैं।
 
 ## अभी क्या नहीं है / किस पर भरोसा न करें
 
 - यह public testnet या production network नहीं है; कोई public endpoint या public peer network नहीं।
 - Remote-address peer dialing नहीं; `--peer` अभी localhost-only है।
 - Production-grade consensus/finality, fault-tolerant producer availability, TLS transport encryption या connection/request rate limiting नहीं।
-- `--produce-every` block production flag अभी नहीं है; यह development में है।
-- `--tls` flag/transport अभी implement नहीं है।
 - HTTP API में transaction submit/write endpoint नहीं है।
 - Prototype transfer fee 1000 utzv है और local model में burn होती है; यह अंतिम या approved fee नहीं।
 - Local build/tests पास होना security audit या production readiness का प्रमाण नहीं।
