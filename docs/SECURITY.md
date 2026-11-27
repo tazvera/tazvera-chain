@@ -15,12 +15,12 @@ This document describes the current prototype, not a production or mainnet secur
 - **No TLS encryption:** network traffic can be read by anyone able to observe the path. Do not send secrets over this connection.
 - **No connection/request rate limit (F4):** peer-count limits are not rate limiting. A peer can still consume time and resources within the current protocol limits.
 - **No independent producer availability (F7):** if the producer is stopped, the chain stops advancing. This prototype does not provide production-grade consensus or fault-tolerant block production.
-- **No money-transfer capability:** this prototype has no real-money payment path. Do not treat testnet balances or test transactions as funds.
+- **No real-world payment path:** local prototype transactions and balances are test data only; they do not represent funds or a payment service. The prototype has no production payment path.
 - **The HTTP API is loopback-only:** it binds to `127.0.0.1`, not to the LAN or public interfaces.
 
 ## Listening on a network interface
 
-The default listener address is `127.0.0.1`. Without an explicit `--listen-on` argument, the node remains reachable only from the same machine through loopback.
+The node listener defaults to `127.0.0.1`. Use `--listen-on <IPv4-address>` with `--serve <port>` or `--listen <port>` to select the listener address. Without it, the listener remains loopback-only. `--listen-on` does not change the `--peer` destination behavior.
 
 Passing `--listen-on 0.0.0.0` means **listen on every IPv4 network interface on that machine**. Other devices on the same network—and potentially devices beyond it, depending on router/firewall rules—may be able to connect. The connection is unencrypted because TLS is not connected. Do not use this setting on a public network or expose the port to the internet.
 
@@ -28,6 +28,6 @@ An explicit LAN address is narrower than `0.0.0.0`, but it is still plaintext an
 
 ## Testnet operating advice
 
-**Run nodes only on a trusted home Wi-Fi network for local testing. Do not run them on public Wi-Fi, shared networks, or internet-facing hosts.** Keep the firewall enabled and allow only the required port on the private network profile. Do not use real keys, secrets, or funds.
+**Run nodes only on a trusted home Wi-Fi network for local testing. Do not run them on public Wi-Fi, shared networks, or internet-facing hosts.** Keep the firewall enabled and allow only the required port on the private network profile. Use test-only keys and data; do not share private keys or secrets.
 
 This is an experimental prototype. It has not been established as safe for public-network or production use.
