@@ -1,98 +1,98 @@
 # DESIGN: POST /tx — signed transaction submission
 <small>Design only. No implementation in this change.</small>
 
-## उद्देश्य और दायरा
+## Purpose and scope
 
-यह दस्तावेज़ अगले API काम का प्रस्ताव है। मौजूदा HTTP API read-only है और GET-only है; `POST /tx` अभी उपलब्ध endpoint नहीं है। यह डिज़ाइन केवल signed transaction स्वीकार करने के लिए है। यह consensus, block production, TLS या remote API access शुरू करने की अनुमति नहीं देता।
+This document proposes the next API work. The current HTTP API is read-only and GET-only; `POST /tx` is not an available endpoint yet. This design is only for accepting signed transactions. It does not authorize enabling consensus, block production, TLS, or remote API access.
 
-## Endpoint और request format
+## Endpoint and request format
 
 - Method/path: `POST /tx`
 - Content-Type: `application/json`
 - Body shape: `{"tx":"<hex>" }`
-- `tx` में एक पूरी signed transaction की canonical wire serialization के bytes का lowercase hexadecimal रूप होगा—signature सहित।
-- Serialization/version, byte order, field lengths और exact decode rules को implementation से पहले protocol document में स्थिर करना होगा। JSON fields को अलग-अलग transaction fields की तरह स्वीकार न करें; signature उसी exact serialized message पर verify होनी चाहिए।
-- Hex decode के बाद malformed, non-canonical या trailing bytes वाली request अस्वीकार करें। Request में private key/seed कभी न भेजें।
+- `tx` contains the lowercase hexadecimal representation of the bytes of one complete signed transaction's canonical wire serialization, including its signature.
+- Serialization/version, byte order, field lengths, and exact decode rules must be fixed in a protocol document before implementation. Do not accept JSON fields as separate transaction fields; the signature must be verified over those exact serialized bytes.
+- Reject requests with malformed, non-canonical, or trailing bytes after hex decoding. Never send a private key/seed in the request.
 
 Successful first admission: `202 Accepted`, with a transaction ID and status such as `{"txid":"<64-hex>","status":"queued"}`. This means queued, **not confirmed**. Invalid request: appropriate 4xx with a short stable error code; do not expose secrets or internal stack traces.
 
 ## Server validation order
 
-किसी transaction को mempool में रखने से पहले:
+Before placing a transaction in the mempool:
 
-1. Request method, Content-Type, JSON shape, hex syntax और decoded byte length जाँचें।
-2. Canonical transaction decode करें; unknown version/kind और non-canonical encoding अस्वीकार करें।
-3. Protocol version और `chain_id` जाँचें; दूसरी chain की transaction स्वीकार न करें।
-4. Sender address और public key का मेल जाँचें; signature को exact signed bytes पर verify करें।
-5. Transaction shape, destination, amount overflow और तय fee schedule जाँचें। Fee इस chain के वर्तमान नियम से मेल खाए; client अपनी fee तय न कर सके।
-6. Sender का current nonce और उपलब्ध balance जाँचें। Balance में amount + fee दोनों के लिए पर्याप्त राशि होनी चाहिए। Nonce सिर्फ़ current chain state के आधार पर नहीं, mempool में sender की पहले से queued transactions के क्रम के साथ भी जाँचना होगा।
-7. Expiry लागू हो तो उसे जाँचें। फिर ही transaction को bounded mempool में डालें।
+1. Check the request method, Content-Type, JSON shape, hex syntax, and decoded byte length.
+2. Decode the canonical transaction; reject unknown version/kind and non-canonical encoding.
+3. Check the protocol version and `chain_id`; do not accept a transaction from another chain.
+4. Check that the sender address matches the public key; verify the signature over the exact signed bytes.
+5. Check the transaction shape, destination, amount overflow, and fixed fee schedule. The fee must match the current rules of this chain; the client must not be able to choose its own fee.
+6. Check the sender's current nonce and available balance. The balance must cover both amount + fee. The nonce must be checked not only against current chain state but also against the ordering of that sender's transactions already queued in the mempool.
+7. If expiry is enabled, check it. Only then place the transaction in the bounded mempool.
 
-ये checks admission के समय प्रारंभिक हैं; block बनाते/स्वीकारते समय सभी consensus-validity checks फिर से लागू होंगे। Admission validation block confirmation नहीं है।
+These checks are preliminary at admission time; all consensus-validity checks must be applied again when producing/accepting a block. Admission validation is not block confirmation.
 
-## Replay और duplicate handling
+## Replay and duplicate handling
 
-- Transaction ID signed canonical bytes (signature सहित) के SHA-256 से निकले।
-- Mempool में वही txid दोबारा आए तो उसे दूसरी बार queue न करें। मौजूदा txid और `already_known` status लौटाएँ; duplicate को नया fee/nonce खर्च करने वाली अलग transaction न मानें।
-- जो transaction पहले ही block में शामिल हो चुकी है, उसका nonce chain state में आगे बढ़ चुका होगा; दोबारा भेजने पर `bad_nonce`/already-included response दें और उसे apply न करें।
-- एक ही sender के लिए एक nonce पर अलग-अलग signed transactions में से केवल एक को सक्रिय queue entry मिले। Conflict को deterministic तरीके से reject/replace करें; चुपचाप दोनों न रखें।
-- Reorg/fork support आने पर included/queued index को canonical chain के अनुसार फिर से बनाना होगा। इस prototype में fork/reorg पर mempool behavior को implementation से पहले स्पष्ट करना आवश्यक है।
+- Derive the transaction ID from SHA-256 of the signed canonical bytes (including the signature).
+- If the same txid is submitted again while in the mempool, do not queue it a second time. Return the existing txid and `already_known` status; do not treat the duplicate as a separate transaction that consumes another fee/nonce.
+- A transaction already included in a block will have advanced the nonce in chain state; on resubmission, return `bad_nonce`/already-included and do not apply it.
+- For one sender and one nonce, only one of multiple different signed transactions may have an active queue entry. Reject/replace conflicts deterministically; never silently keep both.
+- When reorg/fork support is added, the included/queued index must be rebuilt according to the canonical chain. For this prototype, mempool behavior during forks/reorgs must be specified before implementation.
 
-## Resource limits (प्रस्तावित defaults)
+## Resource limits (proposed defaults)
 
-ये नए POST endpoint के प्रस्तावित limits हैं, मौजूदा GET API के दावे नहीं:
+These are proposed limits for the new POST endpoint, not claims about the existing GET API:
 
-- Maximum HTTP request body: **64 KiB** (JSON सहित); इससे बड़ी body पर `413 Payload Too Large` और connection close।
-- Maximum decoded signed transaction: **32 KiB**; इससे बड़ी transaction reject।
-- Rate limit: प्रति loopback client **10 requests/second**, burst **20**; exceed होने पर `429 Too Many Requests`। Invalid requests भी limit में गिने जाएँ।
-- Concurrent connections: मौजूदा API की सीमा **8** ही रखें; POST के लिए अलग pool बनाकर कुल सीमा न बढ़ाएँ।
-- Request timeout: मौजूदा **10 seconds** ही; slow body upload timeout पर connection close।
-- Mempool: अधिकतम **10,000 transactions** और **16 MiB** serialized bytes; full होने पर स्पष्ट `503`/busy response, silently drop न करें।
-- Limits configuration code/API implementation से पहले tests में pinned हों। Loopback-only deployment rate limit को public-network protection न समझें।
+- Maximum HTTP request body: **64 KiB** (including JSON); larger bodies return `413 Payload Too Large` and the connection is closed.
+- Maximum decoded signed transaction: **32 KiB**; reject larger transactions.
+- Rate limit: **10 requests/second per loopback client**, burst **20**; exceeding it returns `429 Too Many Requests`. Count invalid requests too.
+- Concurrent connections: keep the existing API limit of **8**; do not increase the total limit by creating a separate pool for POST.
+- Request timeout: keep the existing **10 seconds**; close the connection when a slow body upload times out.
+- Mempool: maximum **10,000 transactions** and **16 MiB** of serialized bytes; when full, return an explicit `503`/busy response and do not silently drop transactions.
+- Pin these limits in tests before code/API implementation. Do not treat loopback-only deployment rate limits as public-network protection.
 
-## Mempool बनाम सीधे block बनाना
+## Mempool versus producing a block directly
 
-**POST handler से सीधे block बनाना अनुशंसित नहीं है।** इससे हर request block production trigger करेगी, competing requests के क्रम पर परिणाम निर्भर होगा, batching/nonce ordering कठिन होगी, और API request सीधे chain mutation कर देगी।
+**Having the POST handler produce a block directly is not recommended.** It would make every request trigger block production, make outcomes depend on competing request order, complicate batching/nonce ordering, and let an API request mutate the chain directly.
 
-अनुशंसित flow: validate → bounded mempool → existing block producer/explicit block workflow transaction चुनता है → block validation/commit → node sync करता है। लाभ: batching, deduplication, sender nonce ordering और API से block production अलग। नुकसान: queued transaction की पुष्टि की गारंटी नहीं, mempool eviction/restart behavior चाहिए, और inclusion में देरी हो सकती है।
+Recommended flow: validate → bounded mempool → existing block producer/explicit block workflow selects transactions → block validation/commit → node synchronizes. Benefits: batching, deduplication, sender nonce ordering, and separation of API from block production. Costs: queued transactions are not guaranteed confirmation, mempool eviction/restart behavior is needed, and inclusion may be delayed.
 
-वर्तमान node में autonomous block producer/mempool submission API नहीं है। इस design को लागू करने से पहले producer integration, queue persistence policy, expiry/eviction और shutdown behavior अलग से तय हों। POST endpoint को खुद block बनाने का shortcut न दें।
+The current node has no autonomous block producer/mempool submission API. Before implementing this design, producer integration, queue persistence policy, expiry/eviction, and shutdown behavior must be decided separately. Do not make the POST endpoint a shortcut that creates blocks itself.
 
-## CORS और Host सुरक्षा
+## CORS and Host security
 
-मौजूदा API के CORS और Host validation नियम ज्यों के त्यों रहें:
+Keep the current API's CORS and Host validation rules unchanged:
 
-- Host केवल configured port पर `localhost:<port>` या `127.0.0.1:<port>` के accepted forms में हो; duplicate/invalid Host reject हो।
-- Origin केवल valid exact origin हो और configured allowlist में हो; wildcard `*` स्वीकार न करें। Missing Origin वाले non-browser clients के मौजूदा व्यवहार को न बदलें।
-- POST जोड़ने के नाम पर permissive CORS, wildcard origin या Host-check bypass न जोड़ें। CORS authentication नहीं है।
+- Host must be an accepted form of `localhost:<port>` or `127.0.0.1:<port>` on the configured port; reject duplicate/invalid Host.
+- Origin must be a valid exact origin and present in the configured allowlist; do not accept wildcard `*`. Do not change the existing behavior for non-browser clients with no Origin.
+- Do not add permissive CORS, wildcard origins, or Host-check bypasses just because POST is being added. CORS is not authentication.
 
 ## Network exposure / TLS
 
-**यह endpoint सिर्फ़ loopback पर रहेगा जब तक TLS implement नहीं होता।** Bind address को `127.0.0.1` तक सीमित रखें; `0.0.0.0`, LAN या public interface पर POST enable न करें। मौजूदा API के Host/CORS checks TLS का विकल्प नहीं हैं। TLS आने के बाद भी remote exposure के लिए अलग security review और explicit configuration चाहिए।
+**This endpoint must remain loopback-only until TLS is implemented.** Keep the bind address limited to `127.0.0.1`; do not enable POST on `0.0.0.0`, a LAN, or a public interface. The existing API Host/CORS checks are not a substitute for TLS. Even after TLS is added, remote exposure requires a separate security review and explicit configuration.
 
 ## Tests required before implementation is accepted
 
-1. Valid signed transaction accepted and queued; response contains stable txid/status.
-2. Invalid JSON, missing/extra fields, malformed hex, odd-length hex, non-canonical serialization, trailing bytes.
-3. Body exactly at limit accepted; one byte over returns 413; decoded tx limit enforced.
-4. Unsupported protocol version, wrong chain_id, unknown kind, invalid shape and wrong fee rejected.
-5. Valid signature accepted; corrupted signature, wrong sender/public-key pair rejected.
+1. Valid signed transaction is accepted and queued; response contains stable txid/status.
+2. Invalid JSON, missing/extra fields, malformed hex, odd-length hex, non-canonical serialization, and trailing bytes.
+3. Body exactly at the limit is accepted; one byte over returns 413; decoded transaction limit is enforced.
+4. Unsupported protocol version, wrong chain_id, unknown kind, invalid shape, and wrong fee are rejected.
+5. Valid signature is accepted; corrupted signature and wrong sender/public-key pair are rejected.
 6. Exact duplicate while queued returns already-known and queue size does not grow.
-7. Already-included transaction is not queued/applied again; nonce conflict from same sender handled deterministically.
-8. Correct nonce accepted; stale/skipped nonce rejected; balance checks include amount + fee; fee burn occurs only when a block commits.
-9. Queue full by count/bytes returns explicit busy response; eviction/expiry and restart behavior match the documented policy.
-10. Rate limit burst/refill, invalid-request counting, and 429 response.
+7. Already-included transaction is not queued/applied again; nonce conflict from the same sender is handled deterministically.
+8. Correct nonce is accepted; stale/skipped nonce is rejected; balance checks include amount + fee; fee burn occurs only when a block commits.
+9. Queue full by count/bytes returns an explicit busy response; eviction/expiry and restart behavior match the documented policy.
+10. Rate-limit burst/refill, invalid-request counting, and 429 response.
 11. Connection cap, timeout, oversized slow upload, and connection cleanup.
 12. Host spoofing, duplicate Host, disallowed Origin, wildcard Origin, and allowed exact Origin behavior remain unchanged.
-13. Bind test proves POST listener only accepts loopback; attempts on non-loopback bind are rejected.
-14. Accepted/queued transaction does not change balance, nonce, block height or state root until a valid block is committed.
-15. Node syncs the committed block and independently validates the transaction; API response is never described as confirmation.
+13. Bind test proves the POST listener accepts loopback only; attempts to bind non-loopback are rejected.
+14. An accepted/queued transaction does not change balance, nonce, block height, or state root until a valid block is committed.
+15. The node synchronizes the committed block and independently validates the transaction; the API response is never described as confirmation.
 16. Regression: existing GET endpoints and current GET-only behavior remain unchanged until this endpoint is intentionally implemented.
 
 ## Open decisions to resolve before coding
 
 - Publish the exact canonical transaction wire format and a protocol/version identifier.
-- Decide whether mempool survives restart and how it reconciles with accepted blocks/forks.
+- Decide whether the mempool survives restart and how it reconciles with accepted blocks/forks.
 - Pin stable error codes and duplicate/included response semantics.
 - Confirm the 64 KiB / 32 KiB / 10 req/s / burst 20 / 10,000 tx / 16 MiB defaults against expected workload.
-- Specify how block producer selects transactions and handles sender nonce order.
+- Specify how the block producer selects transactions and handles sender nonce order.
