@@ -111,3 +111,13 @@ Windows UCRT64 में copy के लिए cp उपलब्ध है; Win
 - **पुराना binary:** हर source update के बाद build दोबारा करें: cmake --build build --parallel. चल रहे पुराने process को बंद करके नया binary शुरू करें।
 - **Compiler/OpenSSL नहीं मिला:** सही MSYS2 UCRT64 terminal या supported compiler/OpenSSL development package इस्तेमाल करें।
 - **पुरानी chain file:** genesis बनाने की command existing file overwrite नहीं करती। नया filename दें या केवल disposable local test data हटाने के बाद दोबारा चलाएं।
+
+
+## नए flags (जब merge हो जाएँ)
+
+ये flags development में हैं। इन्हें तभी इस्तेमाल करें जब संबंधित बदलाव merge हो चुका हो और आपके build के `--help` में दिखता हो:
+
+- `--listen-on ADDRESS`: `--serve PORT` के साथ server को किस local interface/IP पर listen करना है, यह बताता है। LAN test में server मशीन का Wi-Fi/LAN IPv4 address दें; `127.0.0.1` केवल उसी कंप्यूटर के connections के लिए है।
+- `--produce-every N`: block producer का interval/configuration बताने के लिए है। `N` का unit, allowed range और default वही मानें जो merged implementation और `--help` में स्पष्ट हों; अनुमान से value न दें।
+
+इन flags के merge होने तक पुराने निर्देशों को इनका support मानकर न चलाएँ। दो अलग मशीनों की प्रक्रिया के लिए `docs/TWO-MACHINE-TEST.md` देखें।
