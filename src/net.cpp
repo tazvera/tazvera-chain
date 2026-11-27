@@ -139,7 +139,7 @@ bool is_ipv4_address(std::string_view text) {
         if (digits == 0 || value > 255 || (digits > 1 && text[start] == '0')) return false;
         ++parts;
         if (i == text.size()) return parts == 4;
-        if (text[i] != '.' || parts == 4) return false;
+        if (text[i] != '.') return false;   // a fifth part ends in 'parts != 4' above
         ++i;
     }
 }

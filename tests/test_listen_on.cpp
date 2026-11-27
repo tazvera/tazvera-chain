@@ -4,10 +4,31 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 using namespace taz;
 static int failures = 0;
 #define CHECK(x) do { if (!(x)) { std::cerr << "FAIL line " << __LINE__ << ": " #x "\n"; ++failures; } } while (0)
+
+// The address a listening socket is really bound to, as text
+static std::string bound_address(const Socket& s) {
+    sockaddr_in a{};
+#ifdef _WIN32
+    int len = static_cast<int>(sizeof a);
+#else
+    socklen_t len = sizeof a;
+#endif
+    if (::getsockname(s.raw(), reinterpret_cast<sockaddr*>(&a), &len) != 0) return "?";
+    const std::uint32_t h = ntohl(a.sin_addr.s_addr);
+    return std::to_string(h >> 24) + "." + std::to_string((h >> 16) & 255) + "." + std::to_string((h >> 8) & 255) + "." + std::to_string(h & 255);
+}
 
 // t1: which texts are an IPv4 address (strictly)
 static void t1_address_syntax() {
@@ -15,7 +36,7 @@ static void t1_address_syntax() {
         CHECK(is_ipv4_address(ok));
     for (const char* bad : {"", " ", "localhost", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1.2.3.256", "01.2.3.4", "1.02.3.4", "1.2.3.04", "00.0.0.0",
                             "1.2.3.-4", "+1.2.3.4", "1.2.3.4 ", " 1.2.3.4", "1.2.3.4\n", "1.2.3.4:80", "1.2.3.4/8", "::1", "::ffff:1.2.3.4", "a.b.c.d",
-                            "1..3.4", ".1.2.3", "1.2.3.", "0x7f.0.0.1", "127.1", "2130706433", "999999999999.1.1.1", "1.2.3.4a", "1,2,3,4", "١.٢.٣.٤"})
+                            "1..3.4", ".1.2.3", "1.2.3.", "0x7f.0.0.1", "127.1", "2130706433", "999999999999.1.1.1", "4294967296.0.0.1", "4294967297.0.0.0", "0001.2.3.4", "1.2.3.00004", "1.2.3.4a", "1,2,3,4", "١.٢.٣.٤"})
         CHECK(!is_ipv4_address(bad));
 }
 
@@ -25,11 +46,13 @@ static void t2_listen_on_loopback() {
     CHECK(listen_on("127.0.0.1", 0, l, &err));
     CHECK(l.socket.valid() && l.port != 0);
     if (!l.socket.valid()) return;
+    CHECK(bound_address(l.socket) == "127.0.0.1");
     Socket client, server;
     CHECK(connect_loopback(l.port, client, &err));
     CHECK(accept_one(l.socket, server, &err));
     CHECK(client.valid() && server.valid());
     Listener old; CHECK(listen_loopback(0, old, &err) && old.port != 0 && old.port != l.port);
+    CHECK(bound_address(old.socket) == "127.0.0.1");   // listen_loopback can never be anything else
 }
 
 // t3: 0.0.0.0 listens on every interface of this machine; loopback reaches it
@@ -38,6 +61,7 @@ static void t3_listen_on_every_interface() {
     CHECK(listen_on("0.0.0.0", 0, l, &err));
     CHECK(l.socket.valid() && l.port != 0);
     if (!l.socket.valid()) return;
+    CHECK(bound_address(l.socket) == "0.0.0.0");
     Socket client, server;
     CHECK(connect_loopback(l.port, client, &err));
     CHECK(accept_one(l.socket, server, &err, std::chrono::steady_clock::now() + std::chrono::seconds(5)));
