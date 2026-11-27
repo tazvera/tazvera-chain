@@ -220,6 +220,22 @@ Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Am
     }
     return sha256(bytes);
 }
+Hash32 genesis_commitment_of(const Address& a0, Amount b0, const Address& a1, Amount b1,
+                             const std::vector<Address>& producers, std::uint32_t) {
+    return genesis_commitment_of(a0, b0, a1, b1, producers);   // F7 stub: slots not committed yet
+}
+Address Chain::expected_producer(std::int64_t) const {
+    if (producers_.empty()) return Address{};
+    return producers_[height() % producers_.size()];           // F7 stub: no skipping yet
+}
+std::int64_t Chain::max_future_seconds() const { return 120; }
+bool Chain::init_genesis(const Address& first, Amount first_balance, const Address& second, Amount second_balance,
+                         std::vector<Address> producers, std::uint32_t slot_seconds) {
+    if (slot_seconds != 0 && (slot_seconds < MIN_SLOT_SECONDS || slot_seconds > MAX_SLOT_SECONDS || producers.empty())) return false;
+    if (!init_genesis(first, first_balance, second, second_balance, std::move(producers))) return false;
+    slot_seconds_ = slot_seconds;
+    return true;
+}
 Hash32 Chain::genesis_commitment() const {
     if (genesis_balances_.size() != 2) return Hash32{};
     return genesis_commitment_of(genesis_balances_[0].first, genesis_balances_[0].second,

@@ -215,3 +215,7 @@ target_compile_definitions(taz_node_produce_every_tests PRIVATE TAZ_NODE_BINARY=
 add_dependencies(taz_node_produce_every_tests taznode)
 add_test(NAME taz_node_produce_every_tests COMMAND taz_node_produce_every_tests)
 set_tests_properties(taz_node_produce_every_tests PROPERTIES PASS_REGULAR_EXPRESSION "node produce-every tests: all passed")
+add_executable(taz_producer_slot_tests tests/test_producer_slots.cpp)
+target_link_libraries(taz_producer_slot_tests PRIVATE tazcore)
+add_test(NAME taz_producer_slot_tests COMMAND taz_producer_slot_tests)
+set_tests_properties(taz_producer_slot_tests PROPERTIES PASS_REGULAR_EXPRESSION "producer slot tests: all passed \\(12 cases\\)")

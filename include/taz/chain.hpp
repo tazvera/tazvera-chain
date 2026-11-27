@@ -13,6 +13,15 @@ Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount);
 // v9: when a chain declares producers, the list is committed as well — in the order given, because that order
 // IS the round-robin schedule. An empty list keeps the v8 commitment (domain V2) byte for byte.
 Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount, const std::vector<Address>& producers);
+// F7: slot skipping. A chain may declare a slot length (seconds) in its genesis; 0 = off = the round robin of v9,
+// byte for byte. Allowed range when on: 4 .. 86400 (the lower bound keeps the future-drift allowance, a quarter slot,
+// at one second or more).
+inline constexpr std::uint32_t MIN_SLOT_SECONDS = 4;
+inline constexpr std::uint32_t MAX_SLOT_SECONDS = 86400;
+// With slots, the slot length goes into the genesis commitment under its own domain, so a node that does not know
+// about slots computes another commitment and refuses the chain instead of misreading it.
+Hash32 genesis_commitment_of(const Address&, Amount, const Address&, Amount, const std::vector<Address>& producers,
+                             std::uint32_t slot_seconds);
 class Chain {
 public:
     bool init_genesis(const Address& first, Amount first_balance,
@@ -21,6 +30,19 @@ public:
     // exactly like the call above, so nothing written before v9 changes.
     bool init_genesis(const Address& first, Amount first_balance,
                       const Address& second, Amount second_balance, std::vector<Address> producers);
+
+    // F7: the same, with a slot length (see above). Refused: slot_seconds outside the range, or no producers.
+    bool init_genesis(const Address& first, Amount first_balance,
+                      const Address& second, Amount second_balance, std::vector<Address> producers,
+                      std::uint32_t slot_seconds);
+    std::uint32_t slot_seconds() const noexcept { return slot_seconds_; }
+    // F7: the producer who may make the NEXT block if it carries this timestamp (the zero address if the chain has
+    // no producers). Round robin by height; each full slot_seconds that passed since the parent block moves the turn
+    // on by one producer.
+    Address expected_producer(std::int64_t timestamp) const;
+    // How far past "now" a live block may be stamped: 120 s without slots, a quarter slot (at most 120 s) with them.
+    // A producer can claim a later slot only by stamping a later time, so this bound is what keeps it from skipping early.
+    std::int64_t max_future_seconds() const;
 
     // Build and commit a block from local transactions.
     // Timestamps must be strictly increasing and <= max_timestamp. The caller supplies the
@@ -76,6 +98,7 @@ private:
     std::vector<Block> blocks_;
     std::vector<std::pair<Address, Amount>> genesis_balances_;
     std::vector<Address> producers_;
+    std::uint32_t slot_seconds_{0};
     State state_;
 };
 }
