@@ -6,7 +6,7 @@
 
 - [ ] `--listen-on` का व्यवहार स्पष्ट और जाँचा हुआ है: डिफ़ॉल्ट bind address सुरक्षित है, और स्पष्ट address देने पर ही अपेक्षित interface पर सुनता है।
 - [ ] `--produce-every` का input जाँचा हुआ है: invalid, zero, negative या overflow करने वाले मान अस्वीकार होते हैं; वैध interval पर block production अपेक्षित ढंग से चलता है।
-- [ ] **F7 — producer रुके नहीं:** लंबे समय तक चलने वाले परीक्षण में producer लगातार आगे बढ़ता है; peer disconnect, sync, invalid input या असफल operation के बाद भी अनजाने में स्थायी रूप से अटकता नहीं। Stop/shutdown का तरीका भी जाँचा गया है।
+- [ ] **F7 खुला है:** producer availability/slot skipping लागू और प्रमाणित नहीं है। Producer रुकने पर chain रुक सकती है; इसे बंद issue न मानें।
 - [ ] **F4 — DoS सीमा:** connection, message/frame size, chunking, समय और sync के लिए सीमाएँ लागू हैं; सीमा से बाहर input सीमित संसाधन खर्च करके अस्वीकार होता है। सीमा-पार और boundary tests सफल हैं।
 - [ ] नए और पुराने network tests पूरे चलाए गए; कोई test हटाया, skip किया या कमजोर assertion के साथ बदला नहीं गया।
 - [ ] Linux और Windows पर build तथा test परिणाम दर्ज हैं; sanitizer/fuzz परीक्षण जहाँ लागू हों वहाँ सफल हैं।
