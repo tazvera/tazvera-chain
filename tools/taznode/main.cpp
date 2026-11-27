@@ -967,9 +967,14 @@ int main(int argc, char** argv) {
                 taz::Socket peer;
                 const taz::Deadline wait_until = produce_every == 0 ? serve_deadline : std::min(serve_deadline, next_block);
                 if (!taz::accept_one(listener.socket, peer, &net_err, wait_until)) {
+                    // select() may return a few milliseconds before the time it was given (the wait is cut to whole
+                    // milliseconds, and the Windows timer is coarser still). Compare with that slack, or a node
+                    // woken a hair early would take its own timer for an error and stop.
+                    const auto slack = std::chrono::milliseconds(100);
                     const auto t = std::chrono::steady_clock::now();
-                    const bool out_of_time = serve_timeout != 0 && t >= serve_deadline;
-                    if (produce_every != 0 && !out_of_time && t >= next_block) {
+                    const bool out_of_time = serve_timeout != 0 && t + slack >= serve_deadline;
+                    if (produce_every != 0 && !out_of_time && t + slack >= next_block) {
+                        std::this_thread::sleep_until(next_block);
                         // The tip is read again every time: a peer may have brought blocks since the last tick, and the
                         // chain demands a timestamp strictly greater than the tip's.
                         const std::int64_t now = now_seconds();
