@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -45,6 +46,9 @@ constexpr const char* kUsage =
     "  --listen-on <address>     with --listen or --serve: the IPv4 address to wait on instead of 127.0.0.1\n"
     "                            (0.0.0.0 = every interface; the connection is not encrypted)\n"
     "  --serve <port>            stay up: accept peers one at a time (see --max-peers)\n"
+    "  --produce-every <seconds> with --serve (1..3600): make an empty block every N seconds, signed with --key-file\n"
+    "                            (a chain that declares producers needs the key of one of them); then --max-peers\n"
+    "                            does not apply unless given, and --serve-timeout still stops the node\n"
     "  --api <port>              read-only HTTP API on 127.0.0.1 (GET only; disabled by default)\n"
     "  --api-allow-origin <origin> allow exact browser Origin (repeatable; default: none)\n"
     "  --max-peers <n>           how many peers --serve accepts before stopping (default 5)\n"
@@ -165,6 +169,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> api_allow_origins;
     std::string max_peers_text;
     std::string serve_timeout_text;
+    std::string produce_every_text;   // --produce-every
+    bool seen_produce_every = false;
     std::string every_text;
     std::string retries_text;
     std::string identity_file;
@@ -234,6 +240,10 @@ int main(int argc, char** argv) {
             if (seen_transfer) return usage_error("--transfer was given twice");
             seen_transfer = true; transfer_spec = argv[++i]; continue;
         }
+        if (a == "--produce-every" && i + 1 < argc) {
+            if (seen_produce_every) return usage_error("--produce-every was given twice");
+            seen_produce_every = true; produce_every_text = argv[++i]; continue;
+        }
         if (a == "--listen-on" && i + 1 < argc) {
             if (seen_listen_on) return usage_error("--listen-on was given twice");
             seen_listen_on = true; listen_on_address = argv[++i]; continue;
@@ -254,6 +264,8 @@ int main(int argc, char** argv) {
     const bool production_asked = seen_transfer || seen_register || seen_transfer_asset;
     if ((seen_transfer ? 1 : 0) + (seen_register ? 1 : 0) + (seen_transfer_asset ? 1 : 0) > 1)
         return usage_error("--transfer, --register-asset and --transfer-asset each do one thing and stop; use one of them");
+    if (seen_produce_every && serve_port.empty())
+        return usage_error("--produce-every needs --serve: it is what a node that stays up does between peers");
     if (seen_listen_on && listen_port.empty() && serve_port.empty())
         return usage_error("--listen-on needs --listen or --serve (it is the address they wait on)");
     // Validate allowlist configuration before loading the chain or opening sockets. Empty files mean deny all.
@@ -439,12 +451,40 @@ int main(int argc, char** argv) {
             serve_timeout = value;
         }
 
+        std::uint64_t produce_every = 0;      // 0 = this node makes no blocks of its own
+        if (seen_produce_every) {
+            taz::Amount value = 0;
+            if (!parse_amount(produce_every_text, value) || value == 0 || value > 3600)
+                return usage_error("--produce-every must be between 1 and 3600 seconds");
+            produce_every = value;
+        }
+
         std::uint64_t max_peers = 5;
         if (!max_peers_text.empty()) {
             taz::Amount value = 0;
             if (!parse_amount(max_peers_text, value) || value == 0 || value > 1000)
                 return usage_error("--max-peers must be between 1 and 1000");
             max_peers = value;
+        }
+
+        // A producing node signs with the key it was given. Check that key now, before the port is opened: a node that
+        // would only find out at its first block that it has no right to make one has been running for nothing.
+        taz::PrivKey produce_sk{};
+        taz::PubKey produce_pk{};
+        if (produce_every != 0) {
+            if (!key_file.empty()) {
+                std::string why;
+                if (!read_key_file(key_file, produce_sk, produce_pk, why)) return usage_error(why);
+            }
+            if (!chain.producers().empty()) {
+                if (key_file.empty())
+                    return usage_error("this chain declares producers, so --produce-every needs --key-file: a block must be signed by one of them");
+                const taz::Address me = taz::address_from_pubkey(produce_pk);
+                if (std::find(chain.producers().begin(), chain.producers().end(), me) == chain.producers().end())
+                    return usage_error("the key in --key-file is not one of this chain's declared producers");
+            } else if (!key_file.empty()) {
+                std::cerr << "taznode: note: this chain declares no producers, so its blocks are not signed; --key-file is not used\n";
+            }
         }
 
         taz::PrivKey identity_sk{};
@@ -899,13 +939,18 @@ int main(int argc, char** argv) {
                 taz::net_cleanup();
                 return 3;
             }
-            const std::uint64_t wanted = listen_port.empty() ? max_peers : 1;
+            // A node that makes blocks is a node, not a one-shot server: unless --max-peers says otherwise it keeps
+            // serving, and --serve-timeout (or a signal) is what stops it.
+            const bool unlimited = produce_every != 0 && max_peers_text.empty();
+            const std::uint64_t wanted = unlimited ? std::numeric_limits<std::uint64_t>::max() : (listen_port.empty() ? max_peers : 1);
             // Anything other than 127.x is reachable from other machines; say so, and say what is missing.
             if (listen_on_address.compare(0, 4, "127.") != 0)
                 std::cerr << "taznode: warning: listening on " << listen_on_address << " makes this node reachable beyond this machine; "
                              "the connection is not encrypted, so consider --identity with --require-identity\n";
-            std::cout << "taznode: listening on " << listen_on_address << ":" << listener.port
-                      << " - will serve " << wanted << " peer" << (wanted == 1 ? "" : "s") << std::endl;   // v9.1: flushed, so a script that waits for this line (the tests do) is not left waiting in a stdio buffer
+            std::cout << "taznode: listening on " << listen_on_address << ":" << listener.port << " - will serve ";
+            if (unlimited) std::cout << "peers until stopped"; else std::cout << wanted << " peer" << (wanted == 1 ? "" : "s");
+            if (produce_every != 0) std::cout << " and make a block every " << produce_every << "s";
+            std::cout << std::endl;   // v9.1: flushed, so a script that waits for this line (the tests do) is not left waiting in a stdio buffer
             // Only a peer that proved what it had to prove and finished its exchange counts towards --max-peers.
             // A refused or timed-out connection is not a served peer: otherwise a handful of anonymous connections
             // would use up the quota and stop the node.
@@ -914,12 +959,57 @@ int main(int argc, char** argv) {
             const taz::Deadline serve_deadline =
                 serve_timeout == 0 ? taz::no_deadline()
                                    : std::chrono::steady_clock::now() + std::chrono::seconds(serve_timeout);
+            auto quota = [&]() { return unlimited ? std::string() : " of " + std::to_string(wanted); };
+            // One thread: waiting for a peer is bounded by the next block time, so the node alternates between the two.
+            // A peer exchange that runs long delays the next block; blocks are not made in a burst afterwards.
+            auto next_block = std::chrono::steady_clock::now() + std::chrono::seconds(produce_every);
             while (served < wanted) {
                 taz::Socket peer;
-                if (!taz::accept_one(listener.socket, peer, &net_err, serve_deadline)) {
+                const taz::Deadline wait_until = produce_every == 0 ? serve_deadline : std::min(serve_deadline, next_block);
+                if (!taz::accept_one(listener.socket, peer, &net_err, wait_until)) {
+                    // select() may return a few milliseconds before the time it was given (the wait is cut to whole
+                    // milliseconds, and the Windows timer is coarser still). Compare with that slack, or a node
+                    // woken a hair early would take its own timer for an error and stop.
+                    const auto slack = std::chrono::milliseconds(100);
+                    const auto t = std::chrono::steady_clock::now();
+                    const bool out_of_time = serve_timeout != 0 && t + slack >= serve_deadline;
+                    if (produce_every != 0 && !out_of_time && t + slack >= next_block) {
+                        std::this_thread::sleep_until(next_block);
+                        // The tip is read again every time: a peer may have brought blocks since the last tick, and the
+                        // chain demands a timestamp strictly greater than the tip's.
+                        const std::int64_t now = now_seconds();
+                        const std::int64_t tip_time = chain.blocks().back().timestamp;
+                        if (tip_time >= now + 120) {
+                            std::cerr << "taznode: not making a block: the chain's tip timestamp (" << tip_time
+                                      << ") is beyond this clock; waiting\n";
+                        } else {
+                            const std::int64_t stamp = now > tip_time ? now : tip_time + 1;
+                            const std::vector<taz::Transaction> none;
+                            const taz::ChainResult made = chain.producers().empty()
+                                ? chain.append_block(none, stamp, now + 120)
+                                : chain.append_block_signed(none, stamp, produce_sk, produce_pk, now + 120);
+                            if (!made.ok) {
+                                // With several producers it is not always our turn; that is a skipped tick, not a crash.
+                                std::cerr << "taznode: no block this time: " << made.error << "\n";
+                            } else {
+                                std::string save_err;
+                                if (!taz::save_chain_json(chain, chain_file, &save_err)) {
+                                    std::cerr << "taznode: cannot write " << chain_file << ": " << save_err << "\n";
+                                    taz::net_cleanup();
+                                    return 3;
+                                }
+                                std::cout << "taznode: produced block height=" << chain.height()
+                                          << " hash=" << taz::to_hex(chain.blocks().back().hash())
+                                          << (chain.producers().empty() ? " (unsigned: this chain declares no producers)" : " (signed by the producer)")
+                                          << std::endl;
+                            }
+                        }
+                        next_block = std::chrono::steady_clock::now() + std::chrono::seconds(produce_every);
+                        continue;
+                    }
                     // Running out of time is not a failure of this node: it served what it could.
                     std::cout << "taznode: stopped waiting after " << serve_timeout << "s with " << served
-                              << " of " << wanted << " peer(s) served" << std::endl;
+                              << quota() << " peer(s) served" << std::endl;
                     break;
                 }
                 // The ten seconds start when the connection is accepted, not at each read.
@@ -927,13 +1017,13 @@ int main(int argc, char** argv) {
                 taz::PlainTransport transport(peer);   // the bytes of this connection go straight onto the socket
                 if (handle_peer(transport, false, auth_deadline)) {
                     ++served;
-                    std::cout << "taznode: served " << served << " of " << wanted
+                    std::cout << "taznode: served " << served << quota()
                               << ", our height is now " << chain.height() << std::endl;
                 } else {
                     all_ok = false;
                     // Flushed: a node that writes its progress into a buffer looks dead to anything watching it.
                     std::cout << "taznode: refused one connection; still waiting for "
-                              << (wanted - served) << " peer(s)" << std::endl;
+                              << (unlimited ? std::string("peers") : std::to_string(wanted - served) + " peer(s)") << std::endl;
                 }
             }
         }

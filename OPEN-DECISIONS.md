@@ -216,3 +216,26 @@ They are not part of F10; address them together with the planned RWA-era Explore
 6. **`--peer` still connects to 127.0.0.1 only.** A second machine can now connect *to* this node, but this node cannot connect out to another machine. A `--connect-to <address>` is the natural next flag; it was not asked for.
 7. **The HTTP API (`--api`) stays on 127.0.0.1** and is not affected.
 8. **Plain text on the wire.** `--listen-on` does not add encryption. The authenticated handshake (`--identity`, `--require-identity`, `--allow-peer`) proves who the peer is; it does not hide the traffic.
+
+---
+
+# `taznode --produce-every <seconds>`
+
+## Fixed behaviour (decided by the owner of the project)
+
+- With `--serve`, the node makes a block every N seconds (N from 1 to 3600). Empty blocks are fine.
+- The timestamp stays strictly greater than the previous block's: each block gets `max(now, tip + 1)`.
+- With `--key-file`, the blocks are signed with that key.
+
+## Decisions taken without being asked (please confirm or change)
+
+1. **One thread.** The node alternates between waiting for a peer and making a block: the wait for a peer ends at the next block time. A peer exchange that runs long delays the next block; blocks are not made in a burst afterwards (the next block is N seconds after the last one was made). Block times therefore drift a little; this is a test network clock, not a schedule.
+2. **The tip is read again at every tick**, because a peer may have brought blocks in between. If the tip's timestamp is `now + 120` or more, the node writes a warning ("beyond this clock") and skips that tick instead of exiting. It waits for the clock to catch up.
+3. **A producing node does not leave after 5 peers.** Without `--max-peers`, `--serve --produce-every` serves peers until `--serve-timeout` (or a signal) stops it. An explicit `--max-peers` still counts, as before.
+4. **Chains that declare producers** need `--key-file` with a declared producer's key; it is checked before the port is opened (usage error, exit 2). The blocks are made with `append_block_signed`. With several producers it is not always this node's turn: a refused tick is written to stderr and skipped; it is not fatal.
+5. **Chains that declare no producers** get unsigned blocks. `--key-file` is accepted and ignored (a note on stderr says so).
+6. **Usage errors (exit 2):** `--produce-every` without `--serve` (so also with `--listen`, `--peer`, `--api`, `--transfer`, `--register-asset`, `--transfer-asset`, `--new-key`), given twice, or outside 1..3600.
+7. **A block that cannot be saved** stops the node with exit 3 (memory and disk would otherwise disagree). A refused or skipped tick does not.
+8. **Only empty blocks.** There is no mempool in taznode, so nothing waits to be put into these blocks. Transactions still go in with `--transfer` and the other one-shot commands.
+9. **The key file is read once at start.** A node that makes blocks for days keeps the key in memory. Nothing new is written about key storage here.
+10. **Two nodes producing on the same chain** are a fork race, as they would be anywhere without consensus. This flag does not try to prevent that; it is for one producing node plus followers (`--peer --every`).
