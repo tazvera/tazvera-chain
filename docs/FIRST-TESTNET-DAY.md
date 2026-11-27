@@ -20,7 +20,7 @@
 
 - A पर `ipconfig` (Windows) या `ip addr` (Linux) से connected LAN/Wi-Fi interface का IPv4 address निकालें। `127.0.0.1`, VPN या virtual adapter का address नहीं।
 - दोनों मशीनें भरोसेमंद उसी LAN/Wi-Fi पर हों; guest Wi-Fi/client isolation न हो।
-- Remote-peer address support उपलब्ध होने पर A पर चलाएं:
+- Remote-peer address support merge और test होने के बाद A पर चलाएं:
 
 ```sh
 taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का LAN पता>
@@ -30,7 +30,7 @@ taznode --chain a.json --expect-genesis <pin> --serve 7001 --listen-on <A का
 
 ## 4. B से जुड़ें और sync/height देखें
 
-Remote `--peer` address विकल्प merge होकर उपलब्ध और test होने के बाद B पर:
+Remote `--peer <address>:<port>` विकल्प अभी उपलब्ध नहीं है। इसके merge और test होने के बाद ही B पर यह command चलाएँ:
 
 ```sh
 taznode --chain b.json --expect-genesis <pin> --peer <A का LAN पता>:7001
