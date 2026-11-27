@@ -542,4 +542,9 @@ bool PlainTransport::prepare_send(Deadline deadline, std::string* error) {
 }
 void PlainTransport::shutdown() noexcept { shutdown_connection(socket_); }
 
+
+// ---- declared, not written yet (the tests come first) ----
+bool is_ipv4_address(std::string_view) { return false; }
+bool listen_on(std::string_view, std::uint16_t, Listener&, std::string* error, int) { if (error) *error = "not implemented yet"; return false; }
+
 }  // namespace taz
