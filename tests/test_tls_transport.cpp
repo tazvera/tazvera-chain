@@ -16,7 +16,7 @@ static_assert(!std::is_copy_assignable_v<TlsTransport>);
 
 static void t01_transport_interface_is_complete_without_a_handshake() {
     Socket socket;
-    TlsTransport transport(socket, nullptr);
+    TlsTransport transport(socket, nullptr, nullptr);
     std::string error = "stale";
     std::string received = "stale";
 
