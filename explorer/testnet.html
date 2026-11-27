@@ -425,7 +425,7 @@
       </div>
       <div class="language-picker" id="language-picker">
         <button class="language-trigger" id="language-trigger" type="button"
-          aria-label="Open language menu" aria-haspopup="menu" aria-expanded="false"
+          aria-label="Open language menu" data-i18n-aria-label="aria_open_language_menu" aria-haspopup="menu" aria-expanded="false"
           aria-controls="language-menu">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
@@ -434,7 +434,7 @@
             <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"></path>
           </svg>
         </button>
-        <div class="language-menu" id="language-menu" role="menu" aria-label="Choose language" hidden></div>
+        <div class="language-menu" id="language-menu" role="menu" aria-label="Choose language" data-i18n-aria-label="aria_choose_language" hidden></div>
       </div>
     </div>
   </header>
@@ -454,7 +454,7 @@
         </div>
       </div>
 
-      <aside class="status-card" aria-label="Sample chain data">
+      <aside class="status-card" aria-label="Sample chain data" data-i18n-aria-label="aria_sample_chain">
         <div class="status-header">
           <span class="status-title" data-i18n="card_title"></span>
           <span class="demo-pill" data-i18n="card_pill"></span>
@@ -504,7 +504,7 @@
       </div>
     </section>
 
-    <section class="section-block info-grid" aria-label="Prototype information">
+    <section class="section-block info-grid" aria-label="Prototype information" data-i18n-aria-label="aria_prototype_info">
       <article class="info-card">
         <h2 class="info-heading" data-i18n="what_for_heading"></h2>
         <p data-i18n="what_for_body"></p>
@@ -548,6 +548,22 @@
 
   <script>
     const TEXT = {
+      "aria_open_language_menu": {
+        "en": "Open language menu",
+        "hi": "भाषा मेनू खोलें"
+      },
+      "aria_choose_language": {
+        "en": "Choose language",
+        "hi": "भाषा चुनें"
+      },
+      "aria_sample_chain": {
+        "en": "Sample chain data",
+        "hi": "नमूना चेन डेटा"
+      },
+      "aria_prototype_info": {
+        "en": "Prototype information",
+        "hi": "प्रोटोटाइप की जानकारी"
+      },
       "skip_link": {
         "en": "Skip to content",
         "hi": "मुख्य सामग्री पर जाएँ"
@@ -798,6 +814,14 @@
         const entry = TEXT[key];
         if (entry && typeof entry[selected] === 'string') {
           element.innerHTML = entry[selected];
+        }
+      });
+
+      document.querySelectorAll('[data-i18n-aria-label]').forEach((element) => {
+        const key = element.getAttribute('data-i18n-aria-label');
+        const entry = TEXT[key];
+        if (entry && typeof entry[selected] === 'string') {
+          element.setAttribute('aria-label', entry[selected]);
         }
       });
 
